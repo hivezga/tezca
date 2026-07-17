@@ -1,9 +1,9 @@
 # Tezca Rust workspace.
-# The `tezca` control CLI lives in crates/tezca-cli; `tezca-dock` (Phase 5)
-# will be added as a second member when it lands.
+# The `tezca` control CLI lives in crates/tezca-cli (std-only); `tezca-dock`
+# (Phase 5) is the bespoke gtk4-rs magnifying dock and carries the GTK stack.
 [workspace]
 resolver = "2"
-members = ["crates/tezca-cli"]
+members = ["crates/tezca-cli", "crates/tezca-dock"]
 
 [workspace.package]
 version = "0.1.0"

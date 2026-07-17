@@ -1,0 +1,24 @@
+# Project:Tezca — tezca-dock configuration.
+#
+# The bespoke gtk4-rs magnifying dock (DESIGN.md §6). Autohides at the bottom
+# edge; move the pointer to the very bottom of a monitor to reveal it, and it
+# magnifies icons macOS-style under the cursor. SUPER+D pins it open / releases
+# it. Colors follow the active theme (`tezca theme`) automatically.
+#
+# tezca-dock reloads this file on launch; `tezca dock restart` after editing.
+
+# --- Pinned favourites -----------------------------------------------------
+# Ordered list of desktop-app ids (or window classes). These always show; a
+# running one gets a turquoise indicator dot, and any running app that isn't
+# pinned appears after a divider. Click launches (if not running) or focuses /
+# cycles the app's windows.
+pinned = ["kitty", "firefox", "brave-origin", "obsidian", "org.kde.dolphin"]
+
+# --- Geometry & feel -------------------------------------------------------
+icon_size     = 48     # base (unmagnified) icon edge, px
+max_scale     = 1.6    # peak magnification for the icon under the cursor
+influence     = 110    # magnification falloff radius, px
+gap           = 10     # space between icons, px
+margin_bottom = 8      # gap between the dock and the screen edge, px
+hotspot_height = 6     # bottom reveal strip thickness, px
+hide_delay_ms = 350    # delay before an un-hovered dock hides

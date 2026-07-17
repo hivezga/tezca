@@ -405,7 +405,8 @@ fn dependency_checks() -> Vec<Check> {
         ("matugen", false, &[]),
         ("hyprlock", false, &[]),
         ("hypridle", false, &[]),
-        ("nwg-dock-hyprland", false, &[]), // Phase 4 dock
+        ("tezca-dock", false, &[]),        // Phase 5 bespoke dock (build via install.sh)
+        ("nwg-dock-hyprland", false, &[]), // Phase 4 dock (fallback for tezca-dock)
         ("wlogout", false, &[]),           // Phase 4 power menu
     ];
 

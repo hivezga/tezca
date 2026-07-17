@@ -7,6 +7,7 @@
 //!   game    gaming profile toggle (Phase 6 — stub)
 //!   install bootstrap guidance (delegates to install.sh)
 
+mod cmd_dock;
 mod cmd_doctor;
 mod cmd_link;
 mod cmd_theme;
@@ -59,6 +60,10 @@ fn main() -> ExitCode {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_theme::run(&subargs) as u8)
         }
+        Some("dock") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_dock::run(&subargs) as u8)
+        }
         Some("game") => stub("game", "Phase 6 (gaming profile)", &[
             "tezca game on",
             "tezca game off",
@@ -105,6 +110,7 @@ fn print_help() {
         ("link", "symlink config/* into ~/.config (backs up existing)"),
         ("doctor", "verify NVIDIA env, modeset, monitors, and deps"),
         ("theme", "wallpaper-driven theming (list/set/wallpaper/reload)"),
+        ("dock", "control the magnifying dock (start/stop/restart/toggle)"),
         ("game", "toggle the gaming profile        (Phase 6 — stub)"),
         ("install", "bootstrap guidance (see install.sh)"),
     ];

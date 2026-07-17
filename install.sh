@@ -54,6 +54,7 @@ PKGS_CORE=(hyprland uwsm hyprpolkitagent
 PKGS_AESTHETIC=(waybar swaync
                 hyprlock hypridle wlogout
                 hyprshot grim slurp swappy
+                gtk4 gtk4-layer-shell
                 inter-font ttf-jetbrains-mono-nerd)
 
 # AUR / possibly-AUR (paru resolves either way).
@@ -75,16 +76,22 @@ else
 fi
 echo
 
-# --- 2. build tezca -------------------------------------------------------
-say "Building the tezca CLI"
+# --- 2. build tezca + tezca-dock ------------------------------------------
+# The workspace build compiles both the std-only `tezca` CLI and `tezca-dock`
+# (the gtk4-rs magnifying dock). tezca-dock links GTK4 + layer-shell (already in
+# the package set below); its first build pulls the GTK crate stack and is slow.
+say "Building the tezca workspace (CLI + dock)"
 ( cd "$REPO_DIR" && CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release )
-BIN="${TARGET_DIR}/release/tezca"
-[[ -x "$BIN" ]] || die "build succeeded but $BIN is missing"
 
-BIN_DEST="${HOME}/.local/bin/tezca"
-mkdir -p "$(dirname "$BIN_DEST")"
-install -m755 "$BIN" "$BIN_DEST"
-info "${GREEN}✓${RST} installed → ${DIM}${BIN_DEST}${RST}"
+BIN_DIR="${HOME}/.local/bin"
+mkdir -p "$BIN_DIR"
+for b in tezca tezca-dock; do
+    SRC="${TARGET_DIR}/release/${b}"
+    [[ -x "$SRC" ]] || die "build succeeded but $SRC is missing"
+    install -m755 "$SRC" "${BIN_DIR}/${b}"
+    info "${GREEN}✓${RST} installed → ${DIM}${BIN_DIR}/${b}${RST}"
+done
+BIN="${BIN_DIR}/tezca"
 case ":$PATH:" in
     *":${HOME}/.local/bin:"*) : ;;
     *) warn "~/.local/bin is not on PATH — add it to use \`tezca\` directly" ;;

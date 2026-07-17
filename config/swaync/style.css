@@ -1,0 +1,201 @@
+/* Project:Tezca — swaync "smoking mirror" style.
+ *
+ * Obsidian glass notification center + toasts, matched to the Waybar palette.
+ * The control-center and notification-window layers are blurred by the
+ * compositor (layerrule blur, swaync-*  in conf.d/decoration.conf), so surfaces
+ * here are semi-transparent obsidian. swaync uses GTK4 CSS.
+ *
+ * Palette: base #0B0E0F · surface rgba(15,19,21,x) · text #E8EAED · muted #8B9398
+ *          accent #3FB8AF (turquoise/jade) · gold #C9A24B · urgent #E06C75
+ * Phase 3 (matugen) will regenerate this from the wallpaper.
+ */
+
+* {
+    font-family: "Inter", "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 14px;
+    background: transparent;
+    color: #E8EAED;
+    box-shadow: none;
+}
+
+/* ── Toast notifications (floating) ─────────────────────────────────────── */
+.notification-row {
+    outline: none;
+    margin: 0;
+    padding: 0;
+}
+
+.notification {
+    margin: 6px 12px;
+    padding: 0;
+    border-radius: 14px;
+    border: 1px solid rgba(63, 184, 175, 0.14);
+    background: rgba(11, 14, 15, 0.82);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+
+.notification.critical {
+    border: 1px solid rgba(224, 108, 117, 0.55);
+}
+
+.notification-content {
+    padding: 12px;
+    border-radius: 14px;
+}
+
+.notification .summary {
+    font-size: 14px;
+    font-weight: 600;
+    color: #E8EAED;
+}
+
+.notification .time {
+    font-size: 12px;
+    color: #8B9398;
+}
+
+.notification .body {
+    font-size: 13px;
+    color: #C3C8CC;
+}
+
+/* App icon / image */
+.notification .notification-icon {
+    border-radius: 10px;
+    margin-right: 10px;
+}
+
+/* Close button */
+.close-button {
+    background: rgba(224, 108, 117, 0.0);
+    color: #8B9398;
+    border-radius: 8px;
+    margin: 6px;
+    padding: 2px 6px;
+}
+
+.close-button:hover {
+    background: rgba(224, 108, 117, 0.85);
+    color: #0B0E0F;
+}
+
+/* Inline action buttons */
+.notification-action,
+.notification-default-action {
+    background: transparent;
+    border-radius: 12px;
+}
+
+.notification-action {
+    margin: 4px;
+    padding: 6px 10px;
+    border: 1px solid rgba(63, 184, 175, 0.18);
+    background: rgba(63, 184, 175, 0.06);
+    color: #E8EAED;
+}
+
+.notification-action:hover {
+    background: rgba(63, 184, 175, 0.18);
+    border-color: rgba(63, 184, 175, 0.4);
+}
+
+/* ── Control center (the panel) ─────────────────────────────────────────── */
+.control-center {
+    background: rgba(11, 14, 15, 0.80);
+    border: 1px solid rgba(63, 184, 175, 0.14);
+    border-radius: 18px;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55);
+    padding: 14px;
+    margin: 0;
+}
+
+.control-center .notification-row .notification {
+    margin: 6px 0;
+    background: rgba(20, 25, 27, 0.72);
+}
+
+/* List of notifications inside the center */
+.control-center-list {
+    background: transparent;
+}
+
+.control-center-list-placeholder {
+    color: #5A6166;
+    font-size: 15px;
+}
+
+/* ── Widgets ────────────────────────────────────────────────────────────── */
+.widget-title {
+    color: #E8EAED;
+    font-size: 16px;
+    font-weight: 700;
+    margin: 4px 4px 10px 4px;
+}
+
+.widget-title > button {
+    font-size: 13px;
+    font-weight: 500;
+    color: #E8EAED;
+    background: rgba(63, 184, 175, 0.10);
+    border: 1px solid rgba(63, 184, 175, 0.20);
+    border-radius: 10px;
+    padding: 4px 12px;
+}
+
+.widget-title > button:hover {
+    background: rgba(63, 184, 175, 0.22);
+}
+
+.widget-dnd {
+    color: #E8EAED;
+    font-size: 15px;
+    margin: 4px;
+}
+
+/* DND toggle switch */
+.widget-dnd > switch {
+    border-radius: 14px;
+    background: rgba(40, 46, 48, 0.9);
+    border: 1px solid rgba(63, 184, 175, 0.12);
+}
+
+.widget-dnd > switch:checked {
+    background: #3FB8AF;
+}
+
+.widget-dnd > switch slider {
+    background: #E8EAED;
+    border-radius: 12px;
+}
+
+/* mpris media player */
+.widget-mpris {
+    margin: 6px 2px;
+}
+
+.widget-mpris-player {
+    background: rgba(20, 25, 27, 0.72);
+    border: 1px solid rgba(63, 184, 175, 0.12);
+    border-radius: 14px;
+    padding: 12px;
+}
+
+.widget-mpris-title {
+    font-weight: 600;
+    color: #E8EAED;
+}
+
+.widget-mpris-subtitle {
+    color: #8B9398;
+}
+
+.widget-mpris button {
+    color: #C3C8CC;
+    background: transparent;
+    border-radius: 10px;
+}
+
+.widget-mpris button:hover {
+    color: #3FB8AF;
+    background: rgba(63, 184, 175, 0.10);
+}

@@ -1,0 +1,64 @@
+# Project:Tezca — Walker launcher config.
+# Spotlight/Raycast-style launcher. Theme "tezca" (obsidian glass) lives in
+# themes/tezca/. Providers are served by the `elephant` backend (AUR:
+# elephant-all-bin) — walker shows "Waiting for elephant..." until it runs.
+
+theme = "tezca"                 # obsidian-glass theme in themes/tezca/
+close_when_open = true          # SUPER+SPACE toggles walker closed if already open
+click_to_close = true           # click outside the card dismisses
+single_click_activation = true  # one click launches
+selection_wrap = false
+force_keyboard_focus = true     # keep focus in walker (layer-shell)
+keybind_symbols = true          # render ⌃ ⏎ etc. instead of "ctrl Return"
+page_jump_items = 10
+
+[shell]
+# Layer-shell placement — centered floating card (anchors handled by GTK halign).
+exclusive_zone = -1
+layer = "overlay"
+anchor_top = true
+anchor_bottom = true
+anchor_left = true
+anchor_right = true
+
+[placeholders]
+"default" = { input = "Search  ·  apps, calc, web", list = "No results" }
+
+[providers]
+# Queried by default (plain text search).
+default = ["desktopapplications", "calc", "websearch"]
+# Queried when the input is empty.
+empty = ["desktopapplications"]
+ignore_preview = []
+max_results = 50
+
+# Prefix routing — Spotlight muscle memory + power-user providers.
+[[providers.prefixes]]
+prefix = ";"
+provider = "providerlist"   # ";" lists all providers
+
+[[providers.prefixes]]
+prefix = ">"
+provider = "runner"         # ">" run a shell command
+
+[[providers.prefixes]]
+prefix = "/"
+provider = "files"          # "/" file search
+
+[[providers.prefixes]]
+prefix = ":"
+provider = "symbols"        # ":" emoji / unicode / symbols
+
+[[providers.prefixes]]
+prefix = "="
+provider = "calc"           # "=" force calculator
+
+[keybinds]
+close = ["Escape"]
+next = ["Down", "ctrl j"]
+previous = ["Up", "ctrl k"]
+toggle_exact = ["ctrl e"]
+show_actions = ["alt j"]
+quick_activate = ["F1", "F2", "F3", "F4"]
+page_down = ["Page_Down"]
+page_up = ["Page_Up"]

@@ -1,0 +1,130 @@
+// Project:Tezca — Waybar top menubar.
+// "Smoking mirror": a thin, translucent obsidian strip across the top of every
+// monitor. macOS-15 menubar shape — workspaces at the left, clock centered,
+// status indicators at the right. Blur is applied by a Hyprland layerrule on the
+// `waybar` namespace (see conf.d/decoration.conf), so keep the background here
+// semi-transparent and let the compositor do the glass.
+//
+// Icon glyphs are Material-Design Nerd Font codepoints (JetBrainsMono Nerd Font).
+// They are written as literal UTF-8 here; if you edit this file with a tool that
+// strips private-use characters, regenerate from tools/ rather than retyping.
+//
+// Colors live in style.css. Phase 3 (matugen) will template that file from the
+// wallpaper; until then it's the hand-tuned obsidian palette.
+{
+    "layer": "top",
+    "position": "top",
+    "height": 34,
+    "spacing": 6,
+    "margin-top": 6,
+    "margin-left": 10,
+    "margin-right": 10,
+
+    "modules-left": ["hyprland/workspaces", "hyprland/submap", "hyprland/window"],
+    "modules-center": ["clock"],
+    "modules-right": ["tray", "cpu", "memory", "network", "pulseaudio", "custom/notification", "custom/power"],
+
+    "hyprland/workspaces": {
+        "all-outputs": false,
+        "on-click": "activate",
+        "warp-on-scroll": false,
+        "format": "{icon}",
+        "format-icons": {
+            "1": "1", "2": "2", "3": "3", "4": "4", "5": "5",
+            "6": "6", "7": "7", "8": "8", "9": "9", "10": "10",
+            "urgent": "󰄖", "default": ""
+        },
+        "persistent-workspaces": {}
+    },
+
+    "hyprland/submap": {
+        "format": "  {}",
+        "tooltip": false
+    },
+
+    "hyprland/window": {
+        "format": "{title}",
+        "max-length": 60,
+        "separate-outputs": true,
+        "rewrite": { "": "Tezca" }
+    },
+
+    "clock": {
+        "interval": 1,
+        "format": "{:%a %d %b   %H:%M}",
+        "format-alt": "{:%H:%M:%S}",
+        "tooltip-format": "<tt><small>{calendar}</small></tt>",
+        "calendar": {
+            "mode": "month",
+            "mode-mon-col": 3,
+            "on-scroll": 1,
+            "format": {
+                "months":   "<span color='#E8EAED'><b>{}</b></span>",
+                "days":     "<span color='#C3C8CC'>{}</span>",
+                "weekdays": "<span color='#3FB8AF'><b>{}</b></span>",
+                "today":    "<span color='#3FB8AF'><b>{}</b></span>"
+            }
+        }
+    },
+
+    "tray": { "icon-size": 16, "spacing": 10 },
+
+    "cpu": {
+        "interval": 3,
+        "format": "󰻡 {usage}%",
+        "tooltip": true
+    },
+
+    "memory": {
+        "interval": 5,
+        "format": "󰍛 {percentage}%",
+        "tooltip-format": "{used:0.1f}G / {total:0.1f}G"
+    },
+
+    "network": {
+        "format-wifi": "󰖩 {signalStrength}%",
+        "format-ethernet": "󰈀",
+        "format-disconnected": "󰤭",
+        "tooltip-format-wifi": "{essid}  ({signalStrength}%)\n{ipaddr}",
+        "tooltip-format-ethernet": "{ifname}\n{ipaddr}",
+        "on-click": "uwsm app -- kitty -e nmtui"
+    },
+
+    "pulseaudio": {
+        "format": "{icon} {volume}%",
+        "format-muted": "󰝟",
+        "format-icons": {
+            "headphone": "󰋋",
+            "default": ["󰕿", "󰖀", "󰕾"]
+        },
+        "scroll-step": 5,
+        "on-click": "pavucontrol",
+        "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+    },
+
+    "custom/notification": {
+        "tooltip": false,
+        "format": "{icon}",
+        "format-icons": {
+            "notification": "<span foreground='#3FB8AF'>󰄖</span>",
+            "none": "󰂚",
+            "dnd-notification": "<span foreground='#3FB8AF'>󰄖</span>",
+            "dnd-none": "󰂚",
+            "inhibited-notification": "<span foreground='#3FB8AF'>󰄖</span>",
+            "inhibited-none": "󰂚",
+            "dnd-inhibited-notification": "<span foreground='#3FB8AF'>󰄖</span>",
+            "dnd-inhibited-none": "󰂚"
+        },
+        "return-type": "json",
+        "exec": "swaync-client -swb",
+        "on-click": "swaync-client -t -sw",
+        "on-click-right": "swaync-client -d -sw",
+        "escape": true
+    },
+
+    "custom/power": {
+        "format": "󰐥",
+        "tooltip": false,
+        "on-click": "uwsm app -- wlogout"
+    }
+}

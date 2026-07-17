@@ -40,6 +40,7 @@ pub fn run() -> i32 {
     section("GPU / NVIDIA", nvidia_checks(), &mut all);
     section("Session & environment", session_checks(), &mut all);
     section("Config linkage", config_checks(), &mut all);
+    section("Config validity", config_validity_checks(), &mut all);
     section("Displays", monitor_checks(), &mut all);
     section("Component stack", dependency_checks(), &mut all);
 
@@ -271,6 +272,66 @@ fn config_checks() -> Vec<Check> {
 }
 
 // ---------------------------------------------------------------------------
+// Config validity
+// ---------------------------------------------------------------------------
+
+/// Parse the whole Hyprland config with `Hyprland --verify-config` — it reports
+/// every error WITHOUT launching a compositor, so it runs from a tty. This is
+/// the gate that catches API drift (renamed/removed options, changed windowrule
+/// grammar) *before* a login lands you in a red error overlay with dead keybinds.
+fn config_validity_checks() -> Vec<Check> {
+    let mut v = Vec::new();
+
+    if !which("Hyprland") {
+        v.push(Check::warn("hyprland config not verified", "Hyprland binary not found"));
+        return v;
+    }
+
+    let out = Command::new("Hyprland").arg("--verify-config").output();
+    match out {
+        Ok(o) => {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr),
+            );
+            // Hyprland prints "config ok" after a clean parse, or one
+            // "Config error in file …" line per problem.
+            if text.contains("config ok") {
+                v.push(Check::pass(
+                    "hyprland config valid",
+                    "`Hyprland --verify-config` → config ok",
+                ));
+            } else {
+                let errs: Vec<String> = text
+                    .lines()
+                    .filter(|l| l.contains("Config error in file"))
+                    .map(|l| l.trim().to_string())
+                    .collect();
+                let count = errs.len();
+                let first = errs
+                    .into_iter()
+                    .next()
+                    // Trim the noisy absolute-path prefix for a readable one-liner.
+                    .map(|l| l.replace("Config error in file ", ""))
+                    .unwrap_or_else(|| {
+                        "run `Hyprland --verify-config` to see the errors".into()
+                    });
+                let detail = if count > 1 {
+                    format!("{count} errors — first: {first}")
+                } else {
+                    first
+                };
+                v.push(Check::fail("hyprland config INVALID", detail));
+            }
+        }
+        Err(e) => v.push(Check::warn("hyprland config not verified", e.to_string())),
+    }
+
+    v
+}
+
+// ---------------------------------------------------------------------------
 // Displays
 // ---------------------------------------------------------------------------
 
@@ -325,30 +386,35 @@ fn monitor_checks() -> Vec<Check> {
 // ---------------------------------------------------------------------------
 
 fn dependency_checks() -> Vec<Check> {
-    // (binary, required-for-phase-1?)
-    let deps = [
-        ("Hyprland", true),
-        ("uwsm", true),
-        ("hyprctl", true),
-        ("kitty", true),
-        ("hyprpolkitagent", false),
-        ("waybar", false),
-        ("swaync", false),
-        ("walker", false),
-        ("swww", false),
-        ("matugen", false),
-        ("hyprlock", false),
-        ("hypridle", false),
+    // (probe-name, required-for-phase-1?, fallback-paths)
+    // Most components are PATH binaries, but some aren't: hyprpolkitagent is a
+    // /usr/lib helper + systemd user service, and swww shipped as `awww` (its
+    // renamed successor) whose daemon binary is `awww-daemon`. Probe fallbacks
+    // so a working install isn't reported as missing.
+    let deps: &[(&str, bool, &[&str])] = &[
+        ("Hyprland", true, &[]),
+        ("uwsm", true, &[]),
+        ("hyprctl", true, &[]),
+        ("kitty", true, &[]),
+        ("hyprpolkitagent", false, &["/usr/lib/hyprpolkitagent/hyprpolkitagent"]),
+        ("waybar", false, &[]),
+        ("swaync", false, &[]),
+        ("walker", false, &[]),
+        ("awww", false, &["/usr/bin/swww-daemon"]), // wallpaper daemon (swww successor)
+        ("matugen", false, &[]),
+        ("hyprlock", false, &[]),
+        ("hypridle", false, &[]),
     ];
 
     deps.iter()
-        .map(|(bin, required)| {
-            if which(bin) {
+        .map(|(bin, required, alts)| {
+            let present = which(bin) || alts.iter().any(|p| Path::new(p).exists());
+            if present {
                 Check::pass(bin, "installed")
             } else if *required {
                 Check::fail(bin, "missing — required for a bootable session")
             } else {
-                Check::warn(bin, "missing (installed in a later phase)")
+                Check::warn(bin, "missing (install for the aesthetic stack)")
             }
         })
         .collect()

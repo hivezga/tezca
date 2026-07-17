@@ -4,16 +4,15 @@
  * blurred by the compositor (layerrule blur, walker in conf.d/decoration.conf),
  * so the box-wrapper is semi-transparent obsidian and the window stays clear.
  * GTK4 CSS. Layout XML is vendored from the upstream `default` theme; only this
- * stylesheet is ours. Phase 3 (matugen) will regenerate the palette.
+ * stylesheet is ours.
+ *
+ * Colors come from the theme engine — references ONLY @tz_* tokens. Imported
+ * from the stable path the `tezca` CLI repoints per theme; the relative import
+ * resolves against ~/.config/walker/themes/tezca/ (the symlink location), i.e.
+ * ~/.config/tezca/current/colors.css. Edit templates/ or themes/, not hexes.
  */
 
-@define-color window_bg_color  #0B0E0F;
-@define-color surface_color    #14191B;
-@define-color accent_bg_color  #3FB8AF;
-@define-color theme_fg_color   #E8EAED;
-@define-color muted_fg_color   #8B9398;
-@define-color error_bg_color   #E06C75;
-@define-color error_fg_color   #0B0E0F;
+@import url("../../../tezca/current/colors.css");
 
 * {
   all: unset;
@@ -27,8 +26,8 @@ scrollbar { opacity: 0; }
 
 /* ── The floating card ──────────────────────────────────────────────────── */
 .box-wrapper {
-  background: alpha(@window_bg_color, 0.85);
-  border: 1px solid alpha(@accent_bg_color, 0.16);
+  background: alpha(@tz_base, 0.85);
+  border: 1px solid alpha(@tz_accent, 0.16);
   border-radius: 20px;
   padding: 16px;
   box-shadow:
@@ -42,21 +41,21 @@ scrollbar { opacity: 0; }
 }
 
 .input {
-  caret-color: @accent_bg_color;
-  background: alpha(@surface_color, 0.7);
-  border: 1px solid alpha(@accent_bg_color, 0.12);
+  caret-color: @tz_accent;
+  background: alpha(@tz_surface, 0.7);
+  border: 1px solid alpha(@tz_accent, 0.12);
   border-radius: 14px;
   padding: 14px 16px;
-  color: @theme_fg_color;
+  color: @tz_text;
   font-size: 19px;
   font-weight: 400;
 }
 
-.input placeholder { color: @muted_fg_color; opacity: 1; }
-.input selection { background: alpha(@accent_bg_color, 0.30); color: @theme_fg_color; }
+.input placeholder { color: @tz_muted; opacity: 1; }
+.input selection { background: alpha(@tz_accent, 0.30); color: @tz_text; }
 
 /* ── Result list ────────────────────────────────────────────────────────── */
-.list { color: @theme_fg_color; }
+.list { color: @tz_text; }
 
 .item-box {
   border-radius: 12px;
@@ -66,58 +65,58 @@ scrollbar { opacity: 0; }
 
 child:selected .item-box,
 row:selected .item-box {
-  background: alpha(@accent_bg_color, 0.14);
-  box-shadow: inset 3px 0 0 0 @accent_bg_color;
+  background: alpha(@tz_accent, 0.14);
+  box-shadow: inset 3px 0 0 0 @tz_accent;
 }
 
 .item-text {
-  color: @theme_fg_color;
+  color: @tz_text;
   font-size: 15px;
 }
 
 .item-subtext {
-  color: @muted_fg_color;
+  color: @tz_muted;
   font-size: 12px;
 }
 
-.providerlist .item-subtext { font-size: unset; color: @muted_fg_color; }
+.providerlist .item-subtext { font-size: unset; color: @tz_muted; }
 
-.item-image-text { font-size: 26px; color: @theme_fg_color; }
+.item-image-text { font-size: 26px; color: @tz_text; }
 
 .item-quick-activation {
-  background: alpha(@accent_bg_color, 0.20);
-  color: @theme_fg_color;
+  background: alpha(@tz_accent, 0.20);
+  color: @tz_text;
   border-radius: 6px;
   padding: 2px 8px;
 }
 
 /* ── Calc gets a big answer ─────────────────────────────────────────────── */
-.calc .item-text { font-size: 24px; font-weight: 600; color: @accent_bg_color; }
+.calc .item-text { font-size: 24px; font-weight: 600; color: @tz_accent; }
 .symbols .item-image { font-size: 24px; }
 
 /* ── Preview pane ───────────────────────────────────────────────────────── */
 .preview {
-  border: 1px solid alpha(@accent_bg_color, 0.16);
+  border: 1px solid alpha(@tz_accent, 0.16);
   border-radius: 12px;
-  color: @theme_fg_color;
+  color: @tz_text;
 }
-.preview-box, .elephant-hint, .placeholder { color: @muted_fg_color; }
+.preview-box, .elephant-hint, .placeholder { color: @tz_muted; }
 
 /* ── Keybind hint row ───────────────────────────────────────────────────── */
 .keybinds {
   padding-top: 10px;
-  border-top: 1px solid alpha(@accent_bg_color, 0.10);
+  border-top: 1px solid alpha(@tz_accent, 0.10);
   font-size: 12px;
-  color: @muted_fg_color;
+  color: @tz_muted;
 }
 
-.keybind-bind { text-transform: lowercase; color: @muted_fg_color; opacity: 0.6; }
+.keybind-bind { text-transform: lowercase; color: @tz_muted; opacity: 0.6; }
 
 .keybind-label {
   padding: 2px 6px;
   border-radius: 5px;
-  border: 1px solid alpha(@theme_fg_color, 0.25);
-  color: @theme_fg_color;
+  border: 1px solid alpha(@tz_text, 0.25);
+  color: @tz_text;
 }
 
 .keybind-button { opacity: 0.6; }
@@ -128,6 +127,6 @@ row:selected .item-box {
 .error {
   padding: 10px;
   border-radius: 10px;
-  background: @error_bg_color;
-  color: @error_fg_color;
+  background: @tz_urgent;
+  color: @tz_on_urgent;
 }

@@ -1,0 +1,6 @@
+# Tezca curated theme metadata. Simple `key = value` lines (parsed by `tezca`).
+# `wallpaper` is resolved relative to the repo's wallpapers/ directory.
+name = obsidian
+description = The signature smoking mirror — obsidian black, turquoise/jade accent
+wallpaper = obsidian-teal.jpg
+mode = dark

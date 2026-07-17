@@ -5,16 +5,19 @@
  * compositor (layerrule blur, swaync-*  in conf.d/decoration.conf), so surfaces
  * here are semi-transparent obsidian. swaync uses GTK4 CSS.
  *
- * Palette: base #0B0E0F · surface rgba(15,19,21,x) · text #E8EAED · muted #8B9398
- *          accent #3FB8AF (turquoise/jade) · gold #C9A24B · urgent #E06C75
- * Phase 3 (matugen) will regenerate this from the wallpaper.
+ * Colors come from the theme engine — references ONLY @tz_* tokens (and alpha()
+ * of them). Imported from the stable path the `tezca` CLI repoints per theme;
+ * the relative import resolves against ~/.config/swaync/ →
+ * ~/.config/tezca/current/colors.css. Edit templates/ or themes/, not hexes.
  */
+
+@import url("../tezca/current/colors.css");
 
 * {
     font-family: "Inter", "JetBrainsMono Nerd Font", sans-serif;
     font-size: 14px;
     background: transparent;
-    color: #E8EAED;
+    color: @tz_text;
     box-shadow: none;
 }
 
@@ -29,13 +32,13 @@
     margin: 6px 12px;
     padding: 0;
     border-radius: 14px;
-    border: 1px solid rgba(63, 184, 175, 0.14);
-    background: rgba(11, 14, 15, 0.82);
+    border: 1px solid alpha(@tz_accent, 0.14);
+    background: alpha(@tz_base, 0.82);
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 
 .notification.critical {
-    border: 1px solid rgba(224, 108, 117, 0.55);
+    border: 1px solid alpha(@tz_urgent, 0.55);
 }
 
 .notification-content {
@@ -46,17 +49,17 @@
 .notification .summary {
     font-size: 14px;
     font-weight: 600;
-    color: #E8EAED;
+    color: @tz_text;
 }
 
 .notification .time {
     font-size: 12px;
-    color: #8B9398;
+    color: @tz_muted;
 }
 
 .notification .body {
     font-size: 13px;
-    color: #C3C8CC;
+    color: @tz_subtext;
 }
 
 /* App icon / image */
@@ -67,16 +70,16 @@
 
 /* Close button */
 .close-button {
-    background: rgba(224, 108, 117, 0.0);
-    color: #8B9398;
+    background: alpha(@tz_urgent, 0.0);
+    color: @tz_muted;
     border-radius: 8px;
     margin: 6px;
     padding: 2px 6px;
 }
 
 .close-button:hover {
-    background: rgba(224, 108, 117, 0.85);
-    color: #0B0E0F;
+    background: alpha(@tz_urgent, 0.85);
+    color: @tz_on_urgent;
 }
 
 /* Inline action buttons */
@@ -89,20 +92,20 @@
 .notification-action {
     margin: 4px;
     padding: 6px 10px;
-    border: 1px solid rgba(63, 184, 175, 0.18);
-    background: rgba(63, 184, 175, 0.06);
-    color: #E8EAED;
+    border: 1px solid alpha(@tz_accent, 0.18);
+    background: alpha(@tz_accent, 0.06);
+    color: @tz_text;
 }
 
 .notification-action:hover {
-    background: rgba(63, 184, 175, 0.18);
-    border-color: rgba(63, 184, 175, 0.4);
+    background: alpha(@tz_accent, 0.18);
+    border-color: alpha(@tz_accent, 0.4);
 }
 
 /* ── Control center (the panel) ─────────────────────────────────────────── */
 .control-center {
-    background: rgba(11, 14, 15, 0.80);
-    border: 1px solid rgba(63, 184, 175, 0.14);
+    background: alpha(@tz_base, 0.80);
+    border: 1px solid alpha(@tz_accent, 0.14);
     border-radius: 18px;
     box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55);
     padding: 14px;
@@ -111,7 +114,7 @@
 
 .control-center .notification-row .notification {
     margin: 6px 0;
-    background: rgba(20, 25, 27, 0.72);
+    background: alpha(@tz_surface, 0.72);
 }
 
 /* List of notifications inside the center */
@@ -120,13 +123,13 @@
 }
 
 .control-center-list-placeholder {
-    color: #5A6166;
+    color: @tz_faint;
     font-size: 15px;
 }
 
 /* ── Widgets ────────────────────────────────────────────────────────────── */
 .widget-title {
-    color: #E8EAED;
+    color: @tz_text;
     font-size: 16px;
     font-weight: 700;
     margin: 4px 4px 10px 4px;
@@ -135,19 +138,19 @@
 .widget-title > button {
     font-size: 13px;
     font-weight: 500;
-    color: #E8EAED;
-    background: rgba(63, 184, 175, 0.10);
-    border: 1px solid rgba(63, 184, 175, 0.20);
+    color: @tz_text;
+    background: alpha(@tz_accent, 0.10);
+    border: 1px solid alpha(@tz_accent, 0.20);
     border-radius: 10px;
     padding: 4px 12px;
 }
 
 .widget-title > button:hover {
-    background: rgba(63, 184, 175, 0.22);
+    background: alpha(@tz_accent, 0.22);
 }
 
 .widget-dnd {
-    color: #E8EAED;
+    color: @tz_text;
     font-size: 15px;
     margin: 4px;
 }
@@ -155,16 +158,16 @@
 /* DND toggle switch */
 .widget-dnd > switch {
     border-radius: 14px;
-    background: rgba(40, 46, 48, 0.9);
-    border: 1px solid rgba(63, 184, 175, 0.12);
+    background: alpha(@tz_faint, 0.9);
+    border: 1px solid alpha(@tz_accent, 0.12);
 }
 
 .widget-dnd > switch:checked {
-    background: #3FB8AF;
+    background: @tz_accent;
 }
 
 .widget-dnd > switch slider {
-    background: #E8EAED;
+    background: @tz_text;
     border-radius: 12px;
 }
 
@@ -174,28 +177,28 @@
 }
 
 .widget-mpris-player {
-    background: rgba(20, 25, 27, 0.72);
-    border: 1px solid rgba(63, 184, 175, 0.12);
+    background: alpha(@tz_surface, 0.72);
+    border: 1px solid alpha(@tz_accent, 0.12);
     border-radius: 14px;
     padding: 12px;
 }
 
 .widget-mpris-title {
     font-weight: 600;
-    color: #E8EAED;
+    color: @tz_text;
 }
 
 .widget-mpris-subtitle {
-    color: #8B9398;
+    color: @tz_muted;
 }
 
 .widget-mpris button {
-    color: #C3C8CC;
+    color: @tz_subtext;
     background: transparent;
     border-radius: 10px;
 }
 
 .widget-mpris button:hover {
-    color: #3FB8AF;
-    background: rgba(63, 184, 175, 0.10);
+    color: @tz_accent;
+    background: alpha(@tz_accent, 0.10);
 }

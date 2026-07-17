@@ -43,6 +43,7 @@ pub fn run() -> i32 {
     section("Config validity", config_validity_checks(), &mut all);
     section("Displays", monitor_checks(), &mut all);
     section("Component stack", dependency_checks(), &mut all);
+    section("Theme engine", theme_checks(), &mut all);
 
     let fails = all.iter().filter(|l| **l == Level::Fail).count();
     let warns = all.iter().filter(|l| **l == Level::Warn).count();
@@ -418,6 +419,65 @@ fn dependency_checks() -> Vec<Check> {
             }
         })
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Theme engine
+// ---------------------------------------------------------------------------
+
+/// Verify the theme engine (DESIGN.md §7): the palette must be seeded into
+/// ~/.config/tezca/current/ because components `@import`/`source`/`include` it —
+/// a missing file means unstyled bars or (worse) a Hyprland config error.
+fn theme_checks() -> Vec<Check> {
+    let mut v = Vec::new();
+    let current = match repo::config_home() {
+        Ok(c) => c.join("tezca").join("current"),
+        Err(e) => {
+            v.push(Check::fail("cannot resolve ~/.config", e));
+            return v;
+        }
+    };
+
+    if current.join("colors.css").is_file() {
+        let state = fs::read_to_string(current.join("theme.state"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        match state {
+            Some(s) => {
+                let pretty = s
+                    .strip_prefix("dynamic:")
+                    .map(|img| format!("dynamic ({img})"))
+                    .unwrap_or_else(|| s.clone());
+                v.push(Check::pass("palette seeded", format!("active theme: {pretty}")));
+            }
+            None => v.push(Check::pass("palette seeded", "current/colors.css present")),
+        }
+    } else {
+        v.push(Check::fail(
+            "palette not seeded",
+            "~/.config/tezca/current/colors.css missing — run `tezca theme set obsidian`",
+        ));
+    }
+
+    // The remaining files each component relies on.
+    for f in ["colors-kitty.conf", "colors-hypr.conf", "colors-hyprlock.conf"] {
+        if !current.join(f).is_file() {
+            v.push(Check::warn(f, "missing from current/ — re-run `tezca theme`"));
+        }
+    }
+
+    // matugen powers dynamic mode; curated themes work without it.
+    if which("matugen") {
+        v.push(Check::pass("matugen", "dynamic (wallpaper) theming available"));
+    } else {
+        v.push(Check::warn(
+            "matugen",
+            "absent — curated themes work, `theme wallpaper` won't",
+        ));
+    }
+
+    v
 }
 
 fn which(bin: &str) -> bool {

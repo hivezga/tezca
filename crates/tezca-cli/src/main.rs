@@ -9,6 +9,7 @@
 
 mod cmd_doctor;
 mod cmd_link;
+mod cmd_theme;
 mod repo;
 mod term;
 
@@ -35,15 +36,29 @@ fn main() -> ExitCode {
                 dry_run: flags.iter().any(|f| *f == "--dry-run" || *f == "-n"),
                 force: flags.iter().any(|f| *f == "--force" || *f == "-f"),
             };
-            report(cmd_link::run(opts))
+            let dry = opts.dry_run;
+            match cmd_link::run(opts) {
+                Ok(()) => {
+                    // Seed ~/.config/tezca/current/ so components never import a
+                    // missing palette on first login. No-op if already themed.
+                    if !dry {
+                        if let Err(e) = cmd_theme::ensure_default(false) {
+                            eprintln!("{} {e}", term::yellow("warning:"));
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{} {e}", term::red("error:"));
+                    ExitCode::FAILURE
+                }
+            }
         }
         Some("doctor") => ExitCode::from(cmd_doctor::run() as u8),
-        Some("theme") => stub("theme", "Phase 3 (theme engine)", &[
-            "tezca theme list",
-            "tezca theme set <name>",
-            "tezca theme wallpaper <img>",
-            "tezca theme reload",
-        ]),
+        Some("theme") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_theme::run(&subargs) as u8)
+        }
         Some("game") => stub("game", "Phase 6 (gaming profile)", &[
             "tezca game on",
             "tezca game off",
@@ -61,16 +76,6 @@ fn main() -> ExitCode {
         Some(other) => {
             eprintln!("{} unknown command: {}", term::red("error:"), other);
             eprintln!("run {} for usage", term::bold("tezca --help"));
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn report(r: Result<(), String>) -> ExitCode {
-    match r {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("{} {e}", term::red("error:"));
             ExitCode::FAILURE
         }
     }
@@ -99,13 +104,19 @@ fn print_help() {
     let rows = [
         ("link", "symlink config/* into ~/.config (backs up existing)"),
         ("doctor", "verify NVIDIA env, modeset, monitors, and deps"),
-        ("theme", "wallpaper-driven theming        (Phase 3 — stub)"),
+        ("theme", "wallpaper-driven theming (list/set/wallpaper/reload)"),
         ("game", "toggle the gaming profile        (Phase 6 — stub)"),
         ("install", "bootstrap guidance (see install.sh)"),
     ];
     for (c, d) in rows {
         println!("  {:<9} {}", term::cyan(c), d);
     }
+    println!();
+    println!("{}", term::bold("THEME"));
+    println!("  {}            list curated themes + the active one", term::cyan("tezca theme list"));
+    println!("  {}       apply a curated palette (e.g. obsidian)", term::cyan("tezca theme set <name>"));
+    println!("  {}  extract a palette from any image (matugen)", term::cyan("tezca theme wallpaper <img>"));
+    println!("  {}          re-apply the active theme + reload", term::cyan("tezca theme reload"));
     println!();
     println!("{}", term::bold("LINK OPTIONS"));
     println!("  {}  preview actions without changing anything", term::cyan("-n, --dry-run"));

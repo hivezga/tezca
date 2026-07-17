@@ -111,6 +111,9 @@ cat <<EOF
        (KDE Plasma stays selectable as a fallback.)
     3. After first login, run ${BOLD}hyprctl monitors${RST} and fix connector names
        in ${DIM}config/hypr/conf.d/monitors.conf${RST} if they differ from DP-1/DP-2.
+    4. Theme it: ${BOLD}tezca theme wallpaper ~/Pictures/some.jpg${RST} re-skins the
+       whole desktop from any image, or ${BOLD}tezca theme set obsidian${RST} for the
+       signature look. (${DIM}tezca link${RST} already seeded obsidian as the default.)
 
   ${DIM}Everything is reversible: your originals are the *.bak.* files next to the
   new symlinks in ~/.config.${RST}

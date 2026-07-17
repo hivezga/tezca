@@ -4,20 +4,15 @@
  * (layerrule blur, waybar). Turquoise/jade accent used sparingly; obsidian-gold
  * reserved for the power glyph. GTK3 CSS.
  *
- * Phase 3 will regenerate this file from the wallpaper via matugen; the palette
- * below is the hand-tuned `obsidian` default. Keep color literals grouped here.
+ * Colors come from the theme engine — this file references ONLY the @tz_* tokens
+ * (and alpha() of them). The palette is imported from the stable path below,
+ * which the `tezca` CLI repoints per theme (obsidian default, or wallpaper-
+ * extracted). Never hard-code hexes here; edit templates/ or themes/ instead.
+ * The relative import resolves against ~/.config/waybar/ (the symlink location),
+ * i.e. ~/.config/tezca/current/colors.css. See templates/README.md.
  */
 
-/* ── Palette (hand-tuned obsidian) ──────────────────────────────────────
- *   base      #0B0E0F   obsidian
- *   surface   rgba(15,19,21,0.72)  glass
- *   text      #E8EAED
- *   muted     #8B9398
- *   accent    #3FB8AF   turquoise/jade
- *   accent-dim#2A8C86
- *   gold      #C9A24B   obsidian-gold (sparingly)
- *   urgent    #E06C75
- */
+@import url("../tezca/current/colors.css");
 
 * {
     font-family: "Inter", "JetBrainsMono Nerd Font", "JetBrains Mono", sans-serif;
@@ -33,10 +28,10 @@
 
 /* The bar itself — floating rounded obsidian glass. */
 window#waybar {
-    background: rgba(11, 14, 15, 0.72);
-    border: 1px solid rgba(63, 184, 175, 0.14);
+    background: alpha(@tz_base, 0.72);
+    border: 1px solid alpha(@tz_accent, 0.14);
     border-radius: 14px;
-    color: #E8EAED;
+    color: @tz_text;
 }
 
 /* Generic module padding + spacing. */
@@ -53,7 +48,7 @@ window#waybar {
 #custom-power {
     padding: 0 10px;
     margin: 4px 0;
-    color: #E8EAED;
+    color: @tz_text;
     background: transparent;
 }
 
@@ -65,31 +60,31 @@ window#waybar {
 #workspaces button {
     padding: 0 8px;
     margin: 4px 2px;
-    color: #8B9398;
+    color: @tz_muted;
     background: transparent;
     border-radius: 9px;
     transition: all 180ms cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 #workspaces button:hover {
-    color: #E8EAED;
-    background: rgba(63, 184, 175, 0.10);
+    color: @tz_text;
+    background: alpha(@tz_accent, 0.10);
 }
 
 #workspaces button.active {
-    color: #0B0E0F;
-    background: #3FB8AF;
-    box-shadow: 0 0 8px rgba(63, 184, 175, 0.45);
+    color: @tz_on_accent;
+    background: @tz_accent;
+    box-shadow: 0 0 8px alpha(@tz_accent, 0.45);
 }
 
 #workspaces button.urgent {
-    color: #0B0E0F;
-    background: #E06C75;
+    color: @tz_on_urgent;
+    background: @tz_urgent;
 }
 
 /* ── Window title ───────────────────────────────────────────────────────── */
 #window {
-    color: #C3C8CC;
+    color: @tz_subtext;
     font-weight: 400;
 }
 
@@ -99,13 +94,13 @@ window#waybar.empty #window {
 
 /* ── Submap (resize/etc. modes) ─────────────────────────────────────────── */
 #submap {
-    color: #C9A24B;
+    color: @tz_gold;
     font-weight: 600;
 }
 
 /* ── Clock (center) ─────────────────────────────────────────────────────── */
 #clock {
-    color: #E8EAED;
+    color: @tz_text;
     font-weight: 600;
     letter-spacing: 0.3px;
 }
@@ -115,7 +110,7 @@ window#waybar.empty #window {
 #memory,
 #network,
 #pulseaudio {
-    color: #C3C8CC;
+    color: @tz_subtext;
     padding: 0 8px;
 }
 
@@ -123,38 +118,38 @@ window#waybar.empty #window {
 #memory:hover,
 #network:hover,
 #pulseaudio:hover {
-    color: #3FB8AF;
+    color: @tz_accent;
 }
 
 #network.disconnected {
-    color: #E06C75;
+    color: @tz_urgent;
 }
 
 #pulseaudio.muted {
-    color: #8B9398;
+    color: @tz_muted;
 }
 
 /* ── Notifications (swaync bell) ────────────────────────────────────────── */
 #custom-notification {
     font-family: "JetBrainsMono Nerd Font";
     padding: 0 10px;
-    color: #C3C8CC;
+    color: @tz_subtext;
 }
 
 #custom-notification:hover {
-    color: #3FB8AF;
+    color: @tz_accent;
 }
 
 /* ── Power ──────────────────────────────────────────────────────────────── */
 #custom-power {
     font-family: "JetBrainsMono Nerd Font";
-    color: #C9A24B;
+    color: @tz_gold;
     padding: 0 12px 0 8px;
     margin-right: 2px;
 }
 
 #custom-power:hover {
-    color: #E06C75;
+    color: @tz_urgent;
 }
 
 /* ── Tray ───────────────────────────────────────────────────────────────── */
@@ -171,21 +166,21 @@ window#waybar.empty #window {
 }
 
 #tray menu {
-    background: rgba(11, 14, 15, 0.96);
-    color: #E8EAED;
-    border: 1px solid rgba(63, 184, 175, 0.16);
+    background: alpha(@tz_base, 0.96);
+    color: @tz_text;
+    border: 1px solid alpha(@tz_accent, 0.16);
     border-radius: 10px;
 }
 
 /* Tooltips — obsidian glass to match. */
 tooltip {
-    background: rgba(11, 14, 15, 0.96);
-    border: 1px solid rgba(63, 184, 175, 0.18);
+    background: alpha(@tz_base, 0.96);
+    border: 1px solid alpha(@tz_accent, 0.18);
     border-radius: 10px;
-    color: #E8EAED;
+    color: @tz_text;
 }
 
 tooltip label {
-    color: #E8EAED;
+    color: @tz_text;
     padding: 2px;
 }

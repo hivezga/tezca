@@ -1,0 +1,38 @@
+/* Project:Tezca — GTK color tokens (matugen template).
+ *
+ * Rendered by matugen from the current wallpaper into
+ *   ~/.config/tezca/current/colors.css
+ * and @imported by every GTK-CSS component (Waybar, swaync, Walker). Components
+ * reference ONLY these @tz_* tokens (plus alpha() of them) — never hard hexes —
+ * so a single wallpaper swap re-skins the whole desktop.
+ *
+ * The `obsidian` curated theme ships a hand-tuned copy of this file; keep the
+ * token names in sync across templates/ and themes/*.
+ *
+ *   dynamic role            → Material-You color         obsidian literal
+ *   tz_base    background     surface_container_lowest    #0B0E0F
+ *   tz_surface glass surface  surface_container           #14191B
+ *   tz_text    primary text   on_surface                  #E8EAED
+ *   tz_subtext secondary text on_surface_variant          #C3C8CC
+ *   tz_muted   muted text     outline                     #8B9398
+ *   tz_faint   faint/disabled surface_bright              #5A6166
+ *   tz_accent  turquoise      primary                     #3FB8AF
+ *   tz_accent_dim gradient    primary_container           #2A8C86
+ *   tz_on_accent text-on-pill on_primary                  #0B0E0F
+ *   tz_gold    brand gold     (fixed constant)            #C9A24B
+ *   tz_urgent  error/urgent   error                       #E06C75
+ *   tz_on_urgent text-on-error on_error                   #0B0E0F
+ */
+
+@define-color tz_base        {{colors.surface_container_lowest.default.hex}};
+@define-color tz_surface     {{colors.surface_container.default.hex}};
+@define-color tz_text        {{colors.on_surface.default.hex}};
+@define-color tz_subtext     {{colors.on_surface_variant.default.hex}};
+@define-color tz_muted       {{colors.outline.default.hex}};
+@define-color tz_faint       {{colors.surface_bright.default.hex}};
+@define-color tz_accent      {{colors.primary.default.hex}};
+@define-color tz_accent_dim  {{colors.primary_container.default.hex}};
+@define-color tz_on_accent   {{colors.on_primary.default.hex}};
+@define-color tz_gold        #C9A24B;
+@define-color tz_urgent      {{colors.error.default.hex}};
+@define-color tz_on_urgent   {{colors.on_error.default.hex}};

@@ -1,0 +1,74 @@
+/* Project:Tezca — nwg-dock "smoking mirror" style.
+ *
+ * A floating, autohiding macOS-style dock at the bottom edge. Obsidian glass,
+ * blurred by the compositor (layerrule blur, namespace `nwg-dock` — see
+ * conf.d/decoration.conf), turquoise accent on hover / running indicator.
+ * GTK3 CSS.
+ *
+ * Colors come from the theme engine — reference ONLY the @tz_* tokens (and
+ * alpha() of them), never hard hexes. The palette is imported from the stable
+ * path below, which the `tezca` CLI repoints per theme; the relative import
+ * resolves against ~/.config/nwg-dock-hyprland/ (the symlink location), i.e.
+ * ~/.config/tezca/current/colors.css. See templates/README.md.
+ *
+ * nwg-dock reads this stylesheet only at launch, so `tezca theme` RESTARTS the
+ * dock to recolor it (cmd_theme::reload_components) — a switch is seamless
+ * because the dock is autohidden.
+ */
+
+@import url("../tezca/current/colors.css");
+
+/* The layer-shell window is just a transparent carrier; the glass is the box. */
+window {
+    background: transparent;
+    border: none;
+}
+
+/* The dock body — floating rounded obsidian glass. */
+#box {
+    background: alpha(@tz_base, 0.72);
+    border: 1px solid alpha(@tz_accent, 0.14);
+    border-radius: 18px;
+    padding: 6px 8px;
+    margin: 0 0 8px 0;               /* lift off the screen edge (macOS gap) */
+    box-shadow: 0 8px 32px alpha(@tz_base, 0.55);
+}
+
+/* App buttons — no chrome until hovered. */
+button {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 4px;
+    margin: 0 3px;
+    border-radius: 12px;
+    transition: all 160ms cubic-bezier(0.16, 1, 0.30, 1);
+}
+
+button image {
+    background: transparent;
+}
+
+button:hover {
+    background: alpha(@tz_accent, 0.14);
+    box-shadow: 0 0 12px alpha(@tz_accent, 0.30);
+}
+
+/* Running-app indicator dot nwg-dock draws under active clients. */
+button:checked,
+button:active {
+    background: alpha(@tz_accent, 0.20);
+}
+
+/* Dock tooltips (app names) — obsidian glass to match Waybar. */
+tooltip {
+    background: alpha(@tz_base, 0.96);
+    border: 1px solid alpha(@tz_accent, 0.18);
+    border-radius: 10px;
+    color: @tz_text;
+}
+
+tooltip label {
+    color: @tz_text;
+    padding: 2px 4px;
+}

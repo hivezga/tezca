@@ -405,6 +405,8 @@ fn dependency_checks() -> Vec<Check> {
         ("matugen", false, &[]),
         ("hyprlock", false, &[]),
         ("hypridle", false, &[]),
+        ("nwg-dock-hyprland", false, &[]), // Phase 4 dock
+        ("wlogout", false, &[]),           // Phase 4 power menu
     ];
 
     deps.iter()

@@ -125,6 +125,6 @@
     "custom/power": {
         "format": "󰐥",
         "tooltip": false,
-        "on-click": "uwsm app -- wlogout"
+        "on-click": "uwsm app -- wlogout -b 4"
     }
 }

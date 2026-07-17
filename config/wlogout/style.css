@@ -1,0 +1,62 @@
+/* Project:Tezca — wlogout "smoking mirror" power menu.
+ *
+ * A full-screen obsidian veil (blurred by the compositor — layerrule blur,
+ * namespace `wlogout`, see conf.d/decoration.conf) with a row of glass tiles:
+ * Lock · Logout · Reboot · Shutdown. Suspend/Hibernate are intentionally absent
+ * — this box is an always-on desktop (system sleep targets are static). GTK3 CSS.
+ *
+ * Colors come from the theme engine — reference ONLY the @tz_* tokens. The
+ * relative import resolves against ~/.config/wlogout/ → ~/.config/tezca/current/
+ * colors.css. The button glyphs are wlogout's stock white PNGs (fixed white,
+ * read fine on obsidian). Launched with `-b 4` so all four tiles sit in one row.
+ */
+
+@import url("../tezca/current/colors.css");
+
+* {
+    font-family: "Inter", sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    background-image: none;
+    box-shadow: none;
+    transition: all 180ms cubic-bezier(0.16, 1, 0.30, 1);
+}
+
+/* The dimmed, blurred veil over the desktop. */
+window {
+    background-color: alpha(@tz_base, 0.55);
+}
+
+/* Each power tile — obsidian glass with a centred icon + label beneath. */
+button {
+    color: @tz_subtext;
+    background-color: alpha(@tz_surface, 0.55);
+    border: 1px solid alpha(@tz_accent, 0.14);
+    border-radius: 20px;
+    margin: 14px;
+    background-repeat: no-repeat;
+    background-position: center 34%;
+    background-size: 26%;
+    outline: none;
+}
+
+button:focus,
+button:hover {
+    color: @tz_text;
+    background-color: alpha(@tz_accent, 0.16);
+    border-color: alpha(@tz_accent, 0.50);
+    box-shadow: 0 0 24px alpha(@tz_accent, 0.28);
+}
+
+/* Icon per action (wlogout stock white glyphs). */
+#lock     { background-image: image(url("/usr/share/wlogout/icons/lock.png")); }
+#logout   { background-image: image(url("/usr/share/wlogout/icons/logout.png")); }
+#reboot   { background-image: image(url("/usr/share/wlogout/icons/reboot.png")); }
+#shutdown { background-image: image(url("/usr/share/wlogout/icons/shutdown.png")); }
+
+/* Shutdown gets the brand-gold hover — the one destructive-adjacent accent. */
+#shutdown:focus,
+#shutdown:hover {
+    border-color: alpha(@tz_gold, 0.55);
+    box-shadow: 0 0 24px alpha(@tz_gold, 0.30);
+}

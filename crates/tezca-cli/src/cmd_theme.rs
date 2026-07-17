@@ -316,6 +316,66 @@ fn reload_components() {
 
     // Walker re-reads its theme CSS on each on-demand launch — nothing to signal.
     report("walker", Outcome::Skipped("re-reads on next launch".into()));
+
+    // nwg-dock reads its stylesheet only at launch, so recoloring means a
+    // restart. Seamless in practice — the dock is autohidden.
+    report("dock", restart_dock());
+}
+
+/// Restart the autohiding dock so it picks up the new palette. Best-effort:
+/// only acts when it's actually running and we're inside a Hyprland session
+/// (needed to relaunch it cleanly). Relaunches through the same wrapper script
+/// autostart uses, so the dock's flags stay defined in exactly one place.
+fn restart_dock() -> Outcome {
+    // `-f '^…'`: nwg-dock-hyprland's comm truncates to 15 chars so `-x` on the
+    // full name never matches; the ^ anchor pins the match to argv[0], keeping
+    // pkill off its own (and other) command lines.
+    const DOCK: &str = "^nwg-dock-hyprland";
+    if !proc_running(DOCK) {
+        return Outcome::Skipped("not running".into());
+    }
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return Outcome::Skipped("not in a Hyprland session".into());
+    }
+    let script = match repo::config_home() {
+        Ok(c) => c.join("nwg-dock-hyprland").join("dock.sh"),
+        Err(e) => return Outcome::Failed(e),
+    };
+    if !script.is_file() {
+        return Outcome::Skipped("dock.sh not linked".into());
+    }
+
+    // Terminate and wait for its layer-shell lock to clear before relaunching.
+    let _ = Command::new("pkill").arg("-TERM").arg("-f").arg(DOCK).status();
+    for _ in 0..50 {
+        if !proc_running(DOCK) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // hyprctl dispatch exec detaches it back into the session immediately.
+    match Command::new("hyprctl")
+        .arg("dispatch").arg("exec").arg(script.display().to_string())
+        .output()
+    {
+        Ok(o) if o.status.success() => Outcome::Done("restarted".into()),
+        Ok(o) => Outcome::Failed(
+            strip_ansi(String::from_utf8_lossy(&o.stderr).trim()).chars().take(60).collect(),
+        ),
+        Err(e) => Outcome::Failed(e.to_string()),
+    }
+}
+
+/// True if at least one process matching `pattern` is alive. Uses `pkill -0 -f`
+/// (match against the full command line) because long binary names truncate in
+/// `comm`; pass an anchored regex like `^name` to avoid self-matching.
+fn proc_running(pattern: &str) -> bool {
+    Command::new("pkill")
+        .arg("-0").arg("-f").arg(pattern)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 enum Outcome {

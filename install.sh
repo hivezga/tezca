@@ -57,16 +57,21 @@ PKGS_AESTHETIC=(waybar swaync
                 gtk4 gtk4-layer-shell
                 inter-font ttf-jetbrains-mono-nerd)
 
+# Phase 6 — gaming/AI workflow: the `tezca game run` wrapper (gamemode +
+# MangoHud) and gamescope for problem titles. notify-send for the toggle toast.
+PKGS_WORKFLOW=(gamemode mangohud gamescope libnotify)
+
 # AUR / possibly-AUR (paru resolves either way).
 PKGS_AUR=(walker-bin swww matugen-bin nwg-dock-hyprland)
 
 say "Packages"
 info "core:      ${DIM}${PKGS_CORE[*]}${RST}"
 info "aesthetic: ${DIM}${PKGS_AESTHETIC[*]}${RST}"
+info "workflow:  ${DIM}${PKGS_WORKFLOW[*]}${RST}"
 info "aur:       ${DIM}${PKGS_AUR[*]}${RST}"
 echo
 if confirm "Install/verify these packages with paru?"; then
-    paru -S --needed "${PKGS_CORE[@]}" "${PKGS_AESTHETIC[@]}"
+    paru -S --needed "${PKGS_CORE[@]}" "${PKGS_AESTHETIC[@]}" "${PKGS_WORKFLOW[@]}"
     # AUR names occasionally differ across time; don't let one bad name abort.
     for p in "${PKGS_AUR[@]}"; do
         paru -S --needed "$p" || warn "skipped '$p' (not found / declined) — install manually later"

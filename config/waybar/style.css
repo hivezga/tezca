@@ -129,6 +129,25 @@ window#waybar.empty #window {
     color: @tz_muted;
 }
 
+/* ── Game mode indicator ────────────────────────────────────────────────── */
+/* Empty (no glyph) when off — reads as absent. Gold + glow when active, to
+   match the "profile engaged" feel of the wlogout shutdown accent. */
+#custom-gamemode {
+    font-family: "JetBrainsMono Nerd Font";
+    color: @tz_gold;
+    padding: 0;
+}
+
+#custom-gamemode.active {
+    padding: 0 10px;
+    color: @tz_gold;
+    text-shadow: 0 0 8px alpha(@tz_gold, 0.55);
+}
+
+#custom-gamemode.active:hover {
+    color: @tz_accent;
+}
+
 /* ── Notifications (swaync bell) ────────────────────────────────────────── */
 #custom-notification {
     font-family: "JetBrainsMono Nerd Font";

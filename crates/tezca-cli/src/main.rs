@@ -3,12 +3,14 @@
 //! Std-only, dependency-free (see DESIGN.md §8). Subcommands:
 //!   link    symlink config/* into ~/.config (Phase 0/1)
 //!   doctor  verify NVIDIA env, modeset, monitors, deps (Phase 1)
-//!   theme   wallpaper-driven theming (Phase 3 — stub)
-//!   game    gaming profile toggle (Phase 6 — stub)
+//!   theme   wallpaper-driven theming (Phase 3)
+//!   dock    control the magnifying tezca-dock (Phase 5)
+//!   game    gaming profile toggle + launch wrapper (Phase 6)
 //!   install bootstrap guidance (delegates to install.sh)
 
 mod cmd_dock;
 mod cmd_doctor;
+mod cmd_game;
 mod cmd_link;
 mod cmd_theme;
 mod repo;
@@ -64,10 +66,10 @@ fn main() -> ExitCode {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_dock::run(&subargs) as u8)
         }
-        Some("game") => stub("game", "Phase 6 (gaming profile)", &[
-            "tezca game on",
-            "tezca game off",
-        ]),
+        Some("game") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_game::run(&subargs) as u8)
+        }
         Some("install") => {
             println!("{}", term::header("tezca install"));
             println!();
@@ -86,18 +88,6 @@ fn main() -> ExitCode {
     }
 }
 
-fn stub(name: &str, phase: &str, usage: &[&str]) -> ExitCode {
-    println!("{}", term::header(&format!("tezca {name}")));
-    println!();
-    println!("  {} — {}", term::yellow("not yet implemented"), term::dim(phase));
-    println!();
-    println!("  planned usage:");
-    for u in usage {
-        println!("    {}", term::dim(u));
-    }
-    ExitCode::SUCCESS
-}
-
 fn print_help() {
     println!("{}", term::header(&format!("tezca {VERSION}")));
     println!("{}", term::dim("  control surface for the Project:Tezca desktop"));
@@ -111,7 +101,7 @@ fn print_help() {
         ("doctor", "verify NVIDIA env, modeset, monitors, and deps"),
         ("theme", "wallpaper-driven theming (list/set/wallpaper/reload)"),
         ("dock", "control the magnifying dock (start/stop/restart/toggle)"),
-        ("game", "toggle the gaming profile        (Phase 6 — stub)"),
+        ("game", "gaming profile: on/off/toggle/status/run"),
         ("install", "bootstrap guidance (see install.sh)"),
     ];
     for (c, d) in rows {
@@ -123,6 +113,12 @@ fn print_help() {
     println!("  {}       apply a curated palette (e.g. obsidian)", term::cyan("tezca theme set <name>"));
     println!("  {}  extract a palette from any image (matugen)", term::cyan("tezca theme wallpaper <img>"));
     println!("  {}          re-apply the active theme + reload", term::cyan("tezca theme reload"));
+    println!();
+    println!("{}", term::bold("GAME"));
+    println!("  {}          low-latency profile: blur/shadow/anim off", term::cyan("tezca game on"));
+    println!("  {}         restore desktop eye-candy (hyprctl reload)", term::cyan("tezca game off"));
+    println!("  {}      flip the profile (bound to SUPER+G)", term::cyan("tezca game toggle"));
+    println!("  {}  launch under gamemode + MangoHud", term::cyan("tezca game run -- <cmd>"));
     println!();
     println!("{}", term::bold("LINK OPTIONS"));
     println!("  {}  preview actions without changing anything", term::cyan("-n, --dry-run"));

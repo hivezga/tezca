@@ -44,6 +44,7 @@ pub fn run() -> i32 {
     section("Displays", monitor_checks(), &mut all);
     section("Component stack", dependency_checks(), &mut all);
     section("Theme engine", theme_checks(), &mut all);
+    section("Gaming & AI", workflow_checks(), &mut all);
 
     let fails = all.iter().filter(|l| **l == Level::Fail).count();
     let warns = all.iter().filter(|l| **l == Level::Warn).count();
@@ -481,6 +482,78 @@ fn theme_checks() -> Vec<Check> {
     }
 
     v
+}
+
+// ---------------------------------------------------------------------------
+// Gaming & AI workflow (Phase 6)
+// ---------------------------------------------------------------------------
+
+/// Verify the Phase-6 workflow tooling: the gaming profile's launch wrappers
+/// (`tezca game run`) and the AI launchers (SUPER+A/C). All optional — a warn,
+/// never a fail — but surfaced so `tezca game`/keybinds don't silently no-op.
+fn workflow_checks() -> Vec<Check> {
+    let mut v = Vec::new();
+
+    // Gaming: gamemode + MangoHud are the `tezca game run` wrapper; gamescope is
+    // the escape hatch for problem titles (conf.d/gaming.conf).
+    for (bin, note) in [
+        ("gamemoderun", "gamemode — CPU governor / scheduler tweaks"),
+        ("mangohud", "MangoHud — in-game FPS/latency overlay"),
+        ("gamescope", "gamescope — nested compositor for problem titles"),
+    ] {
+        if which(bin) {
+            v.push(Check::pass(bin, note));
+        } else {
+            v.push(Check::warn(bin, format!("absent — install for `tezca game run` ({note})")));
+        }
+    }
+
+    // Current game-mode state (mirrors what the Waybar indicator reads).
+    match repo::config_home().map(|c| c.join("tezca").join("game.state")) {
+        Ok(p) => {
+            let on = fs::read_to_string(&p).map(|s| s.trim() == "on").unwrap_or(false);
+            v.push(Check::pass(
+                "game mode",
+                if on { "ON (low-latency profile active)" } else { "off" },
+            ));
+        }
+        Err(e) => v.push(Check::warn("game mode", e)),
+    }
+
+    // AI launchers: the Claude desktop app (SUPER+C) and Claude Code (SUPER+A /
+    // the AI scratchpad). Each degrades independently.
+    let claude_desktop = which("claude-desktop")
+        || dirs_have_desktop("com.anthropic.Claude.desktop");
+    if claude_desktop {
+        v.push(Check::pass("claude-desktop", "AI chat app (SUPER+C)"));
+    } else {
+        v.push(Check::warn("claude-desktop", "absent — SUPER+C won't launch the chat app"));
+    }
+    if which("claude") {
+        v.push(Check::pass("claude", "Claude Code — AI scratchpad (SUPER+A)"));
+    } else {
+        v.push(Check::warn("claude", "absent — the AI scratchpad terminal is empty"));
+    }
+
+    v
+}
+
+/// True if `<data>/applications/<file>` exists under any XDG data dir (or the
+/// standard fallbacks) — used to detect apps that ship a .desktop but whose
+/// exec isn't on PATH.
+fn dirs_have_desktop(file: &str) -> bool {
+    let mut roots: Vec<String> = Vec::new();
+    if let Some(x) = std::env::var_os("XDG_DATA_DIRS") {
+        roots.extend(x.to_string_lossy().split(':').map(str::to_string));
+    }
+    roots.push("/usr/share".into());
+    roots.push("/usr/local/share".into());
+    if let Some(h) = std::env::var_os("HOME") {
+        roots.push(format!("{}/.local/share", h.to_string_lossy()));
+    }
+    roots
+        .iter()
+        .any(|r| Path::new(r).join("applications").join(file).is_file())
 }
 
 fn which(bin: &str) -> bool {

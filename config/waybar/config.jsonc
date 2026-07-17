@@ -22,7 +22,7 @@
 
     "modules-left": ["hyprland/workspaces", "hyprland/submap", "hyprland/window"],
     "modules-center": ["clock"],
-    "modules-right": ["tray", "cpu", "memory", "network", "pulseaudio", "custom/notification", "custom/power"],
+    "modules-right": ["custom/gamemode", "tray", "cpu", "memory", "network", "pulseaudio", "custom/notification", "custom/power"],
 
     "hyprland/workspaces": {
         "all-outputs": false,
@@ -100,6 +100,15 @@
         "scroll-step": 5,
         "on-click": "pavucontrol",
         "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+    },
+
+    "custom/gamemode": {
+        "tooltip": true,
+        "interval": 2,
+        "return-type": "json",
+        "exec": "if grep -q on ~/.config/tezca/game.state 2>/dev/null; then printf '{\"text\":\"󰊴\",\"tooltip\":\"Game mode ON — click to toggle\",\"class\":\"active\"}'; else printf '{\"text\":\"\",\"tooltip\":\"\"}'; fi",
+        "on-click": "$HOME/.local/bin/tezca game toggle",
+        "escape": true
     },
 
     "custom/notification": {

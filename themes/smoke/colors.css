@@ -1,0 +1,21 @@
+/* Project:Tezca — smoke (curated) GTK color tokens.
+ *
+ * The soft LIGHT "smoking mirror" — pale smoke glass, deep jade accent, obsidian
+ * ink. Copied verbatim into ~/.config/tezca/current/colors.css by
+ * `tezca theme set smoke` — matugen is NOT involved, so this look is pinned
+ * exactly. Mirrors templates/colors.css token-for-token (see templates/README.md);
+ * the light counterpart of themes/obsidian/colors.css.
+ */
+
+@define-color tz_base        #F1F4F5;
+@define-color tz_surface     #E3E9EA;
+@define-color tz_text        #16191B;
+@define-color tz_subtext     #3A4145;
+@define-color tz_muted       #6C7479;
+@define-color tz_faint       #A6AEB2;
+@define-color tz_accent      #1F8A82;
+@define-color tz_accent_dim  #59B3AC;
+@define-color tz_on_accent   #FFFFFF;
+@define-color tz_gold        #9C7A22;
+@define-color tz_urgent      #C0392F;
+@define-color tz_on_urgent   #FFFFFF;

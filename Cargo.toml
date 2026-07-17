@@ -1,0 +1,20 @@
+# Tezca Rust workspace.
+# The `tezca` control CLI lives in crates/tezca-cli; `tezca-dock` (Phase 5)
+# will be added as a second member when it lands.
+[workspace]
+resolver = "2"
+members = ["crates/tezca-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["hivezga"]
+repository = "https://github.com/hivezga/tezca"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

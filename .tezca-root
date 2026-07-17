@@ -1,0 +1,4 @@
+# Marker file — do not remove.
+# `tezca` walks up the directory tree looking for this file to locate the
+# repository root (so `tezca link`/`doctor` work no matter where they're run).
+name = tezca

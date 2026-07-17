@@ -1,0 +1,16 @@
+# Rust
+/target
+**/target
+Cargo.lock.orig
+
+# tezca link backups (should never be committed)
+*.bak.*
+*.tezca-backup
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
+
+# (conf.d/local.conf ships as a tracked empty stub so Hyprland's `source`
+#  never errors on a fresh clone; edit it freely for machine-local tweaks.)

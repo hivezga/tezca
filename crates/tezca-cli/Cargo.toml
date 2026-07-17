@@ -1,0 +1,16 @@
+[package]
+name = "tezca-cli"
+description = "Control CLI for Project:Tezca — theming, session, gaming, and health checks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# One dependency-free binary to ship (see DESIGN.md §8). Std-only on purpose:
+# guaranteed offline build, tiny binary, no supply chain to audit.
+[[bin]]
+name = "tezca"
+path = "src/main.rs"
+
+[dependencies]

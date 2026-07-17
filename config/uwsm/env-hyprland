@@ -1,0 +1,12 @@
+# ~/.config/uwsm/env-hyprland — Hyprland / aquamarine-specific environment.
+#
+# Sourced by uwsm only for the Hyprland compositor (after `env`). Keep HYPR* and
+# AQ_* (aquamarine) vars here so they never leak into other Wayland sessions.
+
+# Hyprland cursor (hyprcursor). Matches XCURSOR_SIZE in env for consistency.
+export HYPRCURSOR_SIZE=24
+
+# Single-GPU machine, so AQ_DRM_DEVICES is intentionally unset (let aquamarine
+# auto-pick the NVIDIA node). If you ever add a second GPU and want to pin the
+# render node, set e.g.:
+#   export AQ_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0

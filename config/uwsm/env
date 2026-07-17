@@ -1,0 +1,40 @@
+# ~/.config/uwsm/env — general + toolkit + NVIDIA environment.
+#
+# uwsm sources this (POSIX shell) for the whole graphical session, BEFORE the
+# compositor starts. This is the correct place for GPU/toolkit vars — not
+# hyprland.conf. Hyprland/aquamarine-specific vars live in `env-hyprland`.
+#
+# Target: RTX 4070 Ti on nvidia-open. With a recent driver, explicit sync is
+# on and the old WLR_NO_HARDWARE_CURSORS / stutter hacks are NOT needed.
+# `tezca doctor` verifies the driver + modeset rather than cargo-culting.
+
+# --- NVIDIA ---------------------------------------------------------------
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+export LIBVA_DRIVER_NAME=nvidia
+export VDPAU_DRIVER=nvidia
+export NVD_BACKEND=direct          # nvidia VA-API (nvidia-vaapi-driver) direct backend
+export __GL_GSYNC_ALLOWED=1        # allow G-Sync / VRR
+export __GL_VRR_ALLOWED=1
+
+# GBM_BACKEND=nvidia-drm is the "correct" setting but has historically broken
+# HW-accel in some Electron/Firefox builds. Enabled here; if Brave/Antigravity/
+# Claude regress, comment it out (see DESIGN.md §15) and re-test.
+export GBM_BACKEND=nvidia-drm
+
+# --- Wayland toolkit backends ---------------------------------------------
+export GDK_BACKEND=wayland,x11
+export CLUTTER_BACKEND=wayland
+export SDL_VIDEODRIVER=wayland
+export MOZ_ENABLE_WAYLAND=1
+export ELECTRON_OZONE_PLATFORM_HINT=auto
+export QT_QPA_PLATFORM=wayland;xcb
+export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
+export QT_AUTO_SCREEN_SCALE_FACTOR=1
+export _JAVA_AWT_WM_NONREPARENTING=1
+
+# --- Cursor ---------------------------------------------------------------
+export XCURSOR_SIZE=24
+export XCURSOR_THEME=Adwaita
+
+# Note: uwsm manages XDG_CURRENT_DESKTOP / XDG_SESSION_DESKTOP itself — do not
+# set them here.

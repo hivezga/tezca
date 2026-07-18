@@ -183,10 +183,21 @@ A single ergonomic binary that *is* the DE's control surface. Rust workspace cra
 tezca theme list | names | set <name> | wallpaper <img> | reload
 tezca game on | off            # toggle gaming profile (blur off, tearing on, MangoHud)
 tezca dock ...                 # talk to tezca-dock
+tezca display list | set <name> … | reset | brightness <name>   # per-monitor mode/scale/pos + DDC brightness
+tezca wallpaper set <img> --monitor <name> | clear | apply      # per-monitor wallpaper overrides
+tezca hypr get | set <opt> <val>… | reset | list                # live Hyprland option tuning that persists
+tezca keybind list | rebind --line N … | restore                # inspect + rebind keybindings safely
 tezca settings [--page ...]    # open tezca-settings, the GUI control center
 tezca doctor                   # verify NVIDIA env, explicit sync, monitors, deps
 tezca install | link           # (bootstrap wraps this) symlink configs into place
 ```
+
+**Persistence model:** `hypr`/`display` write live tweaks to a delimited *managed
+block* in `conf.d/local.conf` (keyed per option, so re-setting replaces rather than
+appends), applied instantly via `hyprctl keyword` and surviving reload/relogin;
+`keybind` rewrites the matching line in `keybinds.conf` (with an `--expect` guard,
+conflict detection, and a backup for `restore`). Every write is fully reversible
+(`reset` / `restore`) — a bad mode never bricks the session.
 
 Why a CLI (not just scripts): type-safe config, one dependency-free binary to ship,
 testable, and it is the backend the GUI control-center calls. It orchestrates
@@ -194,8 +205,8 @@ matugen + symlinks + reload signals so theming is atomic and reversible.
 
 **Custom Rust core #2:** `tezca-dock` — the magnifying macOS dock (gtk4-rs).
 **Custom Rust core #3:** `tezca-settings` — the obsidian-glass GTK4 control center
-(Appearance/Keybinds/Gaming/System); shells out to `tezca` for every action, so the GUI
-and keyboard bindings drive identical code paths.
+(Appearance/Displays/Dock/Desktop/Keybinds/Gaming/System); shells out to `tezca` for
+every action, so the GUI and keyboard bindings drive identical code paths.
 
 ---
 

@@ -8,12 +8,18 @@
 //!   game    gaming profile toggle + launch wrapper (Phase 6)
 //!   install bootstrap guidance (delegates to install.sh)
 
+mod cmd_display;
 mod cmd_dock;
 mod cmd_doctor;
 mod cmd_game;
+mod cmd_hypr;
+mod cmd_keybind;
 mod cmd_link;
 mod cmd_settings;
 mod cmd_theme;
+mod cmd_wallpaper;
+mod hypr;
+mod managed;
 mod repo;
 mod term;
 
@@ -67,6 +73,22 @@ fn main() -> ExitCode {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_dock::run(&subargs) as u8)
         }
+        Some("display") | Some("monitor") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_display::run(&subargs) as u8)
+        }
+        Some("wallpaper") | Some("wall") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_wallpaper::run(&subargs) as u8)
+        }
+        Some("hypr") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_hypr::run(&subargs) as u8)
+        }
+        Some("keybind") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_keybind::run(&subargs) as u8)
+        }
         Some("game") => {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_game::run(&subargs) as u8)
@@ -105,7 +127,11 @@ fn print_help() {
         ("link", "symlink config/* into ~/.config (backs up existing)"),
         ("doctor", "verify NVIDIA env, modeset, monitors, and deps"),
         ("theme", "wallpaper-driven theming (list/set/wallpaper/reload)"),
-        ("dock", "control the magnifying dock (start/stop/restart/toggle)"),
+        ("dock", "control the magnifying dock (start/stop/restart/config/set)"),
+        ("display", "monitors: modes/scale + per-monitor brightness"),
+        ("wallpaper", "per-monitor wallpaper overrides (set/clear/apply)"),
+        ("hypr", "live+persisted Hyprland option tuning (get/set/reset)"),
+        ("keybind", "list + rebind keybindings (rebind/restore)"),
         ("game", "gaming profile: on/off/toggle/status/run"),
         ("settings", "open the GTK control center (tezca-settings)"),
         ("install", "bootstrap guidance (see install.sh)"),

@@ -54,7 +54,7 @@ PKGS_CORE=(hyprland uwsm hyprpolkitagent
 PKGS_AESTHETIC=(waybar swaync
                 hyprlock hypridle wlogout
                 hyprshot grim slurp swappy hyprpicker
-                gtk4 gtk4-layer-shell
+                gtk4 gtk4-layer-shell ddcutil
                 inter-font ttf-jetbrains-mono-nerd)
 
 # Phase 6 — gaming/AI workflow: the `tezca game run` wrapper (gamemode +

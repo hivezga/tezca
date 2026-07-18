@@ -34,6 +34,18 @@ pub fn root() -> Result<PathBuf, String> {
         }
     }
 
+    // 4. the pointer `tezca link` writes to ~/.config/tezca/repo — this is what
+    //    lets the installed binary (run from the GUI / keybinds, cwd anywhere)
+    //    still resolve the repo for `tezca theme`.
+    if let Ok(cfg) = config_home() {
+        if let Ok(s) = std::fs::read_to_string(cfg.join("tezca").join("repo")) {
+            let p = PathBuf::from(s.trim());
+            if p.join(MARKER).is_file() {
+                return Ok(p);
+            }
+        }
+    }
+
     Err(format!(
         "could not locate the Tezca repo (no {MARKER} found above the current \
          directory). Run from inside the repo or set $TEZCA_REPO."

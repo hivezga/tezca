@@ -110,3 +110,96 @@ pub fn run_script(name: &str, args: &[&str]) {
         spawn(p, args);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Structured helpers for the Displays / Dock / Desktop / Keybinds pages
+// ---------------------------------------------------------------------------
+
+/// Result of a `tezca` invocation we need to branch on (e.g. rebind conflicts).
+pub struct CmdResult {
+    pub code: i32,
+    pub stderr: String,
+}
+
+/// Run `tezca <args>` synchronously, returning its exit code + stderr.
+pub fn tezca_result(args: &[&str]) -> CmdResult {
+    match Command::new(tezca_bin()).args(args).output() {
+        Ok(o) => CmdResult {
+            code: o.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&o.stderr).trim().to_string(),
+        },
+        Err(e) => CmdResult { code: -1, stderr: e.to_string() },
+    }
+}
+
+/// One connected monitor, from `tezca display list --machine`.
+#[derive(Clone, Default)]
+pub struct Monitor {
+    pub name: String,
+    pub desc: String,
+    pub res: String,
+    pub rate: String,
+    pub pos: String,
+    pub scale: String,
+    pub modes: Vec<String>, // "3440x1440@165.00"
+}
+
+pub fn monitors() -> Vec<Monitor> {
+    let Some(out) = tezca_out(&["display", "list", "--machine"]) else {
+        return Vec::new();
+    };
+    let mut mons: Vec<Monitor> = Vec::new();
+    for line in out.lines() {
+        if let Some(name) = line.strip_prefix("@monitor ") {
+            mons.push(Monitor { name: name.trim().to_string(), ..Default::default() });
+            continue;
+        }
+        let Some(m) = mons.last_mut() else { continue };
+        let Some((k, v)) = line.split_once('=') else { continue };
+        match k {
+            "desc" => m.desc = v.to_string(),
+            "res" => m.res = v.to_string(),
+            "rate" => m.rate = v.to_string(),
+            "pos" => m.pos = v.to_string(),
+            "scale" => m.scale = v.to_string(),
+            "modes" => m.modes = v.split_whitespace().map(str::to_string).collect(),
+            _ => {}
+        }
+    }
+    mons
+}
+
+/// Per-monitor wallpaper targets: (name, is_override, path).
+pub fn wallpaper_targets() -> Vec<(String, bool, String)> {
+    let Some(out) = tezca_out(&["wallpaper", "list"]) else { return Vec::new() };
+    out.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let name = f.next()?.trim().to_string();
+            let source = f.next()?.trim();
+            let path = f.next().unwrap_or("").trim().to_string();
+            Some((name, source == "override", path))
+        })
+        .collect()
+}
+
+/// DDC/CI brightness (0-100) for a monitor, or None if not DDC-capable.
+pub fn brightness(name: &str) -> Option<i32> {
+    tezca_out(&["display", "brightness", name])?.trim().parse().ok()
+}
+
+/// The effective dock config as key→value strings (`tezca dock config`).
+pub fn dock_config() -> Vec<(String, String)> {
+    let Some(out) = tezca_out(&["dock", "config"]) else { return Vec::new() };
+    out.lines()
+        .filter_map(|l| {
+            let (k, v) = l.split_once('=')?;
+            Some((k.trim().to_string(), v.trim().to_string()))
+        })
+        .collect()
+}
+
+/// The current value of a Hyprland option (`tezca hypr get`).
+pub fn hypr_get(opt: &str) -> Option<String> {
+    tezca_out(&["hypr", "get", opt])
+}

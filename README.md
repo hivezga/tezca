@@ -85,9 +85,13 @@ The DE's control surface — a single dependency-free Rust binary.
 | `tezca link` | symlink `config/*` → `~/.config` (backs up existing; `--dry-run` previews) |
 | `tezca doctor` | verify NVIDIA env, modeset, monitors, dependencies, config validity |
 | `tezca theme list \| set <name> \| wallpaper <img> \| reload` | wallpaper-driven theming |
-| `tezca dock start \| stop \| restart \| toggle \| status` | control the magnifying dock |
+| `tezca dock start \| stop \| restart \| toggle \| config \| set` | control the magnifying dock |
+| `tezca display list \| set <name> … \| reset <name> \| brightness <name> [0-100]` | per-monitor mode/scale/position (live + persisted) + DDC/CI brightness |
+| `tezca wallpaper set <img> --monitor <name> \| clear \| list \| apply` | per-monitor wallpaper overrides (global image → `tezca theme`) |
+| `tezca hypr get \| set <opt> <val>… \| reset \| list` | live Hyprland option tuning that persists across reloads |
+| `tezca keybind list \| rebind --line N … \| restore` | inspect + rebind keybindings safely |
 | `tezca game on \| off \| toggle \| status \| run -- <cmd>` | gaming profile (tearing, blur off, MangoHud) |
-| `tezca settings` | open the GTK control center (themes · wallpaper · keybinds · gaming · session) |
+| `tezca settings` | open the GTK control center (themes · displays · wallpaper · desktop · keybinds · gaming · session) |
 
 ## Theming
 

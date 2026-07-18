@@ -412,6 +412,7 @@ fn dependency_checks() -> Vec<Check> {
         ("wlogout", false, &[]),           // Phase 4 power menu
         ("hyprpicker", false, &[]),        // color picker (SUPER+SHIFT+P)
         ("dolphin", false, &[]),           // file manager (SUPER+E)
+        ("ddcutil", false, &[]),           // Phase 9 external-monitor brightness (`tezca display brightness`)
     ];
 
     deps.iter()

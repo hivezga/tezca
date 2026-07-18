@@ -1,21 +1,30 @@
-//! The four control-center pages. Each returns a scrollable Widget; all real
-//! actions shell out through `backend`.
+//! The control-center pages. Every real action shells out through `backend` to
+//! the `tezca` CLI, so the GUI and the keyboard/CLI paths drive identical code.
+//!
+//! Convention across controls: set the widget's value FIRST, then connect its
+//! handler — so populating a control never fires an apply. Pages that can be
+//! "reset" (Desktop) rebuild their rows the same way, so no signal-blocking is
+//! needed anywhere.
 
 use crate::{backend, keybinds};
+use gtk4::gdk;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box, Button, ContentFit, FileDialog, FlowBox, Label, Orientation, Picture, PolicyType,
-    ScrolledWindow, SelectionMode, Switch, Widget,
+    Align, Box, Button, ContentFit, DropDown, Entry, EventControllerKey, FileDialog, FlowBox,
+    Label, Orientation, Picture, PolicyType, Scale, ScrolledWindow, SelectionMode, SpinButton,
+    Switch, Widget, Window,
 };
+use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
-// ---------------------------------------------------------------------------
-// Appearance — theme picker + wallpaper
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Appearance — theme + global (palette) wallpaper
+// ===========================================================================
 
-pub fn appearance(window: &gtk4::Window) -> Widget {
+pub fn appearance(window: &Window) -> Widget {
     let page = page_box();
 
     page.append(&section_header("Theme"));
@@ -103,52 +112,632 @@ pub fn appearance(window: &gtk4::Window) -> Widget {
     row.append(&next);
     page.append(&row);
     page.append(&hint(
-        "Any image becomes a full palette via matugen. Next / Previous walk your wallpaper folder (~/Pictures).",
+        "This wallpaper drives the whole palette (matugen). For a different picture per screen, use the Displays tab.",
     ));
 
     scrolled(&page)
 }
 
-// ---------------------------------------------------------------------------
-// Keybinds — cheat-sheet parsed from keybinds.conf
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Displays — mode / scale + brightness + per-monitor wallpaper
+// ===========================================================================
 
-pub fn keybinds() -> Widget {
+pub fn displays(window: &Window) -> Widget {
     let page = page_box();
-    let sections = keybinds::load();
-    if sections.is_empty() {
-        page.append(&hint("Could not read ~/.config/hypr/conf.d/keybinds.conf."));
+    let mons = backend::monitors();
+    if mons.is_empty() {
+        page.append(&hint("Could not read monitors (are you in a Hyprland session?)."));
+        return scrolled(&page);
     }
-    for sec in sections {
-        page.append(&section_header(&sec.title));
-        let list = Box::new(Orientation::Vertical, 0);
-        list.add_css_class("tz-keylist");
-        for (combo, desc) in sec.binds {
-            let row = Box::new(Orientation::Horizontal, 12);
-            row.add_css_class("tz-keyrow");
-            let k = Label::new(Some(&combo));
-            k.add_css_class("tz-key");
-            k.set_width_chars(22);
-            k.set_xalign(0.0);
-            k.set_halign(Align::Start);
-            let d = Label::new(Some(&strip_tag(&desc)));
-            d.set_hexpand(true);
-            d.set_xalign(0.0);
-            d.set_halign(Align::Start);
-            d.set_wrap(true);
-            d.set_max_width_chars(52);
-            row.append(&k);
-            row.append(&d);
-            list.append(&row);
+    let walls = backend::wallpaper_targets();
+
+    for m in &mons {
+        page.append(&section_header(&m.name));
+        page.append(&hint(&m.desc));
+
+        // --- Mode + scale ---------------------------------------------------
+        let mode_refs: Vec<&str> = m.modes.iter().map(String::as_str).collect();
+        let dd = DropDown::from_strings(&mode_refs);
+        let current = format!("{}@{}", m.res, m.rate);
+        if let Some(i) = m.modes.iter().position(|x| *x == current) {
+            dd.set_selected(i as u32);
         }
-        page.append(&list);
+        page.append(&control_row("Resolution & refresh", &dd));
+
+        let scale = SpinButton::with_range(0.5, 3.0, 0.05);
+        scale.set_digits(2);
+        scale.set_value(m.scale.parse().unwrap_or(1.0));
+        page.append(&control_row("Scale", &scale));
+
+        let apply = Button::with_label("Apply mode");
+        apply.add_css_class("tz-primary");
+        {
+            let name = m.name.clone();
+            let modes = m.modes.clone();
+            let dd = dd.clone();
+            let scale = scale.clone();
+            apply.connect_clicked(move |_| {
+                let idx = dd.selected() as usize;
+                let Some(mode) = modes.get(idx) else { return };
+                let sc = format!("{:.2}", scale.value());
+                backend::tezca(&["display", "set", &name, "--mode", mode, "--scale", &sc]);
+            });
+        }
+        let apply_row = Box::new(Orientation::Horizontal, 8);
+        apply_row.set_halign(Align::End);
+        apply_row.append(&apply);
+        page.append(&apply_row);
+
+        // --- Brightness (DDC/CI) -------------------------------------------
+        match backend::brightness(&m.name) {
+            Some(cur) => {
+                let sl = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+                sl.set_hexpand(true);
+                sl.set_draw_value(true);
+                sl.set_value(cur as f64);
+                debounce_scale(&sl, 300, {
+                    let name = m.name.clone();
+                    move |v| backend::tezca(&["display", "brightness", &name, &(v as i32).to_string()])
+                });
+                page.append(&control_row("Brightness", &sl));
+            }
+            None => {
+                page.append(&hint("Brightness: no DDC/CI channel (install ddcutil / not supported)."));
+            }
+        }
+
+        // --- Per-monitor wallpaper -----------------------------------------
+        let (is_override, cur_path) = walls
+            .iter()
+            .find(|(n, _, _)| *n == m.name)
+            .map(|(_, ovr, p)| (*ovr, p.clone()))
+            .unwrap_or((false, String::new()));
+
+        let wp = Picture::new();
+        wp.add_css_class("tz-wallpreview");
+        wp.set_size_request(300, 120);
+        wp.set_content_fit(ContentFit::Cover);
+        wp.set_halign(Align::Start);
+        if !cur_path.is_empty() {
+            wp.set_filename(Some(&cur_path));
+        }
+        page.append(&wp);
+
+        let wrow = Box::new(Orientation::Horizontal, 8);
+        let setw = Button::with_label("Set image…");
+        {
+            let win = window.clone();
+            let name = m.name.clone();
+            let wp = wp.clone();
+            setw.connect_clicked(move |_| {
+                let dialog = FileDialog::builder().title("Wallpaper for this monitor").build();
+                let name = name.clone();
+                let wp = wp.clone();
+                dialog.open(Some(&win), gio::Cancellable::NONE, move |res| {
+                    if let Ok(file) = res {
+                        if let Some(path) = file.path() {
+                            if let Some(s) = path.to_str() {
+                                backend::tezca(&["wallpaper", "set", s, "--monitor", &name]);
+                                wp.set_filename(Some(&path));
+                            }
+                        }
+                    }
+                });
+            });
+        }
+        let resetw = Button::with_label("Reset to theme");
+        {
+            let name = m.name.clone();
+            resetw.connect_clicked(move |_| {
+                backend::tezca(&["wallpaper", "clear", "--monitor", &name]);
+            });
+        }
+        if !is_override {
+            resetw.set_sensitive(false);
+        }
+        wrow.append(&setw);
+        wrow.append(&resetw);
+        page.append(&wrow);
     }
     scrolled(&page)
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Dock — geometry + pinned favourites
+// ===========================================================================
+
+pub fn dock() -> Widget {
+    let page = page_box();
+    let cfg = backend::dock_config();
+    let get = |k: &str| cfg.iter().find(|(kk, _)| kk == k).map(|(_, v)| v.clone());
+
+    page.append(&section_header("Feel"));
+
+    let icon = spin_from("icon_size", 16.0, 128.0, 1.0, 0, &get);
+    let scale = spin_from("max_scale", 1.0, 3.0, 0.1, 1, &get);
+    let infl = spin_from("influence", 40.0, 260.0, 5.0, 0, &get);
+    let gap = spin_from("gap", 0.0, 40.0, 1.0, 0, &get);
+    let margin = spin_from("margin_bottom", 0.0, 40.0, 1.0, 0, &get);
+    let delay = spin_from("hide_delay_ms", 0.0, 1200.0, 50.0, 0, &get);
+
+    page.append(&control_row("Icon size", &icon));
+    page.append(&control_row("Magnification", &scale));
+    page.append(&control_row("Magnify radius", &infl));
+    page.append(&control_row("Icon gap", &gap));
+    page.append(&control_row("Bottom margin", &margin));
+    page.append(&control_row("Autohide delay (ms)", &delay));
+
+    let apply = Button::with_label("Apply dock geometry");
+    apply.add_css_class("tz-primary");
+    {
+        let (icon, scale, infl, gap, margin, delay) =
+            (icon.clone(), scale.clone(), infl.clone(), gap.clone(), margin.clone(), delay.clone());
+        apply.connect_clicked(move |_| {
+            let icon_s = (icon.value() as i64).to_string();
+            let scale_s = format!("{:.1}", scale.value());
+            let infl_s = (infl.value() as i64).to_string();
+            let gap_s = (gap.value() as i64).to_string();
+            let margin_s = (margin.value() as i64).to_string();
+            let delay_s = (delay.value() as i64).to_string();
+            backend::tezca(&[
+                "dock", "set",
+                "icon_size", &icon_s,
+                "max_scale", &scale_s,
+                "influence", &infl_s,
+                "gap", &gap_s,
+                "margin_bottom", &margin_s,
+                "hide_delay_ms", &delay_s,
+            ]);
+        });
+    }
+    let arow = Box::new(Orientation::Horizontal, 8);
+    arow.set_halign(Align::End);
+    arow.append(&apply);
+    page.append(&arow);
+    page.append(&hint("Applying restarts the dock (seamless — it's autohidden)."));
+
+    // --- Pinned favourites -------------------------------------------------
+    page.append(&section_header("Pinned favourites"));
+    let pinned: Vec<String> = get("pinned")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let state = Rc::new(RefCell::new(pinned));
+
+    let list = Box::new(Orientation::Vertical, 4);
+    list.add_css_class("tz-pinlist");
+    page.append(&list);
+    rebuild_pinned(&list, &state);
+
+    let addrow = Box::new(Orientation::Horizontal, 8);
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("app id or window class (e.g. org.kde.dolphin)"));
+    entry.set_hexpand(true);
+    let add = Button::with_label("Add");
+    add.add_css_class("tz-primary");
+    {
+        let state = state.clone();
+        let list = list.clone();
+        let entry2 = entry.clone();
+        let doit = move || {
+            let t = entry2.text().trim().to_string();
+            if t.is_empty() {
+                return;
+            }
+            state.borrow_mut().push(t);
+            entry2.set_text("");
+            rebuild_pinned(&list, &state);
+            save_pinned(&state);
+        };
+        let d2 = doit.clone();
+        add.connect_clicked(move |_| d2());
+        entry.connect_activate(move |_| doit());
+    }
+    addrow.append(&entry);
+    addrow.append(&add);
+    page.append(&addrow);
+    page.append(&hint("Drag order isn't here yet — use the arrows. Click an icon in the dock to launch or focus it."));
+
+    scrolled(&page)
+}
+
+fn rebuild_pinned(list: &Box, state: &Rc<RefCell<Vec<String>>>) {
+    while let Some(c) = list.first_child() {
+        list.remove(&c);
+    }
+    let items = state.borrow().clone();
+    let n = items.len();
+    for (i, app) in items.into_iter().enumerate() {
+        let row = Box::new(Orientation::Horizontal, 8);
+        row.add_css_class("tz-pinrow");
+        let name = Label::new(Some(&app));
+        name.set_halign(Align::Start);
+        name.set_hexpand(true);
+        name.set_xalign(0.0);
+        row.append(&name);
+
+        let up = small_btn("↑");
+        up.set_sensitive(i > 0);
+        let down = small_btn("↓");
+        down.set_sensitive(i + 1 < n);
+        let rm = small_btn("✕");
+        rm.add_css_class("tz-danger");
+
+        {
+            let (s, l) = (state.clone(), list.clone());
+            up.connect_clicked(move |_| {
+                s.borrow_mut().swap(i, i - 1);
+                rebuild_pinned(&l, &s);
+                save_pinned(&s);
+            });
+        }
+        {
+            let (s, l) = (state.clone(), list.clone());
+            down.connect_clicked(move |_| {
+                s.borrow_mut().swap(i, i + 1);
+                rebuild_pinned(&l, &s);
+                save_pinned(&s);
+            });
+        }
+        {
+            let (s, l) = (state.clone(), list.clone());
+            rm.connect_clicked(move |_| {
+                s.borrow_mut().remove(i);
+                rebuild_pinned(&l, &s);
+                save_pinned(&s);
+            });
+        }
+        row.append(&up);
+        row.append(&down);
+        row.append(&rm);
+        list.append(&row);
+    }
+}
+
+fn save_pinned(state: &Rc<RefCell<Vec<String>>>) {
+    let csv = state.borrow().join(",");
+    backend::tezca(&["dock", "set", "pinned", &csv]);
+}
+
+// ===========================================================================
+// Desktop — live Hyprland look & feel (persisted)
+// ===========================================================================
+
+pub fn desktop() -> Widget {
+    let page = page_box();
+    page.append(&section_header("Look & feel"));
+    let container = Box::new(Orientation::Vertical, 0);
+    populate_desktop(&container);
+    page.append(&container);
+
+    page.append(&section_header("Reset"));
+    let reset = Button::with_label("Reset to Tezca defaults");
+    reset.add_css_class("tz-action");
+    {
+        let c = container.clone();
+        reset.connect_clicked(move |_| {
+            // Synchronous so the reload lands before we re-read the values.
+            let _ = backend::tezca_result(&["hypr", "reset"]);
+            while let Some(child) = c.first_child() {
+                c.remove(&child);
+            }
+            populate_desktop(&c);
+        });
+    }
+    page.append(&reset);
+    page.append(&hint("Changes apply instantly and persist across reload/relogin (conf.d/local.conf). Reset clears them."));
+
+    scrolled(&page)
+}
+
+fn populate_desktop(c: &Box) {
+    c.append(&control_row("Inner gaps", &spin_opt("general:gaps_in", 0.0, 40.0, 1.0, 0)));
+    c.append(&control_row("Outer gaps", &spin_opt("general:gaps_out", 0.0, 60.0, 1.0, 0)));
+    c.append(&control_row("Border size", &spin_opt("general:border_size", 0.0, 8.0, 1.0, 0)));
+    c.append(&control_row("Corner rounding", &spin_opt("decoration:rounding", 0.0, 24.0, 1.0, 0)));
+
+    c.append(&control_row("Active opacity", &opacity_opt("decoration:active_opacity")));
+    c.append(&control_row("Inactive opacity", &opacity_opt("decoration:inactive_opacity")));
+
+    c.append(&control_row("Blur", &switch_opt("decoration:blur:enabled")));
+    c.append(&control_row("Blur size", &spin_opt("decoration:blur:size", 1.0, 20.0, 1.0, 0)));
+    c.append(&control_row("Blur passes", &spin_opt("decoration:blur:passes", 1.0, 5.0, 1.0, 0)));
+    c.append(&control_row("Shadows", &switch_opt("decoration:shadow:enabled")));
+    c.append(&control_row("Animations", &switch_opt("animations:enabled")));
+
+    let vrr = DropDown::from_strings(&["Off", "Always on", "Fullscreen only"]);
+    let cur = backend::hypr_get("misc:vrr").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    vrr.set_selected(cur.min(2));
+    vrr.connect_selected_notify(|d| {
+        backend::tezca(&["hypr", "set", "misc:vrr", &d.selected().to_string()]);
+    });
+    c.append(&control_row("Adaptive sync (VRR)", &vrr));
+}
+
+/// An integer SpinButton bound to a Hyprland option (get on build, set on change).
+fn spin_opt(opt: &'static str, min: f64, max: f64, step: f64, digits: u32) -> SpinButton {
+    let s = SpinButton::with_range(min, max, step);
+    s.set_digits(digits);
+    if let Some(v) = backend::hypr_get(opt).and_then(|x| x.parse::<f64>().ok()) {
+        s.set_value(v);
+    }
+    s.connect_value_changed(move |s| {
+        backend::tezca(&["hypr", "set", opt, &(s.value() as i64).to_string()]);
+    });
+    s
+}
+
+/// A 0–1 opacity Scale bound to a float option, debounced.
+fn opacity_opt(opt: &'static str) -> Scale {
+    let s = Scale::with_range(Orientation::Horizontal, 0.3, 1.0, 0.01);
+    s.set_hexpand(true);
+    s.set_draw_value(true);
+    if let Some(v) = backend::hypr_get(opt).and_then(|x| x.parse::<f64>().ok()) {
+        s.set_value(v);
+    }
+    debounce_scale(&s, 200, move |v| {
+        backend::tezca(&["hypr", "set", opt, &format!("{v:.2}")]);
+    });
+    s
+}
+
+/// A boolean Switch bound to a Hyprland option.
+fn switch_opt(opt: &'static str) -> Switch {
+    let sw = Switch::new();
+    sw.set_valign(Align::Center);
+    let on = backend::hypr_get(opt).map(|v| v == "1" || v == "true").unwrap_or(false);
+    sw.set_active(on);
+    sw.connect_state_set(move |_, on| {
+        backend::tezca(&["hypr", "set", opt, if on { "true" } else { "false" }]);
+        glib::Propagation::Proceed
+    });
+    sw
+}
+
+/// A dock-config SpinButton seeded from `tezca dock config`.
+fn spin_from(
+    key: &str,
+    min: f64,
+    max: f64,
+    step: f64,
+    digits: u32,
+    get: &dyn Fn(&str) -> Option<String>,
+) -> SpinButton {
+    let s = SpinButton::with_range(min, max, step);
+    s.set_digits(digits);
+    if let Some(v) = get(key).and_then(|x| x.parse::<f64>().ok()) {
+        s.set_value(v);
+    }
+    s
+}
+
+// ===========================================================================
+// Keybinds — editable, with search + conflict-aware rebinding
+// ===========================================================================
+
+pub fn keybinds(window: &Window) -> Widget {
+    let page = page_box();
+
+    let search = Entry::new();
+    search.set_placeholder_text(Some("Search keybindings…"));
+    search.add_css_class("tz-search");
+    page.append(&search);
+
+    let list = Box::new(Orientation::Vertical, 0);
+    page.append(&list);
+
+    let rebuild: Rc<dyn Fn()> = {
+        let list = list.clone();
+        let search = search.clone();
+        let window = window.clone();
+        Rc::new(move || {
+            populate_keybinds(&list, &window, &search.text().to_lowercase());
+        })
+    };
+    // Bind the rebuild to the search box, then do the first population.
+    {
+        let rebuild = rebuild.clone();
+        search.connect_changed(move |_| rebuild());
+    }
+    populate_keybinds(&list, window, "");
+
+    scrolled(&page)
+}
+
+fn populate_keybinds(list: &Box, window: &Window, filter: &str) {
+    while let Some(c) = list.first_child() {
+        list.remove(&c);
+    }
+    let sections = keybinds::load();
+    if sections.is_empty() {
+        let l = hint("Could not read keybinds.conf.");
+        list.append(&l);
+        return;
+    }
+    let rebuild: Rc<dyn Fn()> = {
+        let list = list.clone();
+        let window = window.clone();
+        let filter = filter.to_string();
+        Rc::new(move || populate_keybinds(&list, &window, &filter))
+    };
+
+    for sec in sections {
+        let matching: Vec<_> = sec
+            .binds
+            .into_iter()
+            .filter(|b| {
+                filter.is_empty()
+                    || b.desc.to_lowercase().contains(filter)
+                    || b.combo().to_lowercase().contains(filter)
+            })
+            .collect();
+        if matching.is_empty() {
+            continue;
+        }
+        list.append(&section_header(&sec.title));
+        let box_ = Box::new(Orientation::Vertical, 0);
+        box_.add_css_class("tz-keylist");
+        for b in matching {
+            box_.append(&keybind_row(window, &b, rebuild.clone()));
+        }
+        list.append(&box_);
+    }
+}
+
+fn keybind_row(window: &Window, b: &keybinds::Bind, on_done: Rc<dyn Fn()>) -> Box {
+    let row = Box::new(Orientation::Horizontal, 12);
+    row.add_css_class("tz-keyrow");
+
+    let combo = Label::new(Some(&b.combo()));
+    combo.add_css_class("tz-key");
+    combo.set_width_chars(22);
+    combo.set_xalign(0.0);
+    combo.set_halign(Align::Start);
+
+    let desc = Label::new(Some(&strip_tag(&b.desc)));
+    desc.set_hexpand(true);
+    desc.set_xalign(0.0);
+    desc.set_halign(Align::Start);
+    desc.set_wrap(true);
+    desc.set_max_width_chars(46);
+
+    let rebind = small_btn("Rebind");
+    rebind.add_css_class("tz-rebind");
+    {
+        let window = window.clone();
+        let b = b.clone();
+        let on_done = on_done.clone();
+        rebind.connect_clicked(move |_| capture_rebind(&window, &b, on_done.clone()));
+    }
+
+    row.append(&combo);
+    row.append(&desc);
+    row.append(&rebind);
+    row
+}
+
+/// Modal "press a shortcut" capture → `tezca keybind rebind`. Handles conflicts
+/// (exit 2) inline; on success closes and reloads the list.
+fn capture_rebind(parent: &Window, b: &keybinds::Bind, on_done: Rc<dyn Fn()>) {
+    let dialog = Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .title("Rebind")
+        .default_width(380)
+        .default_height(150)
+        .build();
+    dialog.add_css_class("tz-capture");
+
+    let v = Box::new(Orientation::Vertical, 10);
+    v.set_margin_top(20);
+    v.set_margin_bottom(20);
+    v.set_margin_start(22);
+    v.set_margin_end(22);
+
+    let title = Label::new(Some(&format!("New shortcut for “{}”", strip_tag(&b.desc))));
+    title.add_css_class("tz-h2");
+    title.set_wrap(true);
+    let prompt = Label::new(Some(&format!("Currently {}. Press a new combination…", b.combo())));
+    prompt.add_css_class("tz-hint");
+    prompt.set_wrap(true);
+    let status = Label::new(Some("Esc to cancel"));
+    status.add_css_class("tz-hint");
+    v.append(&title);
+    v.append(&prompt);
+    v.append(&status);
+    dialog.set_child(Some(&v));
+
+    let keyctl = EventControllerKey::new();
+    {
+        let dialog = dialog.clone();
+        let b = b.clone();
+        let on_done = on_done.clone();
+        let status = status.clone();
+        keyctl.connect_key_pressed(move |_, keyval, _code, state| {
+            if keyval == gdk::Key::Escape {
+                dialog.close();
+                return glib::Propagation::Stop;
+            }
+            if is_modifier(keyval) {
+                return glib::Propagation::Proceed; // wait for the real key
+            }
+            let Some((mods, key)) = combo_from_event(keyval, state) else {
+                return glib::Propagation::Stop;
+            };
+            let line = b.line.to_string();
+            let res = backend::tezca_result(&[
+                "keybind", "rebind",
+                "--line", &line,
+                "--expect-mods", &b.mods,
+                "--expect-key", &b.key,
+                "--mods", &mods,
+                "--key", &key,
+            ]);
+            match res.code {
+                0 => {
+                    dialog.close();
+                    on_done();
+                }
+                2 => {
+                    let msg = res.stderr.trim_start_matches("conflict:").trim();
+                    status.set_text(&format!("⚠ {msg} — try another"));
+                    status.remove_css_class("tz-hint");
+                    status.add_css_class("tz-warn");
+                }
+                _ => {
+                    status.set_text(&format!("Error: {}", res.stderr));
+                    status.add_css_class("tz-warn");
+                }
+            }
+            glib::Propagation::Stop
+        });
+    }
+    dialog.add_controller(keyctl);
+    dialog.present();
+}
+
+/// Build a Hyprland combo (mods string, key name) from a GDK key event.
+fn combo_from_event(keyval: gdk::Key, state: gdk::ModifierType) -> Option<(String, String)> {
+    let mut mods = Vec::new();
+    if state.contains(gdk::ModifierType::SUPER_MASK) {
+        mods.push("SUPER");
+    }
+    if state.contains(gdk::ModifierType::CONTROL_MASK) {
+        mods.push("CTRL");
+    }
+    if state.contains(gdk::ModifierType::ALT_MASK) {
+        mods.push("ALT");
+    }
+    if state.contains(gdk::ModifierType::SHIFT_MASK) {
+        mods.push("SHIFT");
+    }
+    let key = keyval.name()?.to_string();
+    Some((mods.join(" "), key))
+}
+
+fn is_modifier(k: gdk::Key) -> bool {
+    matches!(
+        k,
+        gdk::Key::Shift_L
+            | gdk::Key::Shift_R
+            | gdk::Key::Control_L
+            | gdk::Key::Control_R
+            | gdk::Key::Alt_L
+            | gdk::Key::Alt_R
+            | gdk::Key::Super_L
+            | gdk::Key::Super_R
+            | gdk::Key::Meta_L
+            | gdk::Key::Meta_R
+            | gdk::Key::ISO_Level3_Shift
+            | gdk::Key::Caps_Lock
+    )
+}
+
+// ===========================================================================
 // Gaming — profile toggle + detected tools
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 pub fn gaming() -> Widget {
     let page = page_box();
@@ -174,8 +763,6 @@ pub fn gaming() -> Widget {
     ));
 
     page.append(&section_header("Tools"));
-    // (label, binary-to-probe, description) — note the gamemode package ships
-    // `gamemoderun`, not a bare `gamemode`.
     for (label, bin, desc) in [
         ("gamemode", "gamemoderun", "gamemoderun — CPU governor + process priorities"),
         ("mangohud", "mangohud", "MangoHud — in-game FPS / frametime overlay"),
@@ -186,9 +773,9 @@ pub fn gaming() -> Widget {
     scrolled(&page)
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // System — session actions + info
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 pub fn system() -> Widget {
     let page = page_box();
@@ -225,8 +812,6 @@ pub fn system() -> Widget {
     ));
 
     page.append(&section_header("This session"));
-    // First line is "Hyprland 0.55.4 built from …" — keep just "Hyprland 0.55.4"
-    // so the full commit blurb doesn't stretch the window.
     let compositor = backend::output("hyprctl", &["version"])
         .and_then(|s| s.lines().next().map(str::to_string))
         .map(|l| {
@@ -238,8 +823,6 @@ pub fn system() -> Widget {
             }
         })
         .unwrap_or_else(|| "Hyprland".to_string());
-    // Count monitor blocks by their header line (the -j output repeats "id" in
-    // nested workspace objects, which would over-count).
     let monitors = backend::output("hyprctl", &["monitors"])
         .map(|s| s.lines().filter(|l| l.starts_with("Monitor ")).count())
         .unwrap_or(0);
@@ -251,9 +834,9 @@ pub fn system() -> Widget {
     scrolled(&page)
 }
 
-// ---------------------------------------------------------------------------
-// Small widget helpers
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Shared widget helpers
+// ===========================================================================
 
 fn page_box() -> Box {
     let b = Box::new(Orientation::Vertical, 8);
@@ -287,6 +870,25 @@ fn action(label: &str) -> Button {
     let b = Button::with_label(label);
     b.add_css_class("tz-action");
     b
+}
+
+fn small_btn(label: &str) -> Button {
+    let b = Button::with_label(label);
+    b.add_css_class("tz-small");
+    b
+}
+
+/// A label on the left, a control pushed to the right — the standard settings row.
+fn control_row(label: &str, control: &impl IsA<Widget>) -> Box {
+    let row = Box::new(Orientation::Horizontal, 12);
+    row.add_css_class("tz-ctlrow");
+    let l = Label::new(Some(label));
+    l.set_halign(Align::Start);
+    l.set_hexpand(true);
+    l.set_xalign(0.0);
+    row.append(&l);
+    row.append(control);
+    row
 }
 
 fn status_row(name: &str, ok: bool, desc: &str) -> Widget {
@@ -330,6 +932,26 @@ fn scrolled(child: &Box) -> Widget {
     s.set_vexpand(true);
     s.set_child(Some(child));
     s.upcast()
+}
+
+/// Apply a Scale's value `ms` after the user stops dragging (coalesces the
+/// stream of value-changed events so slow backends like ddcutil aren't hammered).
+fn debounce_scale<F: Fn(f64) + 'static>(scale: &Scale, ms: u64, f: F) {
+    let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let f = Rc::new(f);
+    scale.connect_value_changed(move |s| {
+        if let Some(id) = pending.borrow_mut().take() {
+            id.remove();
+        }
+        let v = s.value();
+        let f = f.clone();
+        let pending2 = pending.clone();
+        let id = glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            *pending2.borrow_mut() = None;
+            f(v);
+        });
+        *pending.borrow_mut() = Some(id);
+    });
 }
 
 fn capitalize(s: &str) -> String {

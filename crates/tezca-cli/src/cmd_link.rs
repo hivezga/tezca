@@ -37,6 +37,14 @@ pub fn run(opts: Opts) -> Result<(), String> {
     if !opts.dry_run {
         fs::create_dir_all(&cfg)
             .map_err(|e| format!("cannot create {}: {e}", cfg.display()))?;
+        // Drop a repo pointer so `tezca theme …` works from ANY cwd (the GUI and
+        // keybinds run the installed ~/.local/bin/tezca, whose exe dir is not
+        // under the repo, so the .tezca-root walk-up can't find it). link() runs
+        // from inside the repo, so root is known here. See repo::root().
+        let tezca_dir = cfg.join("tezca");
+        if fs::create_dir_all(&tezca_dir).is_ok() {
+            let _ = fs::write(tezca_dir.join("repo"), format!("{}\n", root.display()));
+        }
     }
 
     let mut entries: Vec<PathBuf> = fs::read_dir(&src_dir)

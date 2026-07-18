@@ -278,6 +278,9 @@ fn finalize(
         if let Some(wp) = wallpaper {
             if wp.is_file() {
                 set_wallpaper(wp);
+                // Re-apply per-monitor overrides on top of the fresh global
+                // image so a monitor keeps its own picture across theme switches.
+                crate::cmd_wallpaper::apply_overrides();
             } else if opts.announce {
                 println!(
                     "  {} wallpaper not found: {}",

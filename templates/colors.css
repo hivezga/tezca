@@ -7,7 +7,9 @@
  * so a single wallpaper swap re-skins the whole desktop.
  *
  * The `obsidian` curated theme ships a hand-tuned copy of this file; keep the
- * token names in sync across templates/ and themes/*.
+ * token names in sync across templates/ and each curated theme under themes/.
+ * (Avoid a literal slash-star pair anywhere in this comment — GTK CSS has no
+ * nested comments, and Waybar/swaync/Walker abort CSS load on one.)
  *
  *   dynamic role            → Material-You color         obsidian literal
  *   tz_base    background     surface_container_lowest    #0B0E0F

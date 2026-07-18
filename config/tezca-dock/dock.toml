@@ -12,7 +12,7 @@
 # running one gets a turquoise indicator dot, and any running app that isn't
 # pinned appears after a divider. Click launches (if not running) or focuses /
 # cycles the app's windows.
-pinned = ["kitty", "firefox", "brave-origin", "obsidian", "org.kde.dolphin"]
+pinned = ["kitty", "brave-origin", "obsidian", "org.kde.dolphin"]
 
 # --- Geometry & feel -------------------------------------------------------
 icon_size     = 48     # base (unmagnified) icon edge, px

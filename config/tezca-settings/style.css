@@ -182,3 +182,161 @@ switch:checked {
     color: @tz_subtext;
     font-size: 10pt;
 }
+
+/* --- Icon sidebar ------------------------------------------------------- */
+.tz-nav {
+    background-color: alpha(@tz_surface, 0.30);
+    padding: 8px;
+}
+.tz-nav > row.tz-navrow {
+    border-radius: 10px;
+    padding: 9px 12px;
+    margin: 2px 4px;
+    color: @tz_subtext;
+    font-weight: 600;
+}
+.tz-nav > row.tz-navrow:hover {
+    background-color: alpha(@tz_muted, 0.14);
+    color: @tz_text;
+}
+.tz-nav > row.tz-navrow:selected {
+    background-color: alpha(@tz_accent, 0.18);
+    color: @tz_text;
+    box-shadow: inset 3px 0 0 0 @tz_accent;
+}
+.tz-navicon {
+    color: @tz_accent;
+    -gtk-icon-size: 18px;
+    min-width: 20px;
+}
+.tz-nav > row.tz-navrow:selected .tz-navicon {
+    color: @tz_accent;
+}
+
+/* --- Control rows (Displays / Dock / Desktop) --------------------------- */
+.tz-ctlrow {
+    padding: 6px 2px;
+    min-height: 34px;
+}
+.tz-ctlrow > label {
+    font-size: 10.5pt;
+    color: @tz_text;
+}
+
+/* Spin buttons + dropdowns as obsidian-glass pills. */
+spinbutton,
+dropdown {
+    background-color: alpha(@tz_surface, 0.85);
+    color: @tz_text;
+    border: 1px solid alpha(@tz_muted, 0.22);
+    border-radius: 9px;
+    min-height: 30px;
+}
+spinbutton entry {
+    background: transparent;
+    color: @tz_text;
+    border: none;
+    min-width: 56px;
+}
+spinbutton button,
+dropdown button {
+    background: transparent;
+    border: none;
+    color: @tz_subtext;
+}
+spinbutton button:hover,
+dropdown button:hover {
+    background-color: alpha(@tz_accent, 0.18);
+    color: @tz_text;
+}
+dropdown {
+    padding: 2px 6px;
+}
+dropdown:hover {
+    border-color: alpha(@tz_accent, 0.5);
+}
+
+/* Sliders — turquoise fill + handle. */
+scale {
+    min-width: 200px;
+}
+scale trough {
+    background-color: alpha(@tz_muted, 0.20);
+    border-radius: 6px;
+    min-height: 6px;
+}
+scale highlight {
+    background-color: @tz_accent;
+    border-radius: 6px;
+}
+scale slider {
+    background-color: @tz_text;
+    border-radius: 50%;
+    min-width: 16px;
+    min-height: 16px;
+    box-shadow: 0 1px 3px alpha(#000000, 0.4);
+}
+scale value {
+    color: @tz_subtext;
+    font-size: 9pt;
+}
+
+/* --- Small buttons (pinned reorder, rebind) ----------------------------- */
+button.tz-small {
+    min-width: 32px;
+    min-height: 28px;
+    padding: 2px 10px;
+    font-size: 9.5pt;
+}
+button.tz-danger:hover {
+    background-color: alpha(@tz_urgent, 0.20);
+    border-color: alpha(@tz_urgent, 0.5);
+    color: @tz_text;
+}
+button.tz-rebind {
+    padding: 3px 14px;
+    font-size: 9pt;
+    color: @tz_accent;
+}
+button.tz-rebind:hover {
+    background-color: alpha(@tz_accent, 0.18);
+    color: @tz_text;
+}
+
+/* --- Pinned favourites list --------------------------------------------- */
+.tz-pinlist {
+    background-color: alpha(@tz_surface, 0.35);
+    border-radius: 12px;
+    padding: 6px 10px;
+    margin: 4px 0 8px 0;
+}
+.tz-pinrow {
+    padding: 4px 4px;
+}
+.tz-pinrow > label {
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 10pt;
+    color: @tz_subtext;
+}
+
+/* --- Search + rebind capture dialog ------------------------------------- */
+entry.tz-search {
+    background-color: alpha(@tz_surface, 0.80);
+    color: @tz_text;
+    border: 1px solid alpha(@tz_muted, 0.22);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+}
+entry.tz-search:focus {
+    border-color: alpha(@tz_accent, 0.6);
+}
+window.tz-capture {
+    background-color: alpha(@tz_base, 0.96);
+    color: @tz_text;
+}
+.tz-warn {
+    color: @tz_urgent;
+    font-weight: 600;
+    font-size: 10pt;
+}

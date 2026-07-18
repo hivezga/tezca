@@ -39,6 +39,8 @@ pub fn run(args: &[&str]) -> i32 {
     let mut it = args.iter().copied();
     let r = match it.next() {
         None | Some("list") | Some("ls") => cmd_list(),
+        // Machine-readable name list (one per line) for scripts + tezca-settings.
+        Some("names") => cmd_names(),
         Some("set") => match it.next() {
             Some(name) => cmd_set(name),
             None => Err("usage: tezca theme set <name>".into()),
@@ -122,6 +124,15 @@ fn cmd_list() -> Result<(), String> {
         }
     }
     println!();
+    Ok(())
+}
+
+/// Bare curated-theme names, one per line. Consumed by scripts/theme-select.sh
+/// and the tezca-settings Appearance tab — no decoration, no ANSI.
+fn cmd_names() -> Result<(), String> {
+    for (name, _desc) in curated_themes()? {
+        println!("{name}");
+    }
     Ok(())
 }
 

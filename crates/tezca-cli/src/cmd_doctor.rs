@@ -407,8 +407,11 @@ fn dependency_checks() -> Vec<Check> {
         ("hyprlock", false, &[]),
         ("hypridle", false, &[]),
         ("tezca-dock", false, &[]),        // Phase 5 bespoke dock (build via install.sh)
+        ("tezca-settings", false, &[]),    // Phase 8 control center (build via install.sh)
         ("nwg-dock-hyprland", false, &[]), // Phase 4 dock (fallback for tezca-dock)
         ("wlogout", false, &[]),           // Phase 4 power menu
+        ("hyprpicker", false, &[]),        // color picker (SUPER+SHIFT+P)
+        ("dolphin", false, &[]),           // file manager (SUPER+E)
     ];
 
     deps.iter()

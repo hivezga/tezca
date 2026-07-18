@@ -1,0 +1,21 @@
+# tezca-settings — the GTK4 control center (Phase 8).
+#
+# The DESIGN.md §8 "future GUI control-center" — a real obsidian-glass window to
+# manage themes, wallpaper, keybinds, gaming and the session. Like tezca-dock it
+# carries the GTK stack and is a separate workspace member, so those deps never
+# touch the std-only `tezca` CLI. It shells out to `tezca` for all real work.
+[package]
+name = "tezca-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "GTK4 control center for Project:Tezca (themes, wallpaper, keybinds, gaming, session)"
+
+[[bin]]
+name = "tezca-settings"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_10"] }

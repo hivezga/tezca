@@ -12,6 +12,7 @@ mod cmd_dock;
 mod cmd_doctor;
 mod cmd_game;
 mod cmd_link;
+mod cmd_settings;
 mod cmd_theme;
 mod repo;
 mod term;
@@ -70,6 +71,10 @@ fn main() -> ExitCode {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_game::run(&subargs) as u8)
         }
+        Some("settings") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_settings::run(&subargs) as u8)
+        }
         Some("install") => {
             println!("{}", term::header("tezca install"));
             println!();
@@ -102,6 +107,7 @@ fn print_help() {
         ("theme", "wallpaper-driven theming (list/set/wallpaper/reload)"),
         ("dock", "control the magnifying dock (start/stop/restart/toggle)"),
         ("game", "gaming profile: on/off/toggle/status/run"),
+        ("settings", "open the GTK control center (tezca-settings)"),
         ("install", "bootstrap guidance (see install.sh)"),
     ];
     for (c, d) in rows {

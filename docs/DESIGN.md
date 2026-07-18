@@ -180,18 +180,22 @@ opacity with blur. A `smoke` light variant ships alongside.
 A single ergonomic binary that *is* the DE's control surface. Rust workspace crate.
 
 ```
-tezca theme list | set <name> | wallpaper <img> | reload
+tezca theme list | names | set <name> | wallpaper <img> | reload
 tezca game on | off            # toggle gaming profile (blur off, tearing on, MangoHud)
-tezca dock ...                 # later: talk to tezca-dock
+tezca dock ...                 # talk to tezca-dock
+tezca settings [--page ...]    # open tezca-settings, the GUI control center
 tezca doctor                   # verify NVIDIA env, explicit sync, monitors, deps
 tezca install | link           # (bootstrap wraps this) symlink configs into place
 ```
 
 Why a CLI (not just scripts): type-safe config, one dependency-free binary to ship,
-testable, and it becomes the backend the future GUI control-center calls. It orchestrates
+testable, and it is the backend the GUI control-center calls. It orchestrates
 matugen + symlinks + reload signals so theming is atomic and reversible.
 
-**Custom Rust core #2 (later):** `tezca-dock` — the magnifying macOS dock (gtk4-rs).
+**Custom Rust core #2:** `tezca-dock` — the magnifying macOS dock (gtk4-rs).
+**Custom Rust core #3:** `tezca-settings` — the obsidian-glass GTK4 control center
+(Appearance/Keybinds/Gaming/System); shells out to `tezca` for every action, so the GUI
+and keyboard bindings drive identical code paths.
 
 ---
 
@@ -273,9 +277,17 @@ Fully reversible.
 
 ## 12. Keybinding philosophy
 
-`SUPER` as the Tezca modifier (mirrors macOS `⌘`). Discoverable, mnemonic, printed to a
-cheat-sheet overlay (`SUPER+/`). Reserve `SUPER+SPACE` for Walker (Spotlight muscle
-memory). Media/brightness on XF86 keys. Full map defined in `conf.d/keybinds.conf`.
+`SUPER` as the Tezca modifier (mirrors macOS `⌘`). The map follows a **HyDE-parity
+layout** ([HyDE KEYBINDINGS.md](https://github.com/HyDE-Project/HyDE/blob/master/KEYBINDINGS.md))
+so anyone coming from HyDE keeps their muscle memory — HyDE's rofi menus map onto Walker's
+elephant providers (`walker -m windows|clipboard|unicode|symbols|files`). Tezca's own
+signature actions (AI terminal, Claude, the bespoke dock) cluster on `SUPER+ALT` because
+their HyDE keys (`A`=app-finder, `C`=editor) are taken by parity; game mode lands on
+`SUPER+ALT+G`, exactly where HyDE puts it. `SUPER+SPACE` stays mapped to Walker (Spotlight
+muscle memory) alongside the HyDE `SUPER+A`. Media/brightness on XF86 keys (plus HyDE's
+`F10/F11/F12`). Discoverable + self-documenting: `SUPER+/` pops a Walker cheat-sheet parsed
+live from the config (`scripts/cheatsheet.sh`), and the **Keybinds** tab of `tezca-settings`
+renders the same. Full map in `conf.d/keybinds.conf`; helper scripts in `conf.d/../scripts/`.
 
 ---
 

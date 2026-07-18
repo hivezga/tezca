@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Tezca Settings
+GenericName=Control Center
+Comment=Manage themes, wallpaper, keybinds, gaming and the session
+Exec=tezca-settings
+Icon=preferences-desktop-theme
+Terminal=false
+Categories=Settings;DesktopSettings;GTK;
+Keywords=tezca;theme;wallpaper;keybinds;rice;control;center;
+StartupWMClass=dev.tezca.Settings

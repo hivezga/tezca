@@ -87,6 +87,7 @@ The DE's control surface — a single dependency-free Rust binary.
 | `tezca theme list \| set <name> \| wallpaper <img> \| reload` | wallpaper-driven theming |
 | `tezca dock start \| stop \| restart \| toggle \| status` | control the magnifying dock |
 | `tezca game on \| off \| toggle \| status \| run -- <cmd>` | gaming profile (tearing, blur off, MangoHud) |
+| `tezca settings` | open the GTK control center (themes · wallpaper · keybinds · gaming · session) |
 
 ## Theming
 
@@ -107,31 +108,54 @@ theme re-renders those files and sends each app its live-reload signal — Wayba
 
 ## Keybindings
 
-`SUPER` is the Tezca modifier (mirrors macOS `⌘`).
+A **HyDE-style layout** (mirrors [HyDE's map](https://github.com/HyDE-Project/HyDE/blob/master/KEYBINDINGS.md)) so muscle memory transfers, with Tezca's own actions clustered on `SUPER + ALT`. `SUPER` is the modifier (macOS `⌘`). The always-current, self-documenting cheat-sheet is **`SUPER + /`** — or the **Keybinds** tab in `tezca settings`.
+
+**Apps & launchers**
 
 | Key | Action |
 |---|---|
-| `SUPER + Space` | Walker launcher (Spotlight-style) |
-| `SUPER + Return` | terminal (kitty) |
-| `SUPER + Q` | close window |
-| `SUPER + D` | toggle the dock |
-| `SUPER + V` / `F` / `SHIFT+F` | float / fullscreen / maximize |
-| `SUPER + 1…0` | switch workspace · `SUPER + SHIFT + 1…0` move window there |
-| `SUPER + H/L/K/;` · arrows | move focus · `SUPER + SHIFT` move window · `SUPER + CTRL` resize |
-| `SUPER + \`` | drop-down scratch terminal (special workspace) |
-| `SUPER + A` / `SHIFT + A` | AI workspace · spawn a Claude Code terminal |
-| `SUPER + C` / `N` | Claude desktop · quick-note window |
-| `SUPER + G` | toggle gaming mode |
-| `SUPER + SHIFT + L` / `E` | lock (hyprlock) · power menu (wlogout) |
-| `SUPER + SHIFT + R` | reload Hyprland |
-| `Print` / `SHIFT` / `CTRL` | screenshot region / window / whole output (hyprshot) |
-| media & brightness keys | volume, mute, play/next/prev, backlight |
+| `SUPER + A` · `SUPER + Space` | application finder (Walker) |
+| `SUPER + T` / `Return` | terminal (kitty) |
+| `SUPER + E` / `SHIFT + E` | file manager · file finder |
+| `SUPER + C` / `B` | text editor (code) · browser (Brave) |
+| `SUPER + Tab` / `V` / `,` / `.` | window switcher · clipboard · emoji · glyph |
+| `SUPER + /` · `SUPER + SHIFT + A` | keybind cheat-sheet · **control center** |
+
+**Windows & workspaces**
+
+| Key | Action |
+|---|---|
+| `CTRL + Q` / `ALT + F4` | close window |
+| `SUPER + W` / `F` / `SHIFT + F` | float / fullscreen / pin |
+| `SUPER + arrows` | move focus · `SHIFT +` resize · `CTRL + SHIFT +` move |
+| `SUPER + G` / `J` | toggle group / split |
+| `SUPER + 1…0` | workspace · `SHIFT +` move (follow) · `ALT +` move (silent) |
+| `SUPER + S` · `SUPER + ALT + T` | scratchpad · drop-down terminal |
+
+**Theming, capture & session**
+
+| Key | Action |
+|---|---|
+| `SUPER + SHIFT + W` / `T` | select wallpaper / theme · `SUPER + ALT + ←/→` cycle wallpaper |
+| `SUPER + P` / `CTRL + P` / `SHIFT + P` | snip · freeze-snip · color picker · `Print` whole output |
+| `SUPER + L` · `ALT + CTRL + Del` · `SUPER + Del` | lock · power menu · end session |
+| media / brightness · `F10 F11 F12` | volume · mute · play · backlight |
+
+**Tezca signature (`SUPER + ALT`)**
+
+| Key | Action |
+|---|---|
+| `SUPER + ALT + A` / `SHIFT + A` | AI drop-down terminal · spawn Claude Code |
+| `SUPER + ALT + C` · `SUPER + N` | Claude desktop · quick-note |
+| `SUPER + ALT + D` · `SUPER + D` | pin / unpin the dock |
+| `SUPER + ALT + G` | toggle gaming mode |
 
 ## Component stack
 
-Waybar (menubar) · **tezca-dock** (Rust dock) · Walker (launcher) · swaync
-(notifications) · hyprlock + hypridle (lock/idle) · wlogout (power) · matugen
-(theme engine) · awww (wallpaper) · kitty (terminal) · cliphist · hyprshot.
+Waybar (menubar) · **tezca-dock** (Rust dock) · **tezca-settings** (Rust control
+center) · Walker (launcher) · swaync (notifications) · hyprlock + hypridle
+(lock/idle) · wlogout (power) · matugen (theme engine) · awww (wallpaper) · kitty
+(terminal) · cliphist · hyprshot · hyprpicker.
 NVIDIA env lives in uwsm's `env` / `env-hyprland`. Rationale for each choice is in
 [`docs/DESIGN.md §5`](docs/DESIGN.md).
 
@@ -139,7 +163,7 @@ NVIDIA env lives in uwsm's `env` / `env-hyprland`. Rationale for each choice is 
 
 ```
 config/       → symlinked into ~/.config (hypr, uwsm, waybar, swaync, walker, kitty, …)
-crates/       the Rust core — tezca-cli (the `tezca` binary) + tezca-dock (the dock)
+crates/       the Rust core — tezca-cli (`tezca`) + tezca-dock (dock) + tezca-settings (control center)
 themes/       curated palettes — obsidian (dark), smoke (light)
 templates/    matugen templates → ~/.config/tezca/current/colors.*
 wallpapers/   default wallpapers (see wallpapers/CREDITS.md)

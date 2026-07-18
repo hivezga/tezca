@@ -3,7 +3,7 @@
 # (Phase 5) is the bespoke gtk4-rs magnifying dock and carries the GTK stack.
 [workspace]
 resolver = "2"
-members = ["crates/tezca-cli", "crates/tezca-dock"]
+members = ["crates/tezca-cli", "crates/tezca-dock", "crates/tezca-settings"]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,184 @@
+/* tezca-settings — obsidian-glass control center.
+ *
+ * Colors come from the live theme tokens (@tz_*) which tezca-settings loads
+ * from ~/.config/tezca/current/colors.css ahead of this file, so the panel
+ * tracks `tezca theme`. Editing this file restyles the panel (it is embedded at
+ * build time AND kept here for reference; rebuild to pick up changes).
+ *
+ * Tokens: tz_base tz_surface tz_text tz_subtext tz_muted tz_faint tz_accent
+ *         tz_accent_dim tz_on_accent tz_gold tz_urgent tz_on_urgent.
+ */
+
+window.tezca-settings {
+    background-color: alpha(@tz_base, 0.86);
+    color: @tz_text;
+    font-family: "Inter", sans-serif;
+}
+
+/* --- Header ------------------------------------------------------------- */
+headerbar.tz-header {
+    background-color: alpha(@tz_surface, 0.55);
+    border-bottom: 1px solid alpha(@tz_muted, 0.18);
+    box-shadow: none;
+    min-height: 44px;
+}
+.tz-brand {
+    font-weight: 800;
+    font-size: 14pt;
+    color: @tz_text;
+    letter-spacing: 0.5px;
+}
+.tz-subtitle {
+    color: @tz_accent;
+    font-weight: 600;
+    font-size: 11pt;
+}
+
+/* --- Sidebar ------------------------------------------------------------ */
+.tz-sidebar {
+    background-color: alpha(@tz_surface, 0.30);
+}
+.tz-sidebar list {
+    background: transparent;
+    padding: 8px;
+}
+.tz-sidebar row {
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 2px 4px;
+    color: @tz_subtext;
+    font-weight: 600;
+}
+.tz-sidebar row:hover {
+    background-color: alpha(@tz_muted, 0.14);
+    color: @tz_text;
+}
+.tz-sidebar row:selected {
+    background-color: alpha(@tz_accent, 0.18);
+    color: @tz_text;
+    box-shadow: inset 3px 0 0 0 @tz_accent;
+}
+
+/* --- Pages -------------------------------------------------------------- */
+scrolledwindow, .tz-page {
+    background: transparent;
+}
+.tz-h2 {
+    font-weight: 700;
+    font-size: 12.5pt;
+    color: @tz_text;
+    margin-top: 6px;
+    margin-bottom: 2px;
+}
+.tz-hint {
+    color: @tz_muted;
+    font-size: 9.5pt;
+    margin-bottom: 4px;
+}
+
+/* --- Buttons ------------------------------------------------------------ */
+button {
+    background-color: alpha(@tz_surface, 0.85);
+    color: @tz_text;
+    border: 1px solid alpha(@tz_muted, 0.20);
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-weight: 600;
+}
+button:hover {
+    background-color: alpha(@tz_accent, 0.16);
+    border-color: alpha(@tz_accent, 0.5);
+}
+button:active {
+    background-color: alpha(@tz_accent, 0.26);
+}
+button.tz-primary {
+    background-color: @tz_accent;
+    color: @tz_on_accent;
+    border: none;
+}
+button.tz-primary:hover {
+    background-color: @tz_accent_dim;
+}
+button.tz-theme {
+    min-width: 118px;
+    min-height: 46px;
+    font-size: 11pt;
+}
+button.tz-theme.tz-active {
+    border: 2px solid @tz_accent;
+    color: @tz_text;
+    box-shadow: 0 0 0 3px alpha(@tz_accent, 0.20);
+}
+button.tz-action {
+    min-width: 150px;
+    min-height: 40px;
+}
+
+/* --- Wallpaper preview -------------------------------------------------- */
+.tz-wallpreview {
+    border-radius: 12px;
+    border: 1px solid alpha(@tz_muted, 0.25);
+}
+
+/* --- Switch row (gaming) ------------------------------------------------ */
+switch {
+    min-width: 46px;
+}
+switch:checked {
+    background-color: @tz_accent;
+}
+.tz-switchrow {
+    background-color: alpha(@tz_surface, 0.55);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin: 4px 0;
+}
+.tz-switchrow label {
+    font-weight: 600;
+    font-size: 11pt;
+    color: @tz_text;
+}
+
+/* --- Status + info rows ------------------------------------------------- */
+.tz-statusrow {
+    background-color: alpha(@tz_surface, 0.40);
+    border-radius: 10px;
+    padding: 8px 14px;
+    margin: 2px 0;
+}
+.tz-ok {
+    color: @tz_accent;
+    font-weight: 700;
+}
+.tz-miss {
+    color: @tz_urgent;
+    font-weight: 700;
+}
+.tz-inforow {
+    padding: 4px 6px;
+}
+.tz-inforow .tz-key2 {
+    color: @tz_muted;
+}
+
+/* --- Keybind cheat-sheet ------------------------------------------------ */
+.tz-keylist {
+    background-color: alpha(@tz_surface, 0.35);
+    border-radius: 12px;
+    padding: 6px 10px;
+    margin: 4px 0 10px 0;
+}
+.tz-keyrow {
+    padding: 5px 6px;
+}
+.tz-key {
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 9.5pt;
+    color: @tz_gold;
+    font-weight: 700;
+}
+.tz-keyrow label:not(.tz-key) {
+    color: @tz_subtext;
+    font-size: 10pt;
+}

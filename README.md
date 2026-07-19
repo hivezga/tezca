@@ -141,7 +141,8 @@ A **HyDE-style layout** (mirrors [HyDE's map](https://github.com/HyDE-Project/Hy
 | Key | Action |
 |---|---|
 | `SUPER + SHIFT + W` / `T` | select wallpaper / theme · `SUPER + ALT + ←/→` cycle wallpaper |
-| `SUPER + P` / `CTRL + P` / `SHIFT + P` | snip · freeze-snip · color picker · `Print` whole output |
+| `SUPER + P` / `ALT + P` / `CTRL + P` | snip region · snip window · freeze-snip — all open swappy to annotate |
+| `SUPER + SHIFT + ALT + P` / `Print` / `SUPER + SHIFT + P` | snip focused monitor · all monitors → file · color picker |
 | `SUPER + L` · `ALT + CTRL + Del` · `SUPER + Del` | lock · power menu · end session |
 | media / brightness · `F10 F11 F12` | volume · mute · play · backlight |
 
@@ -159,7 +160,7 @@ A **HyDE-style layout** (mirrors [HyDE's map](https://github.com/HyDE-Project/Hy
 Waybar (menubar) · **tezca-dock** (Rust dock) · **tezca-settings** (Rust control
 center) · Walker (launcher) · swaync (notifications) · hyprlock + hypridle
 (lock/idle) · wlogout (power) · matugen (theme engine) · awww (wallpaper) · kitty
-(terminal) · cliphist · hyprshot · hyprpicker.
+(terminal) · cliphist · hyprshot + swappy (snip + annotate) · hyprpicker.
 NVIDIA env lives in uwsm's `env` / `env-hyprland`. Rationale for each choice is in
 [`docs/DESIGN.md §5`](docs/DESIGN.md).
 

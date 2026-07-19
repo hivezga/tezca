@@ -1,0 +1,8 @@
+# Tezca — swappy (screenshot annotate editor). Launched by
+# config/hypr/scripts/screenshot.sh. Ctrl+S saves here, Ctrl+C copies.
+[Default]
+save_dir=$HOME/Pictures/Screenshots
+save_filename_format=tezca_%Y%m%d_%H%M%S.png
+show_panel=true
+early_exit=false
+fill_shape=false

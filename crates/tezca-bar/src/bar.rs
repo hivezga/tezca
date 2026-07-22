@@ -14,13 +14,14 @@ use crate::config::{Config, Shape};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
-use crate::{hypr, nowplaying, notify, popovers};
+use crate::{hypr, nowplaying, notify, popovers, tray};
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Button, CenterBox, Label, Orientation, Overlay, Window};
+use gtk4::{Align, Box as GtkBox, Button, CenterBox, Image, Label, Orientation, Overlay, Window};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 // Nerd Font glyphs — the exact codepoints from config/waybar/config.jsonc, plus
@@ -50,10 +51,19 @@ pub struct Bar {
     cpu: RefCell<CpuMeter>,
     netmeter: RefCell<NetMeter>,
     throughput: Rc<RefCell<Throughput>>,
+    tray_cmd: async_channel::Sender<tray::TrayCmd>,
+    tray_items: RefCell<Vec<tray::TrayItemView>>,
+    tray_menus: RefCell<HashMap<String, tray::MenuNode>>,
 }
 
 impl Bar {
-    pub fn build(app: &gtk4::Application, cfg: Config, palette: Palette, css: CssStack) -> Rc<Bar> {
+    pub fn build(
+        app: &gtk4::Application,
+        cfg: Config,
+        palette: Palette,
+        css: CssStack,
+        tray_cmd: async_channel::Sender<tray::TrayCmd>,
+    ) -> Rc<Bar> {
         let display = gdk::Display::default().expect("no display");
         let shared: SharedPalette = Rc::new(RefCell::new(palette));
         let throughput = Rc::new(RefCell::new(Throughput { down_mbps: 0.0, up_mbps: 0.0 }));
@@ -75,6 +85,9 @@ impl Bar {
             cpu: RefCell::new(CpuMeter::default()),
             netmeter: RefCell::new(NetMeter::default()),
             throughput,
+            tray_cmd,
+            tray_items: RefCell::new(Vec::new()),
+            tray_menus: RefCell::new(HashMap::new()),
         });
 
         bar.refresh_hypr();
@@ -219,6 +232,110 @@ impl Bar {
             s.window.set_visible(!vis);
         }
     }
+
+    /// Apply a tray update from the D-Bus thread, then repaint every bar's tray.
+    pub fn apply_tray(self: &Rc<Self>, update: tray::TrayUpdate) {
+        match update {
+            tray::TrayUpdate::Items(items) => *self.tray_items.borrow_mut() = items,
+            tray::TrayUpdate::Menu { key, root } => {
+                self.tray_menus.borrow_mut().insert(key, root);
+            }
+        }
+        self.rebuild_tray();
+    }
+
+    /// Rebuild each surface's tray cluster from the current item + menu state.
+    fn rebuild_tray(self: &Rc<Self>) {
+        let items = self.tray_items.borrow();
+        for s in &self.surfaces {
+            while let Some(c) = s.tray_box.first_child() {
+                s.tray_box.remove(&c);
+            }
+            for item in items.iter() {
+                s.tray_box.append(&self.tray_button(item));
+            }
+            if !items.is_empty() {
+                s.tray_box.append(&sep());
+            }
+            s.tray_box.set_visible(!items.is_empty());
+        }
+    }
+
+    /// One tray icon: left-click activates, right-click opens the menu (or falls
+    /// back to secondary-activate when the app exposes no DBusMenu).
+    fn tray_button(self: &Rc<Self>, item: &tray::TrayItemView) -> Button {
+        let btn = Button::new();
+        btn.add_css_class("tray-item");
+        btn.set_child(Some(&tray_icon_widget(&item.icon)));
+        if !item.tooltip.is_empty() {
+            btn.set_tooltip_text(Some(&item.tooltip));
+        }
+
+        // Left-click → Activate.
+        let (cmd, key) = (self.tray_cmd.clone(), item.key.clone());
+        btn.connect_clicked(move |_| {
+            let _ = cmd.send_blocking(tray::TrayCmd::Activate(key.clone()));
+        });
+
+        // Right-click → our rendered DBusMenu popover when the app exposes a
+        // usable one; otherwise ask the app to show its own menu (ContextMenu).
+        let menu = self.tray_menus.borrow().get(&item.key).cloned();
+        let right = gtk4::GestureClick::new();
+        right.set_button(gdk::BUTTON_SECONDARY);
+        let cmd = self.tray_cmd.clone();
+        let key = item.key.clone();
+        match menu {
+            Some(root) => {
+                let pop = popovers::tray_menu(&btn, &root, &item.key, self.tray_cmd.clone());
+                right.connect_released(move |_, _, _, _| pop.popup());
+            }
+            None => {
+                right.connect_released(move |_, _, _, _| {
+                    let _ = cmd.send_blocking(tray::TrayCmd::ContextMenu(key.clone()));
+                });
+            }
+        }
+        btn.add_controller(right);
+
+        // Middle-click → SecondaryActivate (the SNI convention).
+        let middle = gtk4::GestureClick::new();
+        middle.set_button(gdk::BUTTON_MIDDLE);
+        let (cmd, key) = (self.tray_cmd.clone(), item.key.clone());
+        middle.connect_released(move |_, _, _, _| {
+            let _ = cmd.send_blocking(tray::TrayCmd::SecondaryActivate(key.clone()));
+        });
+        btn.add_controller(middle);
+        btn
+    }
+}
+
+/// Build the GTK image for a tray icon (themed name or raw ARGB pixmap).
+fn tray_icon_widget(icon: &tray::TrayIcon) -> Image {
+    let img = match icon {
+        tray::TrayIcon::Named { name, theme_path } => {
+            if let (Some(path), Some(display)) = (theme_path, gdk::Display::default()) {
+                let theme = gtk4::IconTheme::for_display(&display);
+                if !theme.search_path().iter().any(|p| p.to_str() == Some(path.as_str())) {
+                    theme.add_search_path(path);
+                }
+            }
+            Image::from_icon_name(name)
+        }
+        tray::TrayIcon::Pixmap { width, height, argb } => {
+            let bytes = glib::Bytes::from(argb);
+            let texture = gdk::MemoryTexture::new(
+                *width,
+                *height,
+                gdk::MemoryFormat::A8r8g8b8,
+                &bytes,
+                (*width * 4) as usize,
+            );
+            Image::from_paintable(Some(&texture))
+        }
+        tray::TrayIcon::None => Image::from_icon_name("application-x-executable"),
+    };
+    img.set_pixel_size(18);
+    img
 }
 
 // ===========================================================================
@@ -271,6 +388,7 @@ struct Surface {
     clock_label: Label,
 
     gamemode_box: GtkBox,
+    tray_box: GtkBox,
 
     mirror: gtk4::DrawingArea,
 }
@@ -379,6 +497,14 @@ impl Surface {
         gamemode_box.append(&game_glyph);
         gamemode_box.set_visible(false);
         right.append(&gamemode_box);
+
+        // System tray (StatusNotifierItem icons) — filled live by the tray
+        // thread; hidden until the first item registers.
+        let tray_box = GtkBox::new(Orientation::Horizontal, 2);
+        tray_box.add_css_class("tray");
+        tray_box.set_valign(Align::Center);
+        tray_box.set_visible(false);
+        right.append(&tray_box);
 
         // Metrics: CPU + MEM sparklines.
         let cpu_spark = draw::sparkline(pal, draw::SparkColor::Accent);
@@ -552,6 +678,7 @@ impl Surface {
             bell_dot,
             clock_label,
             gamemode_box,
+            tray_box,
             mirror,
         })
     }

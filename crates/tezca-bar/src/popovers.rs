@@ -9,6 +9,7 @@
 //! Plus the Tezca "mirror" system menu.
 
 use crate::sysinfo::{self, Net, Throughput};
+use crate::tray;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Calendar, Label, LevelBar, Orientation, Popover};
 use std::cell::RefCell;
@@ -168,6 +169,74 @@ pub fn network(anchor: &impl IsA<gtk4::Widget>, tp: Rc<RefCell<Throughput>>) -> 
         content_c.append(&rows);
     });
     pop
+}
+
+// ── Tray item menu (DBusMenu) ───────────────────────────────────────────────
+
+/// A glass popover rendering an app's DBusMenu; leaf clicks dispatch a
+/// `MenuClicked` back over the tray channel. Submenus nest as child popovers.
+pub fn tray_menu(
+    anchor: &impl IsA<gtk4::Widget>,
+    root: &tray::MenuNode,
+    key: &str,
+    cmd: async_channel::Sender<tray::TrayCmd>,
+) -> Popover {
+    let (pop, content) = glass(anchor);
+    content.set_width_request(180);
+    fill_menu(&content, root, key, &cmd, &pop);
+    pop
+}
+
+fn fill_menu(
+    content: &GtkBox,
+    node: &tray::MenuNode,
+    key: &str,
+    cmd: &async_channel::Sender<tray::TrayCmd>,
+    root: &Popover,
+) {
+    for child in node.children.iter().filter(|c| c.visible) {
+        if child.separator {
+            let line = GtkBox::new(Orientation::Horizontal, 0);
+            line.add_css_class("sep");
+            line.set_size_request(-1, 1);
+            content.append(&line);
+            continue;
+        }
+
+        let mark = match child.checked {
+            Some(true) => "\u{2713} ",
+            Some(false) => "  ",
+            None => "",
+        };
+        let btn = Button::with_label(&format!("{mark}{}", child.label));
+        btn.add_css_class("appmenu-item");
+        btn.set_halign(Align::Fill);
+        btn.set_sensitive(child.enabled);
+        if let Some(c) = btn.child() {
+            c.set_halign(Align::Start);
+        }
+
+        if child.children.iter().any(|c| c.visible) {
+            // Submenu → open a nested glass popover anchored on this row.
+            let sub = Popover::new();
+            sub.add_css_class("tz-popover");
+            sub.set_has_arrow(false);
+            sub.set_position(gtk4::PositionType::Right);
+            sub.set_parent(&btn);
+            let sub_content = GtkBox::new(Orientation::Vertical, 12);
+            sub.set_child(Some(&sub_content));
+            fill_menu(&sub_content, child, key, cmd, root);
+            let sub_c = sub.clone();
+            btn.connect_clicked(move |_| sub_c.popup());
+        } else {
+            let (cmd, key, id, root) = (cmd.clone(), key.to_string(), child.id, root.clone());
+            btn.connect_clicked(move |_| {
+                let _ = cmd.send_blocking(tray::TrayCmd::MenuClicked { key: key.clone(), id });
+                root.popdown();
+            });
+        }
+        content.append(&btn);
+    }
 }
 
 // ── Hardware detail (CPU / MEM / GPU metric popovers) ───────────────────────

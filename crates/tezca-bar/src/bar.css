@@ -185,6 +185,22 @@ button.ws.urgent {
     font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
 }
 
+/* ── System tray (StatusNotifierItem icons) ─────────────────────────────── */
+.tray {
+    padding: 0 4px;
+}
+button.tray-item {
+    background: transparent;
+    padding: 0 4px;
+    min-height: 0;
+    min-width: 0;
+    color: @tz_subtext;
+}
+button.tray-item:hover {
+    background: alpha(@tz_accent, 0.10);
+    border-radius: 7px;
+}
+
 /* ── Notification bell ──────────────────────────────────────────────────── */
 button.bell {
     background: transparent;

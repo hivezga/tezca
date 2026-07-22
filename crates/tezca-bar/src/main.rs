@@ -15,6 +15,7 @@ mod notify;
 mod popovers;
 mod sysinfo;
 mod theme;
+mod tray;
 
 use gtk4::gdk::Display;
 use gtk4::glib;
@@ -36,7 +37,23 @@ fn activate(app: &Application) {
     let display = Display::default().expect("no display");
     let css = theme::CssStack::install(&display);
 
-    let bar = bar::Bar::build(app, cfg, palette, css);
+    // System-tray channels: updates come in from the D-Bus thread, click
+    // commands go back out. Wired before the bar so it holds the command sender.
+    let (tray_upd_tx, tray_upd_rx) = async_channel::unbounded::<tray::TrayUpdate>();
+    let (tray_cmd_tx, tray_cmd_rx) = async_channel::unbounded::<tray::TrayCmd>();
+
+    let bar = bar::Bar::build(app, cfg, palette, css, tray_cmd_tx);
+
+    tray::spawn(tray_upd_tx, tray_cmd_rx);
+    glib::spawn_future_local(glib::clone!(
+        #[strong]
+        bar,
+        async move {
+            while let Ok(update) = tray_upd_rx.recv().await {
+                bar.apply_tray(update);
+            }
+        }
+    ));
 
     // Live Hyprland updates → refresh workspaces / app label / submap.
     let (tx, rx) = async_channel::unbounded::<hypr::Event>();

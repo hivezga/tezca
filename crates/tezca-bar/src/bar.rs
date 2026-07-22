@@ -398,6 +398,11 @@ impl Surface {
         let gpu_metric = metric(G_GPU_LABEL, &gpu_spark.area, &gpu_val);
         gpu_metric.set_visible(false);
 
+        // Each metric group expands into a glass detail popover on click.
+        attach_detail(&cpu_metric, popovers::cpu_detail(&cpu_metric));
+        attach_detail(&mem_metric, popovers::mem_detail(&mem_metric));
+        attach_detail(&gpu_metric, popovers::gpu_detail(&gpu_metric));
+
         right.append(&cpu_metric);
         right.append(&mem_metric);
         right.append(&gpu_metric);
@@ -726,6 +731,14 @@ fn metric(label: &str, spark: &gtk4::DrawingArea, val: &Label) -> GtkBox {
     b.append(spark);
     b.append(val);
     b
+}
+
+/// Parent `pop` to `widget` and pop it up on click, marking the group hoverable.
+fn attach_detail(widget: &impl IsA<gtk4::Widget>, pop: gtk4::Popover) {
+    widget.add_css_class("clickable");
+    let click = gtk4::GestureClick::new();
+    click.connect_released(move |_, _, _, _| pop.popup());
+    widget.add_controller(click);
 }
 
 /// A `.control` button holding a glyph + value; returns handles to both labels.

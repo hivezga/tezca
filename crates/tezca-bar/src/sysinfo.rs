@@ -286,6 +286,239 @@ fn nvidia_gpu() -> Option<f64> {
     Some((v / 100.0).clamp(0.0, 1.0))
 }
 
+// ── Hardware detail (metric popovers) ───────────────────────────────────────
+//
+// The right-cluster CPU/MEM/GPU groups expand into a glass popover on click.
+// These readers gather the extra telemetry that doesn't fit on the bar: temps
+// (hwmon), clocks, load, memory breakdown, and GPU power/VRAM. Everything is
+// best-effort — any field the hardware doesn't expose stays `None` and its row
+// is simply omitted.
+
+/// First `tempN_input` (°C) on the hwmon chip named `chip`, preferring an input
+/// whose `tempN_label` contains one of `pref` (else the first temp on the chip).
+fn hwmon_temp(chip: &str, pref: &[&str]) -> Option<f64> {
+    let rd = std::fs::read_dir("/sys/class/hwmon").ok()?;
+    for e in rd.flatten() {
+        let p = e.path();
+        if read_trim(&p.join("name")).as_deref() != Some(chip) {
+            continue;
+        }
+        let read_c = |i: u32| {
+            read_trim(&p.join(format!("temp{i}_input")))
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|m| m / 1000.0)
+        };
+        for want in pref {
+            for i in 1..=16 {
+                let label = read_trim(&p.join(format!("temp{i}_label"))).unwrap_or_default();
+                if label.contains(want) {
+                    if let Some(t) = read_c(i) {
+                        return Some(t);
+                    }
+                }
+            }
+        }
+        for i in 1..=16 {
+            if let Some(t) = read_c(i) {
+                return Some(t);
+            }
+        }
+    }
+    None
+}
+
+/// CPU package temperature in °C, from whichever driver the platform exposes.
+pub fn cpu_temp() -> Option<f64> {
+    for (chip, pref) in [
+        ("k10temp", &["Tctl", "Tdie"][..]),
+        ("zenpower", &["Tdie"][..]),
+        ("coretemp", &["Package"][..]),
+        ("cpu_thermal", &[][..]),
+        ("acpitz", &[][..]),
+    ] {
+        if let Some(t) = hwmon_temp(chip, pref) {
+            return Some(t);
+        }
+    }
+    None
+}
+
+/// Mean current core clock in MHz across all `cpufreq` policies.
+fn cpu_freq_mhz() -> Option<f64> {
+    let rd = std::fs::read_dir("/sys/devices/system/cpu").ok()?;
+    let (mut sum, mut n) = (0.0, 0u32);
+    for e in rd.flatten() {
+        let p = e.path().join("cpufreq/scaling_cur_freq");
+        if let Some(khz) = read_trim(&p).and_then(|s| s.parse::<f64>().ok()) {
+            sum += khz;
+            n += 1;
+        }
+    }
+    (n > 0).then(|| sum / n as f64 / 1000.0)
+}
+
+/// The 1 / 5 / 15-minute load averages from /proc/loadavg.
+fn loadavg() -> (f64, f64, f64) {
+    let t = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+    let mut it = t.split_whitespace().filter_map(|s| s.parse::<f64>().ok());
+    (it.next().unwrap_or(0.0), it.next().unwrap_or(0.0), it.next().unwrap_or(0.0))
+}
+
+/// Expanded CPU telemetry for the metric popover.
+pub struct CpuDetail {
+    pub model: String,
+    pub temp_c: Option<f64>,
+    pub freq_mhz: Option<f64>,
+    pub threads: usize,
+    pub load: (f64, f64, f64),
+}
+
+pub fn cpu_detail() -> CpuDetail {
+    let model = std::fs::read_to_string("/proc/cpuinfo")
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .find(|l| l.starts_with("model name"))
+                .and_then(|l| l.split_once(':'))
+                .map(|(_, v)| v.trim().to_string())
+        })
+        .unwrap_or_else(|| "CPU".to_string());
+    CpuDetail {
+        model,
+        temp_c: cpu_temp(),
+        freq_mhz: cpu_freq_mhz(),
+        threads: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
+        load: loadavg(),
+    }
+}
+
+/// Expanded memory telemetry (all fields in kB, matching /proc/meminfo).
+pub struct MemDetail {
+    pub total_kb: f64,
+    pub used_kb: f64,
+    pub available_kb: f64,
+    pub cached_kb: f64,
+    pub buffers_kb: f64,
+    pub swap_total_kb: f64,
+    pub swap_used_kb: f64,
+    pub dimm_temp_c: Option<f64>,
+}
+
+pub fn mem_detail() -> MemDetail {
+    let text = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    let get = |key: &str| -> f64 {
+        text.lines()
+            .find(|l| l.starts_with(key))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0)
+    };
+    let total = get("MemTotal:");
+    let available = get("MemAvailable:");
+    let swap_total = get("SwapTotal:");
+    let swap_free = get("SwapFree:");
+    MemDetail {
+        total_kb: total,
+        used_kb: (total - available).max(0.0),
+        available_kb: available,
+        cached_kb: get("Cached:"),
+        buffers_kb: get("Buffers:"),
+        swap_total_kb: swap_total,
+        swap_used_kb: (swap_total - swap_free).max(0.0),
+        // jc42 SPD sensors sit on the DIMMs; take the hottest module.
+        dimm_temp_c: hwmon_temp("jc42", &[]),
+    }
+}
+
+/// Expanded GPU telemetry for the metric popover (fields absent → `None`).
+pub struct GpuDetail {
+    pub name: String,
+    pub temp_c: Option<f64>,
+    pub power_w: Option<f64>,
+    pub power_limit_w: Option<f64>,
+    pub mem_used_mb: Option<f64>,
+    pub mem_total_mb: Option<f64>,
+    pub core_clock_mhz: Option<f64>,
+    pub mem_clock_mhz: Option<f64>,
+    pub fan_pct: Option<f64>,
+    pub util_pct: Option<f64>,
+}
+
+pub fn gpu_detail() -> Option<GpuDetail> {
+    sysfs_gpu_detail().or_else(nvidia_detail)
+}
+
+/// NVIDIA telemetry from a single batched `nvidia-smi` query.
+fn nvidia_detail() -> Option<GpuDetail> {
+    let out = Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=name,temperature.gpu,power.draw,power.limit,memory.used,\
+             memory.total,clocks.gr,clocks.mem,fan.speed,utilization.gpu",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    let f: Vec<String> = s.lines().next()?.split(',').map(|x| x.trim().to_string()).collect();
+    if f.len() < 10 {
+        return None;
+    }
+    // "[N/A]" and blanks parse to None, which is exactly what we want.
+    let num = |i: usize| f.get(i).and_then(|v| v.parse::<f64>().ok());
+    Some(GpuDetail {
+        name: f[0].clone(),
+        temp_c: num(1),
+        power_w: num(2),
+        power_limit_w: num(3),
+        mem_used_mb: num(4),
+        mem_total_mb: num(5),
+        core_clock_mhz: num(6),
+        mem_clock_mhz: num(7),
+        fan_pct: num(8),
+        util_pct: num(9),
+    })
+}
+
+/// Best-effort AMD/Intel telemetry from sysfs (temp + utilization + power).
+fn sysfs_gpu_detail() -> Option<GpuDetail> {
+    let temp = hwmon_temp("amdgpu", &["edge", "junction"]).or_else(|| hwmon_temp("i915", &[]));
+    let util = sysfs_gpu_busy().map(|f| f * 100.0);
+    let power = hwmon_power_w("amdgpu");
+    if temp.is_none() && util.is_none() {
+        return None;
+    }
+    Some(GpuDetail {
+        name: "GPU".to_string(),
+        temp_c: temp,
+        power_w: power,
+        power_limit_w: None,
+        mem_used_mb: None,
+        mem_total_mb: None,
+        core_clock_mhz: None,
+        mem_clock_mhz: None,
+        fan_pct: None,
+        util_pct: util,
+    })
+}
+
+/// `power1_average` (µW → W) on the hwmon chip named `chip`.
+fn hwmon_power_w(chip: &str) -> Option<f64> {
+    let rd = std::fs::read_dir("/sys/class/hwmon").ok()?;
+    for e in rd.flatten() {
+        let p = e.path();
+        if read_trim(&p.join("name")).as_deref() != Some(chip) {
+            continue;
+        }
+        if let Some(uw) = read_trim(&p.join("power1_average")).and_then(|s| s.parse::<f64>().ok()) {
+            return Some(uw / 1_000_000.0);
+        }
+    }
+    None
+}
+
 /// Backlight brightness percent, or None (desktop monitors use DDC, not sysfs).
 pub fn brightness() -> Option<u32> {
     let dir = Path::new("/sys/class/backlight");

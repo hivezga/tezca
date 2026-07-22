@@ -164,6 +164,10 @@ button.ws.urgent {
 }
 .metric {
     padding: 0 9px;
+    border-radius: 9px;
+}
+.metric.clickable:hover {
+    background: alpha(@tz_accent, 0.08);
 }
 .control {
     color: @tz_subtext;

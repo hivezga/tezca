@@ -1,0 +1,20 @@
+/* Project:Tezca — obsidian (curated) GTK color tokens.
+ *
+ * The signature "smoking mirror" palette, hand-tuned. Copied verbatim into
+ * ~/.config/tezca/current/colors.css by `tezca theme set obsidian` — matugen is
+ * NOT involved, so this look is pinned exactly. Mirrors templates/colors.css
+ * token-for-token (see templates/README.md).
+ */
+
+@define-color tz_base        #0B0E0F;
+@define-color tz_surface     #14191B;
+@define-color tz_text        #E8EAED;
+@define-color tz_subtext     #C3C8CC;
+@define-color tz_muted       #8B9398;
+@define-color tz_faint       #5A6166;
+@define-color tz_accent      #E0685C;
+@define-color tz_accent_dim  #B24338;
+@define-color tz_on_accent   #0B0E0F;
+@define-color tz_gold        #C9A24B;
+@define-color tz_urgent      #E06C75;
+@define-color tz_on_urgent   #0B0E0F;

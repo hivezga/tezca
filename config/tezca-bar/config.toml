@@ -1,0 +1,35 @@
+# Project:Tezca — tezca-bar configuration.
+#
+# The bespoke gtk4-rs top menubar (DESIGN.md §6), replacing Waybar. A thin
+# translucent obsidian strip across the top of every monitor: per-app label +
+# workspaces on the left, now-playing centred, metrics/controls/clock/power on
+# the right, with expandable glass popovers. Colors follow the active theme
+# (`tezca theme`) automatically — nothing here hard-codes a hex.
+#
+# tezca-bar reads this file on launch; `tezca bar restart` after editing (or
+# `tezca bar set <key> <value>`, which edits + restarts for you).
+
+# --- Shape -----------------------------------------------------------------
+# floating : rounded glass strip, inset from the screen edges (macOS feel).
+# edge     : full-width, square, edge-to-edge, single bottom hairline.
+shape = "floating"
+
+# --- Geometry --------------------------------------------------------------
+height      = 40     # bar height, px (the glass strip)
+margin_top  = 6      # gap above the bar (floating only), px
+margin_side = 10     # gap left/right of the bar (floating only), px
+
+# --- Poll intervals (seconds) ----------------------------------------------
+cpu_interval = 3     # CPU sparkline + percentage
+mem_interval = 5     # MEM sparkline + percentage
+net_interval = 5     # network glyph + throughput
+
+# --- Clock -----------------------------------------------------------------
+# strftime-style; matches the Waybar format the bar reaches parity with.
+clock_format = "%a %d %b   %H:%M"
+
+# --- Per-monitor adaptive --------------------------------------------------
+# Monitors narrower than this (px) render the COMPACT layout — no per-app menu
+# label, tighter padding. The 3440×1440 ultrawide primary stays full; the
+# 2560×1440 secondary goes compact. Set very high to force compact everywhere.
+compact_width = 3000

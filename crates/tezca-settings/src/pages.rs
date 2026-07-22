@@ -68,7 +68,7 @@ pub fn appearance(window: &Window) -> Widget {
     }
     page.append(&grid);
     page.append(&hint(
-        "Curated palettes. Switching re-skins Waybar, kitty, the dock, hyprlock and the launcher live — no restart.",
+        "Curated palettes. Switching re-skins the bar, kitty, the dock, hyprlock and the launcher live — no restart.",
     ));
 
     page.append(&section_header("Wallpaper"));
@@ -239,6 +239,81 @@ pub fn displays(window: &Window) -> Widget {
         wrow.append(&resetw);
         page.append(&wrow);
     }
+    scrolled(&page)
+}
+
+// ===========================================================================
+// Bar — the top menubar (tezca-bar): shape, geometry, poll intervals
+// ===========================================================================
+
+pub fn bar() -> Widget {
+    let page = page_box();
+    let cfg = backend::bar_config();
+    let get = |k: &str| cfg.iter().find(|(kk, _)| kk == k).map(|(_, v)| v.clone());
+
+    page.append(&section_header("Shape"));
+
+    // floating | edge — index 0/1 into SHAPES.
+    const SHAPES: [&str; 2] = ["floating", "edge"];
+    let shape = DropDown::from_strings(&["Floating (rounded, inset)", "Edge (full-width)"]);
+    let cur_shape = get("shape").unwrap_or_else(|| "floating".into());
+    if let Some(i) = SHAPES.iter().position(|s| *s == cur_shape) {
+        shape.set_selected(i as u32);
+    }
+    page.append(&control_row("Shape", &shape));
+
+    let height = spin_from("height", 20.0, 80.0, 1.0, 0, &get);
+    let mtop = spin_from("margin_top", 0.0, 40.0, 1.0, 0, &get);
+    let mside = spin_from("margin_side", 0.0, 40.0, 1.0, 0, &get);
+    page.append(&control_row("Height (px)", &height));
+    page.append(&control_row("Top margin (floating)", &mtop));
+    page.append(&control_row("Side margin (floating)", &mside));
+
+    page.append(&section_header("Metrics"));
+    let cpu_iv = spin_from("cpu_interval", 1.0, 30.0, 1.0, 0, &get);
+    let mem_iv = spin_from("mem_interval", 1.0, 30.0, 1.0, 0, &get);
+    let net_iv = spin_from("net_interval", 1.0, 30.0, 1.0, 0, &get);
+    let compact = spin_from("compact_width", 0.0, 6000.0, 100.0, 0, &get);
+    page.append(&control_row("CPU poll (s)", &cpu_iv));
+    page.append(&control_row("Memory poll (s)", &mem_iv));
+    page.append(&control_row("Network poll (s)", &net_iv));
+    page.append(&control_row("Compact below width (px)", &compact));
+
+    let apply = Button::with_label("Apply bar settings");
+    apply.add_css_class("tz-primary");
+    {
+        let (shape, height, mtop, mside, cpu_iv, mem_iv, net_iv, compact) = (
+            shape.clone(), height.clone(), mtop.clone(), mside.clone(),
+            cpu_iv.clone(), mem_iv.clone(), net_iv.clone(), compact.clone(),
+        );
+        apply.connect_clicked(move |_| {
+            let shape_s = SHAPES.get(shape.selected() as usize).copied().unwrap_or("floating");
+            let height_s = (height.value() as i64).to_string();
+            let mtop_s = (mtop.value() as i64).to_string();
+            let mside_s = (mside.value() as i64).to_string();
+            let cpu_s = (cpu_iv.value() as i64).to_string();
+            let mem_s = (mem_iv.value() as i64).to_string();
+            let net_s = (net_iv.value() as i64).to_string();
+            let compact_s = (compact.value() as i64).to_string();
+            backend::tezca(&[
+                "bar", "set",
+                "shape", shape_s,
+                "height", &height_s,
+                "margin_top", &mtop_s,
+                "margin_side", &mside_s,
+                "cpu_interval", &cpu_s,
+                "mem_interval", &mem_s,
+                "net_interval", &net_s,
+                "compact_width", &compact_s,
+            ]);
+        });
+    }
+    let arow = Box::new(Orientation::Horizontal, 8);
+    arow.set_halign(Align::End);
+    arow.append(&apply);
+    page.append(&arow);
+    page.append(&hint("Applying restarts the bar so the new geometry takes effect."));
+
     scrolled(&page)
 }
 

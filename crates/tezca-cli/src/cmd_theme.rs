@@ -315,7 +315,11 @@ fn reload_components() {
         report("hyprland", Outcome::Skipped("not in a Hyprland session".into()));
     }
 
-    // Waybar — SIGUSR2 reloads its stylesheet.
+    // tezca-bar — SIGUSR2 re-reads colors.css (CSS + parsed palette) live, no
+    // restart. Its 9-char comm matches `pkill -x` cleanly.
+    report("bar", signal("tezca-bar", "USR2"));
+
+    // Waybar — SIGUSR2 reloads its stylesheet (kept for the documented fallback).
     report("waybar", signal("waybar", "USR2"));
 
     // swaync — reload the CSS via its control client.

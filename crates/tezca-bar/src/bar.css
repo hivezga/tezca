@@ -1,0 +1,333 @@
+/* tezca-bar — GTK4 stylesheet for the widget tree.
+ *
+ * References ONLY the @tz_* tokens defined by the palette provider (the user's
+ * ~/.config/tezca/current/colors.css), via alpha()/mix() — never hard hexes —
+ * exactly like config/waybar/style.css. The self-drawn bits (mirror glyph,
+ * sparklines, equalizer) are painted by cairo from the parsed Palette instead.
+ *
+ * GTK CSS dialect: @define-color names, alpha(), mix(); no var()/color-mix().
+ */
+
+/* Window chrome is invisible — the glass is the .bar box, so margins show the
+   wallpaper/blur around a floating bar. */
+window.tezca-bar {
+    background: transparent;
+}
+
+* {
+    font-family: "Inter", "JetBrainsMono Nerd Font", "JetBrains Mono", sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    /* kill default widget chrome so only the bar reads as glass */
+    box-shadow: none;
+    text-shadow: none;
+    border: none;
+    outline: none;
+    min-height: 0;
+    min-width: 0;
+}
+
+/* ── The bar glass ──────────────────────────────────────────────────────── */
+.bar {
+    background: alpha(@tz_base, 0.70);
+    border: 1px solid alpha(@tz_accent, 0.18);
+    border-radius: 15px;
+    color: @tz_text;
+    padding: 0 6px;
+}
+
+/* Edge shape — full-width, square, a single bottom hairline. */
+.bar.edge {
+    background: alpha(@tz_base, 0.82);
+    border: none;
+    border-bottom: 1px solid alpha(@tz_accent, 0.18);
+    border-radius: 0;
+}
+
+/* Submap (resize) — bar border goes gold with an inset ring. */
+.bar.submap {
+    border-color: alpha(@tz_gold, 0.32);
+    box-shadow: inset 0 0 0 1px alpha(@tz_gold, 0.12);
+}
+
+/* ── Tezca "mirror" menu button ─────────────────────────────────────────── */
+button.mirror {
+    background: transparent;
+    padding: 0 10px 0 8px;
+    margin: 0;
+    min-height: 0;
+}
+button.mirror:hover {
+    background: transparent;
+}
+
+/* ── Per-app menu bar ───────────────────────────────────────────────────── */
+.appname {
+    font-weight: 700;
+    color: @tz_text;
+    padding: 0 9px;
+}
+.appname.idle {
+    font-weight: 500;
+    color: @tz_faint;
+}
+.appmenu-item {
+    color: @tz_subtext;
+    padding: 0 9px;
+    font-weight: 500;
+    background: transparent;
+    min-height: 0;
+}
+.appmenu-item:hover {
+    color: @tz_text;
+    background: alpha(@tz_accent, 0.10);
+    border-radius: 7px;
+}
+
+/* ── Hairline separators ────────────────────────────────────────────────── */
+.sep {
+    background: alpha(@tz_muted, 0.16);
+    min-width: 1px;
+    margin: 0 5px;
+}
+
+/* ── Workspaces ─────────────────────────────────────────────────────────── */
+.workspaces {
+    padding: 0 4px;
+}
+button.ws {
+    color: @tz_muted;
+    background: transparent;
+    border-radius: 9px;
+    padding: 0 10px;
+    margin: 0 2px;
+    min-width: 26px;
+    min-height: 26px;
+    transition: all 180ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+button.ws:hover {
+    color: @tz_text;
+    background: alpha(@tz_accent, 0.10);
+}
+button.ws.active {
+    color: @tz_on_accent;
+    background: @tz_accent;
+    font-weight: 600;
+    box-shadow: 0 0 12px alpha(@tz_accent, 0.55);
+}
+button.ws.urgent {
+    color: @tz_on_accent;
+    background: @tz_urgent;
+}
+
+/* ── Now-playing (MPRIS) pill ───────────────────────────────────────────── */
+.nowplaying {
+    background: alpha(@tz_text, 0.055);
+    border: 1px solid alpha(@tz_text, 0.06);
+    border-radius: 12px;
+    padding: 3px 13px 3px 5px;
+}
+.np-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: @tz_text;
+}
+.np-artist {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    color: @tz_muted;
+}
+.np-art {
+    border-radius: 7px;
+    min-width: 24px;
+    min-height: 24px;
+    background: linear-gradient(135deg, @tz_accent_dim, @tz_gold);
+    box-shadow: 0 2px 8px alpha(black, 0.4);
+}
+
+/* ── Right cluster ──────────────────────────────────────────────────────── */
+.metric-label {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    color: @tz_muted;
+}
+.metric-val,
+.control-val {
+    font-size: 12px;
+    color: @tz_subtext;
+}
+.metric,
+.control {
+    padding: 0 8px;
+    background: transparent;
+    min-height: 0;
+}
+.metric {
+    padding: 0 9px;
+}
+.control {
+    color: @tz_subtext;
+}
+.control:hover {
+    color: @tz_accent;
+}
+.control.disconnected {
+    color: @tz_urgent;
+}
+.control.muted {
+    color: @tz_muted;
+}
+.glyph {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+}
+
+/* ── Notification bell ──────────────────────────────────────────────────── */
+button.bell {
+    background: transparent;
+    padding: 0 8px;
+    color: @tz_subtext;
+    min-height: 0;
+}
+button.bell:hover {
+    color: @tz_accent;
+}
+button.bell.unread {
+    color: @tz_accent;
+}
+
+/* ── Clock ──────────────────────────────────────────────────────────────── */
+button.clock {
+    background: transparent;
+    color: @tz_text;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    padding: 0 10px;
+    min-height: 0;
+}
+button.clock:hover {
+    color: @tz_text;
+    background: alpha(@tz_accent, 0.08);
+    border-radius: 9px;
+}
+
+/* ── Submap indicator ───────────────────────────────────────────────────── */
+.submap-label {
+    color: @tz_gold;
+    font-weight: 600;
+    padding: 0 8px;
+}
+.submap-hint {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
+    color: @tz_muted;
+    padding: 0 6px;
+}
+
+/* ── Game mode ──────────────────────────────────────────────────────────── */
+.gamemode {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    color: @tz_gold;
+    padding: 0;
+}
+.gamemode.active {
+    padding: 0 8px;
+    color: @tz_gold;
+    text-shadow: 0 0 8px alpha(@tz_gold, 0.60);
+}
+.gamemode-fps {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 12px;
+    color: @tz_accent;
+    padding: 0 4px;
+}
+
+/* ── Power ──────────────────────────────────────────────────────────────── */
+button.power {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    background: transparent;
+    color: @tz_gold;
+    padding: 0 11px 0 7px;
+    min-height: 0;
+}
+button.power:hover {
+    color: @tz_urgent;
+}
+
+/* ── Glass popovers (calendar / mixer / network) ────────────────────────── */
+popover.tz-popover > contents {
+    background: alpha(@tz_base, 0.96);
+    border: 1px solid alpha(@tz_accent, 0.18);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 20px 50px alpha(black, 0.55);
+    color: @tz_text;
+}
+.pop-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: @tz_text;
+}
+.pop-sub {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
+    color: @tz_muted;
+}
+.pop-mono {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
+    color: @tz_muted;
+}
+.pop-mono-val {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
+    color: @tz_subtext;
+}
+.chip-connected {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    color: @tz_accent;
+    background: alpha(@tz_accent, 0.12);
+    border-radius: 5px;
+    padding: 2px 7px;
+}
+
+/* Calendar (clock popover). */
+calendar.tz-cal {
+    background: transparent;
+    color: @tz_subtext;
+    padding: 4px 0 0;
+}
+calendar.tz-cal:selected {
+    color: @tz_on_accent;
+    background: @tz_accent;
+    border-radius: 6px;
+    font-weight: 700;
+}
+calendar.tz-cal.highlight {
+    color: @tz_accent;
+}
+
+/* Mixer rows (audio popover). */
+.mix-label {
+    font-size: 11px;
+    color: @tz_subtext;
+}
+.mix-val {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 11px;
+    color: @tz_muted;
+}
+levelbar.mix trough {
+    min-height: 5px;
+    border-radius: 3px;
+    background: alpha(@tz_text, 0.08);
+}
+levelbar.mix block.filled {
+    border-radius: 3px;
+    background: @tz_accent;
+    border: none;
+}
+levelbar.mix block.empty {
+    background: transparent;
+    border: none;
+}

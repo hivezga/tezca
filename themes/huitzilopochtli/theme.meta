@@ -1,0 +1,6 @@
+# Tezca curated theme metadata. Simple `key = value` lines (parsed by `tezca`).
+# One of the four Tezcatlipocas — the obsidian base with a per-direction accent.
+name = huitzilopochtli
+description = Huitzilopochtli — south · sun · will; the obsidian base with a blue accent
+wallpaper = obsidian-teal.jpg
+mode = dark

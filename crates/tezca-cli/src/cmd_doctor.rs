@@ -406,8 +406,10 @@ fn dependency_checks() -> Vec<Check> {
         ("matugen", false, &[]),
         ("hyprlock", false, &[]),
         ("hypridle", false, &[]),
+        ("tezca-bar", false, &[]),         // Phase 10 bespoke menubar (build via install.sh)
         ("tezca-dock", false, &[]),        // Phase 5 bespoke dock (build via install.sh)
         ("tezca-settings", false, &[]),    // Phase 8 control center (build via install.sh)
+        ("playerctl", false, &[]),         // Phase 10 bar now-playing (MPRIS)
         ("nwg-dock-hyprland", false, &[]), // Phase 4 dock (fallback for tezca-dock)
         ("wlogout", false, &[]),           // Phase 4 power menu
         ("hyprpicker", false, &[]),        // color picker (SUPER+SHIFT+P)
@@ -415,7 +417,8 @@ fn dependency_checks() -> Vec<Check> {
         ("ddcutil", false, &[]),           // Phase 9 external-monitor brightness (`tezca display brightness`)
     ];
 
-    deps.iter()
+    let mut checks: Vec<Check> = deps
+        .iter()
         .map(|(bin, required, alts)| {
             let present = which(bin) || alts.iter().any(|p| Path::new(p).exists());
             if present {
@@ -426,7 +429,29 @@ fn dependency_checks() -> Vec<Check> {
                 Check::warn(bin, "missing (install for the aesthetic stack)")
             }
         })
-        .collect()
+        .collect();
+
+    // Runtime: is a menubar actually up? tezca-bar (layer-shell) is the default;
+    // Waybar is the documented fallback. Not fatal — a fresh install just hasn't
+    // started it yet. A running tezca-bar also confirms layer-shell works.
+    checks.push(if proc_running("tezca-bar") {
+        Check::pass("menubar", "tezca-bar is running (layer-shell OK)")
+    } else if proc_running("waybar") {
+        Check::warn("menubar", "tezca-bar not running — Waybar fallback is up")
+    } else {
+        Check::warn("menubar", "no menubar running — start it with `tezca bar start`")
+    });
+
+    checks
+}
+
+/// True if a process with the exact name `name` is alive (`pkill -0 -x`).
+fn proc_running(name: &str) -> bool {
+    Command::new("pkill")
+        .args(["-0", "-x", name])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------

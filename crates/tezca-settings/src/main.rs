@@ -1,14 +1,14 @@
 //! tezca-settings — the Project:Tezca GTK4 control center.
 //!
 //! A single-instance obsidian-glass window: an icon sidebar + a stack of pages
-//! (Appearance, Displays, Dock, Desktop, Keybinds, Gaming, System). It owns no
+//! (Appearance, Displays, Bar, Dock, Desktop, Keybinds, Gaming, System). It owns no
 //! state — every action shells out to the `tezca` CLI / hyprctl / the
 //! hypr/scripts helpers, so the GUI and the keyboard bindings drive exactly the
 //! same code paths. Pages are built lazily on first visit (so e.g. the slow DDC
 //! brightness probe on the Displays tab never blocks startup).
 //!
 //! Launched by `tezca settings` (bound to SUPER+SHIFT+A). An optional
-//! `--page <appearance|displays|dock|desktop|keybinds|gaming|system>` opens
+//! `--page <appearance|displays|bar|dock|desktop|keybinds|gaming|system>` opens
 //! straight to a tab.
 
 mod backend;
@@ -31,6 +31,7 @@ const APP_ID: &str = "dev.tezca.Settings";
 const PAGES: &[(&str, &str, &str)] = &[
     ("appearance", "Appearance", "applications-graphics-symbolic"),
     ("displays", "Displays", "video-display-symbolic"),
+    ("bar", "Bar", "open-menu-symbolic"),
     ("dock", "Dock", "view-grid-symbolic"),
     ("desktop", "Desktop", "preferences-desktop-symbolic"),
     ("keybinds", "Keybinds", "input-keyboard-symbolic"),
@@ -157,6 +158,7 @@ fn build_page(id: &str, window: &Window) -> Widget {
     match id {
         "appearance" => pages::appearance(window),
         "displays" => pages::displays(window),
+        "bar" => pages::bar(),
         "dock" => pages::dock(),
         "desktop" => pages::desktop(),
         "keybinds" => pages::keybinds(window),

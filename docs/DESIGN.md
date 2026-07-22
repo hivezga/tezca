@@ -115,10 +115,14 @@ long-term *stability + performance + beauty*, ideally Rust + CSS.
 
 **Decision — hybrid, phased:**
 
-- **Top menubar = Waybar**, permanently. It's the most battle-tested, lowest-overhead
-  bar; GTK CSS gives us the full obsidian-glass menubar (clock, tray, indicators,
-  per-monitor workspaces, system stats). This is exactly where you want *boring
-  reliability* — it's always on screen.
+- **Top menubar = Waybar**, initially — the most battle-tested, lowest-overhead bar,
+  with GTK CSS for the obsidian-glass look (clock, tray, indicators, per-monitor
+  workspaces, system stats). ***Superseded in Phase 10*** by **`tezca-bar`** (see the
+  update note below): once the dock proved a bespoke gtk4-layer-shell surface is a
+  daily-driveable win, the same approach applied to the menubar unlocks things Waybar
+  can't render from config — inline live sparklines, expandable glass popovers, an
+  MPRIS now-playing widget, per-app menus, and animated state transitions. Waybar
+  stays in the repo as a documented fallback.
 - **Dock = nwg-dock-hyprland** now (mature, purpose-built: autohide, pinned launchers,
   running indicators), then **replaced by `tezca-dock`** — a bespoke **Rust + GTK4 +
   gtk4-layer-shell** dock — as the flagship v2 component with real macOS *magnification*
@@ -129,6 +133,24 @@ long-term *stability + performance + beauty*, ideally Rust + CSS.
 while keeping the always-critical menubar on software that will still be maintained in
 five years. You get Rust + CSS where it matters, and stability everywhere else.
 (Note: **yasb** is Windows-only — not viable on Hyprland; ruled out.)
+
+**Update (Phase 10) — `tezca-bar` lands (Custom Rust core #4).** The "keep Waybar
+forever" call above is retired. `crates/tezca-bar/` is a bespoke **Rust + GTK4 +
+gtk4-layer-shell** top menubar replacing Waybar, built on the same pattern as
+`tezca-dock`: obsidian-glass layer surface (namespace `tezca-bar`, blurred by a
+`layerrule`), one window per monitor, palette read live from
+`~/.config/tezca/current/colors.css` and repainted on **SIGUSR2** (so `tezca theme`
+reskins it with no restart). Left cluster = Tezca "mirror" menu · per-app label ·
+per-output workspaces; centre = MPRIS now-playing; right = live CPU/MEM sparklines ·
+network/volume/brightness/battery · notification bell · clock · power, each clock/
+audio/network module expanding into a glass popover. Per-monitor adaptive: the
+ultrawide shows the full cluster, the 1440p secondary drops the per-app label and
+tightens. It also introduces the **four Tezcatlipoca themes** (`obsidian` · `xipe` ·
+`huitzilopochtli` · `quetzalcoatl`) — one obsidian base, one accent per direction.
+Controlled by `tezca bar start|stop|restart|toggle|config|set`; SIGUSR1 toggles
+visibility (the `ALT+Right-Ctrl` bind). Waybar's `config/waybar/` is kept as a
+fallback. Data sources stay shell-out/`/proc` (hyprctl, wpctl, nmcli, playerctl,
+swaync-client) so the crate carries no deps beyond the dock's.
 
 ---
 

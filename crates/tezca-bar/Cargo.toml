@@ -1,0 +1,27 @@
+# tezca-bar — the bespoke gtk4-rs top menubar (DESIGN.md §6, Custom Rust core #4).
+#
+# Replaces Waybar. Like tezca-dock it carries the GTK stack and is a separate
+# workspace member so those deps never touch the std-only `tezca` control CLI.
+# Deps are deliberately identical to tezca-dock's — every data source is a
+# std/shell-out (hyprctl, /proc, nmcli, wpctl, playerctl, swaync-client), so the
+# bar stays dependency-light and offline-buildable.
+[package]
+name = "tezca-bar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Bespoke top menubar for Project:Tezca (GTK4 + layer-shell), replaces Waybar"
+
+[[bin]]
+name = "tezca-bar"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_10"] }
+gtk4-layer-shell = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-channel = "2"
+signal-hook = "0.3"

@@ -1,0 +1,6 @@
+# Tezca curated theme metadata. Simple `key = value` lines (parsed by `tezca`).
+# One of the four Tezcatlipocas — the obsidian base with a per-direction accent.
+name = quetzalcoatl
+description = Quetzalcoatl — west · wind · wisdom; the obsidian base with a white accent
+wallpaper = obsidian-teal.jpg
+mode = dark

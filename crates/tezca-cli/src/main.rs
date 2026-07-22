@@ -8,6 +8,7 @@
 //!   game    gaming profile toggle + launch wrapper (Phase 6)
 //!   install bootstrap guidance (delegates to install.sh)
 
+mod cmd_bar;
 mod cmd_display;
 mod cmd_dock;
 mod cmd_doctor;
@@ -73,6 +74,10 @@ fn main() -> ExitCode {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_dock::run(&subargs) as u8)
         }
+        Some("bar") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_bar::run(&subargs) as u8)
+        }
         Some("display") | Some("monitor") => {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_display::run(&subargs) as u8)
@@ -127,6 +132,7 @@ fn print_help() {
         ("link", "symlink config/* into ~/.config (backs up existing)"),
         ("doctor", "verify NVIDIA env, modeset, monitors, and deps"),
         ("theme", "wallpaper-driven theming (list/set/wallpaper/reload)"),
+        ("bar", "control the top menubar (start/stop/restart/toggle/config/set)"),
         ("dock", "control the magnifying dock (start/stop/restart/config/set)"),
         ("display", "monitors: modes/scale + per-monitor brightness"),
         ("wallpaper", "per-monitor wallpaper overrides (set/clear/apply)"),

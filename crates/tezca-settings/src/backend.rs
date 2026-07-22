@@ -190,7 +190,17 @@ pub fn brightness(name: &str) -> Option<i32> {
 
 /// The effective dock config as key→value strings (`tezca dock config`).
 pub fn dock_config() -> Vec<(String, String)> {
-    let Some(out) = tezca_out(&["dock", "config"]) else { return Vec::new() };
+    config_pairs(&["dock", "config"])
+}
+
+/// The effective bar config as key→value strings (`tezca bar config`).
+pub fn bar_config() -> Vec<(String, String)> {
+    config_pairs(&["bar", "config"])
+}
+
+/// Shared `key = value` parse for the `tezca <x> config` commands.
+fn config_pairs(args: &[&str]) -> Vec<(String, String)> {
+    let Some(out) = tezca_out(args) else { return Vec::new() };
     out.lines()
         .filter_map(|l| {
             let (k, v) = l.split_once('=')?;

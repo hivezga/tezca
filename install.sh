@@ -81,16 +81,17 @@ else
 fi
 echo
 
-# --- 2. build tezca + tezca-dock + tezca-settings -------------------------
-# The workspace build compiles the std-only `tezca` CLI plus the two gtk4-rs
-# binaries: `tezca-dock` (magnifying dock) and `tezca-settings` (control center).
-# The GTK crates (already in the package set below) are slow on first build.
-say "Building the tezca workspace (CLI + dock + settings)"
+# --- 2. build tezca + tezca-dock + tezca-bar + tezca-settings -------------
+# The workspace build compiles the std-only `tezca` CLI plus the three gtk4-rs
+# binaries: `tezca-dock` (magnifying dock), `tezca-bar` (top menubar), and
+# `tezca-settings` (control center). The GTK crates (already in the package set
+# below) are slow on first build.
+say "Building the tezca workspace (CLI + dock + bar + settings)"
 ( cd "$REPO_DIR" && CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release )
 
 BIN_DIR="${HOME}/.local/bin"
 mkdir -p "$BIN_DIR"
-for b in tezca tezca-dock tezca-settings; do
+for b in tezca tezca-dock tezca-bar tezca-settings; do
     SRC="${TARGET_DIR}/release/${b}"
     [[ -x "$SRC" ]] || die "build succeeded but $SRC is missing"
     install -m755 "$SRC" "${BIN_DIR}/${b}"

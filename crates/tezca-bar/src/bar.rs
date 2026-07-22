@@ -81,6 +81,7 @@ impl Bar {
         bar.tick_clock();
         bar.tick_cpu();
         bar.tick_mem();
+        bar.tick_gpu();
         bar.tick_controls();
         bar.start_timers();
         bar
@@ -110,6 +111,7 @@ impl Bar {
         });
         every(self.cfg.cpu_interval, Box::new(|b| b.tick_cpu()), self);
         every(self.cfg.mem_interval, Box::new(|b| b.tick_mem()), self);
+        every(self.cfg.gpu_interval, Box::new(|b| b.tick_gpu()), self);
         // Controls (audio/net/battery/brightness/bell/gamemode/now-playing).
         every(2, Box::new(|b| b.tick_controls()), self);
     }
@@ -156,6 +158,24 @@ impl Bar {
         for s in &self.surfaces {
             s.mem_spark.push(m.used_frac);
             s.mem_val.set_text(&format!("{pct}%"));
+        }
+    }
+
+    fn tick_gpu(&self) {
+        match sysinfo::gpu() {
+            Some(frac) => {
+                let pct = (frac * 100.0).round() as u32;
+                for s in &self.surfaces {
+                    s.gpu_spark.push(frac);
+                    s.gpu_val.set_text(&format!("{pct}%"));
+                    s.gpu_metric.set_visible(true);
+                }
+            }
+            None => {
+                for s in &self.surfaces {
+                    s.gpu_metric.set_visible(false);
+                }
+            }
         }
     }
 
@@ -225,6 +245,9 @@ struct Surface {
     cpu_val: Label,
     mem_spark: Sparkline,
     mem_val: Label,
+    gpu_spark: Sparkline,
+    gpu_val: Label,
+    gpu_metric: GtkBox,
 
     net_ctl: Button,
     net_glyph: Label,
@@ -358,17 +381,26 @@ impl Surface {
         right.append(&gamemode_box);
 
         // Metrics: CPU + MEM sparklines.
-        let cpu_spark = draw::sparkline(pal, false);
+        let cpu_spark = draw::sparkline(pal, draw::SparkColor::Accent);
         let cpu_val = Label::new(Some("0%"));
         cpu_val.add_css_class("metric-val");
         let cpu_metric = metric(G_CPU_LABEL, &cpu_spark.area, &cpu_val);
 
-        let mem_spark = draw::sparkline(pal, true);
+        let mem_spark = draw::sparkline(pal, draw::SparkColor::Gold);
         let mem_val = Label::new(Some("0%"));
         mem_val.add_css_class("metric-val");
         let mem_metric = metric(G_MEM_LABEL, &mem_spark.area, &mem_val);
+
+        // GPU — hidden until the first successful read (absent on GPU-less rigs).
+        let gpu_spark = draw::sparkline(pal, draw::SparkColor::AccentDim);
+        let gpu_val = Label::new(Some("0%"));
+        gpu_val.add_css_class("metric-val");
+        let gpu_metric = metric(G_GPU_LABEL, &gpu_spark.area, &gpu_val);
+        gpu_metric.set_visible(false);
+
         right.append(&cpu_metric);
         right.append(&mem_metric);
+        right.append(&gpu_metric);
         right.append(&sep());
 
         // Controls: network (button → popover).
@@ -496,6 +528,9 @@ impl Surface {
             cpu_val,
             mem_spark,
             mem_val,
+            gpu_spark,
+            gpu_val,
+            gpu_metric,
             net_ctl,
             net_glyph,
             net_val,
@@ -660,6 +695,7 @@ impl Surface {
         self.mirror.queue_draw();
         self.cpu_spark.area.queue_draw();
         self.mem_spark.area.queue_draw();
+        self.gpu_spark.area.queue_draw();
     }
 }
 
@@ -669,6 +705,7 @@ impl Surface {
 
 const G_CPU_LABEL: &str = "CPU";
 const G_MEM_LABEL: &str = "MEM";
+const G_GPU_LABEL: &str = "GPU";
 
 /// A 1×18 hairline separator.
 fn sep() -> GtkBox {

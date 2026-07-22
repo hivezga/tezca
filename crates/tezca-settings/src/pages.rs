@@ -272,19 +272,21 @@ pub fn bar() -> Widget {
     page.append(&section_header("Metrics"));
     let cpu_iv = spin_from("cpu_interval", 1.0, 30.0, 1.0, 0, &get);
     let mem_iv = spin_from("mem_interval", 1.0, 30.0, 1.0, 0, &get);
+    let gpu_iv = spin_from("gpu_interval", 1.0, 30.0, 1.0, 0, &get);
     let net_iv = spin_from("net_interval", 1.0, 30.0, 1.0, 0, &get);
     let compact = spin_from("compact_width", 0.0, 6000.0, 100.0, 0, &get);
     page.append(&control_row("CPU poll (s)", &cpu_iv));
     page.append(&control_row("Memory poll (s)", &mem_iv));
+    page.append(&control_row("GPU poll (s)", &gpu_iv));
     page.append(&control_row("Network poll (s)", &net_iv));
     page.append(&control_row("Compact below width (px)", &compact));
 
     let apply = Button::with_label("Apply bar settings");
     apply.add_css_class("tz-primary");
     {
-        let (shape, height, mtop, mside, cpu_iv, mem_iv, net_iv, compact) = (
+        let (shape, height, mtop, mside, cpu_iv, mem_iv, gpu_iv, net_iv, compact) = (
             shape.clone(), height.clone(), mtop.clone(), mside.clone(),
-            cpu_iv.clone(), mem_iv.clone(), net_iv.clone(), compact.clone(),
+            cpu_iv.clone(), mem_iv.clone(), gpu_iv.clone(), net_iv.clone(), compact.clone(),
         );
         apply.connect_clicked(move |_| {
             let shape_s = SHAPES.get(shape.selected() as usize).copied().unwrap_or("floating");
@@ -293,6 +295,7 @@ pub fn bar() -> Widget {
             let mside_s = (mside.value() as i64).to_string();
             let cpu_s = (cpu_iv.value() as i64).to_string();
             let mem_s = (mem_iv.value() as i64).to_string();
+            let gpu_s = (gpu_iv.value() as i64).to_string();
             let net_s = (net_iv.value() as i64).to_string();
             let compact_s = (compact.value() as i64).to_string();
             backend::tezca(&[
@@ -303,6 +306,7 @@ pub fn bar() -> Widget {
                 "margin_side", &mside_s,
                 "cpu_interval", &cpu_s,
                 "mem_interval", &mem_s,
+                "gpu_interval", &gpu_s,
                 "net_interval", &net_s,
                 "compact_width", &compact_s,
             ]);

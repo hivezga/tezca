@@ -60,9 +60,18 @@ pub fn mirror_glyph(pal: &SharedPalette, edge: f64) -> DrawingArea {
     area
 }
 
+/// Which theme token a sparkline strokes with — one per metric so CPU, MEM, and
+/// GPU read apart at a glance while all staying theme-driven.
+#[derive(Clone, Copy)]
+pub enum SparkColor {
+    Accent,    // CPU
+    Gold,      // MEM
+    AccentDim, // GPU
+}
+
 /// A live sparkline. Returns the area and its history buffer; push a value in
-/// [0,1] and call `area.queue_draw()` to advance it. `gold` selects the stroke
-/// colour (accent when false, gold when true), matching CPU vs MEM.
+/// [0,1] and call `area.queue_draw()` to advance it. `color` selects the stroke
+/// token, matching CPU / MEM / GPU.
 pub struct Sparkline {
     pub area: DrawingArea,
     pub history: Rc<RefCell<VecDeque<f64>>>,
@@ -70,7 +79,7 @@ pub struct Sparkline {
 
 const SPARK_POINTS: usize = 24;
 
-pub fn sparkline(pal: &SharedPalette, gold: bool) -> Sparkline {
+pub fn sparkline(pal: &SharedPalette, color: SparkColor) -> Sparkline {
     let area = DrawingArea::new();
     area.set_content_width(34);
     area.set_content_height(14);
@@ -85,7 +94,11 @@ pub fn sparkline(pal: &SharedPalette, gold: bool) -> Sparkline {
             return;
         }
         let p = pal_c.borrow();
-        let col = if gold { p.gold } else { p.accent };
+        let col = match color {
+            SparkColor::Accent => p.accent,
+            SparkColor::Gold => p.gold,
+            SparkColor::AccentDim => p.accent_dim,
+        };
         let (w, h) = (w as f64, h as f64);
         let n = hist.len();
         let dx = w / (n - 1) as f64;

@@ -36,6 +36,7 @@ pub struct Config {
     /// Poll intervals, seconds.
     pub cpu_interval: u32,
     pub mem_interval: u32,
+    pub gpu_interval: u32,
     pub net_interval: u32,
     /// strftime-style clock format (glib::DateTime::format).
     pub clock_format: String,
@@ -53,6 +54,7 @@ impl Default for Config {
             margin_side: 10,
             cpu_interval: 3,
             mem_interval: 5,
+            gpu_interval: 3,
             net_interval: 5,
             clock_format: "%a %d %b   %H:%M".to_string(),
             compact_width: 3000,
@@ -98,6 +100,7 @@ impl Config {
                 "margin_side" => set_i32(&mut self.margin_side, v),
                 "cpu_interval" => set_u32(&mut self.cpu_interval, v),
                 "mem_interval" => set_u32(&mut self.mem_interval, v),
+                "gpu_interval" => set_u32(&mut self.gpu_interval, v),
                 "net_interval" => set_u32(&mut self.net_interval, v),
                 "clock_format" => self.clock_format = v.to_string(),
                 "compact_width" => set_i32(&mut self.compact_width, v),
@@ -108,6 +111,7 @@ impl Config {
         self.height = self.height.clamp(20, 80);
         self.cpu_interval = self.cpu_interval.max(1);
         self.mem_interval = self.mem_interval.max(1);
+        self.gpu_interval = self.gpu_interval.max(1);
         self.net_interval = self.net_interval.max(1);
     }
 }

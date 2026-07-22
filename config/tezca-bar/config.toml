@@ -12,17 +12,18 @@
 # --- Shape -----------------------------------------------------------------
 # floating : rounded glass strip, inset from the screen edges (macOS feel).
 # edge     : full-width, square, edge-to-edge, single bottom hairline.
-shape = "floating"
+shape = floating
 
 # --- Geometry --------------------------------------------------------------
-height      = 40     # bar height, px (the glass strip)
-margin_top  = 6      # gap above the bar (floating only), px
-margin_side = 10     # gap left/right of the bar (floating only), px
+height = 40  # bar height, px (the glass strip)
+margin_top = 6  # gap above the bar (floating only), px
+margin_side = 10  # gap left/right of the bar (floating only), px
 
 # --- Poll intervals (seconds) ----------------------------------------------
-cpu_interval = 3     # CPU sparkline + percentage
-mem_interval = 5     # MEM sparkline + percentage
-net_interval = 5     # network glyph + throughput
+cpu_interval = 3  # CPU sparkline + percentage
+mem_interval = 5  # MEM sparkline + percentage
+gpu_interval = 3  # GPU sparkline + percentage (auto-hidden if no GPU source)
+net_interval = 5  # network glyph + throughput
 
 # --- Clock -----------------------------------------------------------------
 # strftime-style; matches the Waybar format the bar reaches parity with.

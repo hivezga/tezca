@@ -22,6 +22,7 @@ const SCALARS: &[(&str, &str)] = &[
     ("margin_side", "10"),
     ("cpu_interval", "3"),
     ("mem_interval", "5"),
+    ("gpu_interval", "3"),
     ("net_interval", "5"),
     ("clock_format", "%a %d %b   %H:%M"),
     ("compact_width", "3000"),

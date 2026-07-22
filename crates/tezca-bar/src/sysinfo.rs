@@ -239,6 +239,53 @@ pub fn battery() -> Option<Battery> {
     None
 }
 
+/// GPU utilization fraction in [0,1], or None when no source is available.
+///
+/// Tries the generic DRM sysfs `gpu_busy_percent` first (AMD/Intel expose it),
+/// then `nvidia-smi` (the target rig's RTX 4070 Ti on nvidia-open). None → the
+/// bar hides the GPU metric, exactly like battery/brightness.
+pub fn gpu() -> Option<f64> {
+    if let Some(f) = sysfs_gpu_busy() {
+        return Some(f);
+    }
+    nvidia_gpu()
+}
+
+/// First `card<N>` DRM device exposing `device/gpu_busy_percent` (0–100).
+fn sysfs_gpu_busy() -> Option<f64> {
+    let rd = std::fs::read_dir("/sys/class/drm").ok()?;
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let name = name.to_str().unwrap_or("");
+        // Match cardN (a whole GPU), not cardN-DP-1 connectors or renderD* nodes.
+        let is_card = name.len() > 4
+            && name.starts_with("card")
+            && name[4..].chars().all(|c| c.is_ascii_digit());
+        if !is_card {
+            continue;
+        }
+        let p = e.path().join("device/gpu_busy_percent");
+        if let Some(v) = read_trim(&p).and_then(|s| s.parse::<f64>().ok()) {
+            return Some((v / 100.0).clamp(0.0, 1.0));
+        }
+    }
+    None
+}
+
+/// NVIDIA utilization via `nvidia-smi` (first GPU).
+fn nvidia_gpu() -> Option<f64> {
+    let out = Command::new("nvidia-smi")
+        .args(["--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    let v: f64 = s.lines().next()?.trim().parse().ok()?;
+    Some((v / 100.0).clamp(0.0, 1.0))
+}
+
 /// Backlight brightness percent, or None (desktop monitors use DDC, not sysfs).
 pub fn brightness() -> Option<u32> {
     let dir = Path::new("/sys/class/backlight");

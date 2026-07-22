@@ -141,7 +141,7 @@ gtk4-layer-shell** top menubar replacing Waybar, built on the same pattern as
 `layerrule`), one window per monitor, palette read live from
 `~/.config/tezca/current/colors.css` and repainted on **SIGUSR2** (so `tezca theme`
 reskins it with no restart). Left cluster = Tezca "mirror" menu · per-app label ·
-per-output workspaces; centre = MPRIS now-playing; right = live CPU/MEM sparklines ·
+per-output workspaces; centre = MPRIS now-playing; right = live CPU/MEM/GPU sparklines ·
 network/volume/brightness/battery · notification bell · clock · power, each clock/
 audio/network module expanding into a glass popover. Per-monitor adaptive: the
 ultrawide shows the full cluster, the 1440p secondary drops the per-app label and

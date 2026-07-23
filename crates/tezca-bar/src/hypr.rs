@@ -7,6 +7,7 @@
 //! workspace + active-window + submap state the bar needs.
 
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -86,6 +87,46 @@ pub fn goto_workspace(id: i32) {
     let _ = Command::new("hyprctl")
         .args(["dispatch", "workspace", &id.to_string()])
         .status();
+}
+
+/// One open window, trimmed to what workspace compaction needs.
+#[derive(Debug, Clone, Deserialize)]
+struct Client {
+    #[serde(default)]
+    address: String,
+    #[serde(default)]
+    workspace: WsRef,
+    #[serde(default)]
+    pinned: bool,
+}
+
+/// Window addresses grouped by the workspace they sit on (pinned windows, which
+/// follow the monitor rather than a workspace, are excluded).
+pub fn clients_by_workspace() -> HashMap<i32, Vec<String>> {
+    let mut map: HashMap<i32, Vec<String>> = HashMap::new();
+    for c in query::<Client>("clients") {
+        if c.pinned || c.address.is_empty() {
+            continue;
+        }
+        map.entry(c.workspace.id).or_default().push(c.address);
+    }
+    map
+}
+
+/// Silently move every window on `from` to `to`, for each `(from, to)` pair, in
+/// one `hyprctl --batch` so the shuffle lands atomically. Addresses come from a
+/// pre-move snapshot (`by_ws`) so simultaneous swaps resolve correctly.
+pub fn apply_moves(moves: &[(i32, i32)], by_ws: &HashMap<i32, Vec<String>>) {
+    let mut batch = String::new();
+    for &(from, to) in moves {
+        for addr in by_ws.get(&from).into_iter().flatten() {
+            batch.push_str(&format!("dispatch movetoworkspacesilent {to},address:{addr} ; "));
+        }
+    }
+    let batch = batch.trim_end_matches(" ; ");
+    if !batch.is_empty() {
+        let _ = Command::new("hyprctl").arg("--batch").arg(batch).status();
+    }
 }
 
 fn query<T: for<'de> Deserialize<'de>>(what: &str) -> Vec<T> {

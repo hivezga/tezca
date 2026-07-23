@@ -72,6 +72,10 @@ pub struct Config {
     /// Show only occupied (windowed) workspaces plus the focused one, hiding
     /// empty pills. Applies whether the set is assigned or dynamic.
     pub hide_empty: bool,
+    /// Auto-compact each assigned workspace set: when a non-visible workspace
+    /// empties, pull the higher workspaces in that monitor's set down to close
+    /// the gap (windows move, staying on the same monitor). Needs `ws_assign`.
+    pub compact: bool,
 }
 
 impl Default for Config {
@@ -90,6 +94,7 @@ impl Default for Config {
             numerals: Numerals::Arabic,
             ws_assign: HashMap::new(),
             hide_empty: false,
+            compact: false,
         }
     }
 }
@@ -145,6 +150,7 @@ impl Config {
                     }
                 }
                 "workspace_hide_empty" | "hide_empty_workspaces" => set_bool(&mut self.hide_empty, v),
+                "workspace_compact" | "compact_workspaces" => set_bool(&mut self.compact, v),
                 // `workspaces.<connector> = <spec>` — per-output workspace sets.
                 _ if k.starts_with("workspaces.") => {
                     let output = k["workspaces.".len()..].trim();

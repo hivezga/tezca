@@ -45,6 +45,12 @@ workspace_numerals = mayan
 # hiding empty pills. Applies to both assigned and dynamic sets.
 workspace_hide_empty = true
 
+# Auto-compact each monitor's assigned set: when a workspace you're not looking
+# at empties out, the higher workspaces in that monitor's set slide down to
+# close the gap (windows move, staying on the same monitor; the workspace you're
+# viewing never moves). Needs a `workspaces.<connector>` assignment above.
+workspace_compact = true
+
 # Assign which workspaces each monitor's bar shows, by connector name. A monitor
 # listed here shows exactly those pills, always (empty ones included), in order;
 # unlisted monitors mirror whatever Hyprland has placed on them. Accepts an

@@ -21,7 +21,7 @@ use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, CenterBox, Image, Label, Orientation, Overlay, Window};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 // Nerd Font glyphs — the exact codepoints from config/waybar/config.jsonc, plus
@@ -54,6 +54,9 @@ pub struct Bar {
     tray_cmd: async_channel::Sender<tray::TrayCmd>,
     tray_items: RefCell<Vec<tray::TrayItemView>>,
     tray_menus: RefCell<HashMap<String, tray::MenuNode>>,
+    /// The moves the last compaction pass dispatched — if the same plan recurs
+    /// (a window that wouldn't move), we skip it rather than loop forever.
+    last_compaction: RefCell<Vec<(i32, i32)>>,
 }
 
 impl Bar {
@@ -88,6 +91,7 @@ impl Bar {
             tray_cmd,
             tray_items: RefCell::new(Vec::new()),
             tray_menus: RefCell::new(HashMap::new()),
+            last_compaction: RefCell::new(Vec::new()),
         });
 
         bar.refresh_hypr();
@@ -132,10 +136,38 @@ impl Bar {
     /// Refresh workspaces + the per-app label from live Hyprland state.
     pub fn refresh_hypr(&self) {
         let snap = hypr::snapshot();
+        if self.cfg.compact {
+            self.compact_workspaces(&snap);
+        }
         for s in &self.surfaces {
             s.set_workspaces(&snap);
             s.set_app(&snap.active.class);
         }
+    }
+
+    /// Per-monitor gap-compaction: within each assigned workspace set, pull
+    /// occupied workspaces down to the lowest slots, preserving order and never
+    /// moving the monitor's visible workspace (so nothing shifts under you).
+    /// Only queries windows + dispatches moves when a gap actually exists.
+    fn compact_workspaces(&self, snap: &hypr::Snapshot) {
+        let occ: HashSet<i32> =
+            snap.workspaces.iter().filter(|w| w.windows > 0).map(|w| w.id).collect();
+        let mut moves = Vec::new();
+        for (output, set) in &self.cfg.ws_assign {
+            let visible = hypr::active_ws_for(&snap.monitors, output);
+            moves.extend(plan_compaction(set, visible, |id| occ.contains(&id)));
+        }
+        if moves.is_empty() {
+            self.last_compaction.borrow_mut().clear();
+            return;
+        }
+        // A repeat of the exact plan means the previous moves didn't take (an
+        // immovable window) — bail instead of dispatching in a tight loop.
+        if *self.last_compaction.borrow() == moves {
+            return;
+        }
+        *self.last_compaction.borrow_mut() = moves.clone();
+        hypr::apply_moves(&moves, &hypr::clients_by_workspace());
     }
 
     /// A submap change (empty = default submap).
@@ -918,6 +950,29 @@ fn ws_button(id: i32, label: &str, active: bool, occupied: bool, mayan: bool) ->
     }
     b.connect_clicked(move |_| hypr::goto_workspace(id));
     b
+}
+
+/// Plan the window moves that pack a monitor's ordered workspace `set` — the
+/// occupied workspaces slide down to the lowest slots, order preserved — while
+/// leaving `visible` (the monitor's shown workspace) fixed and never moving
+/// content across it. Returns `(from, to)` pairs; empty when already compact.
+fn plan_compaction(set: &[i32], visible: i32, occupied: impl Fn(i32) -> bool) -> Vec<(i32, i32)> {
+    let mut moves = Vec::new();
+    // Content stays on its side of the visible workspace, so pack each side
+    // independently. When `visible` isn't in this set, the whole set is one part.
+    let parts: Vec<&[i32]> = match set.iter().position(|&w| w == visible) {
+        Some(i) => vec![&set[..i], &set[i + 1..]],
+        None => vec![set],
+    };
+    for part in parts {
+        let filled: Vec<i32> = part.iter().copied().filter(|&w| occupied(w)).collect();
+        for (slot, &src) in filled.iter().enumerate() {
+            if src != part[slot] {
+                moves.push((src, part[slot]));
+            }
+        }
+    }
+    moves
 }
 
 /// A workspace's pill label in the configured numeral system.

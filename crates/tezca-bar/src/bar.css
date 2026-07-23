@@ -109,6 +109,14 @@ button.ws:hover {
     color: @tz_text;
     background: alpha(@tz_accent, 0.10);
 }
+/* Mayan bar-and-dot numerals: render from the Mayan Numerals Unicode block,
+   which only Noto Sans Mayan Numerals covers here — name it first so Pango
+   picks it up for those codepoints (else they'd fall back to tofu boxes). */
+button.ws.mayan {
+    font-family: "Noto Sans Mayan Numerals", "JetBrainsMono Nerd Font", monospace;
+    font-size: 20px;
+    padding: 0 10px;
+}
 button.ws.active {
     color: @tz_on_accent;
     background: @tz_accent;

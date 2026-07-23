@@ -10,7 +10,7 @@
 //! Data all comes from std/shell-out readers (see `hypr`, `sysinfo`,
 //! `nowplaying`, `notify`); this file is purely the GTK4 widget tree + wiring.
 
-use crate::config::{Config, Shape};
+use crate::config::{Config, Numerals, Shape};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
@@ -341,6 +341,10 @@ struct Surface {
     bar_box: CenterBox,
 
     ws_box: GtkBox,
+    /// Fixed workspace ids this output's bar always shows (from config), or None
+    /// to mirror whatever Hyprland has placed on this monitor.
+    ws_assigned: Option<Vec<i32>>,
+    numerals: Numerals,
     app_label: Label,
 
     submap_box: GtkBox,
@@ -395,6 +399,8 @@ impl Surface {
     ) -> Rc<Surface> {
         let output = monitor.connector().map(|s| s.to_string()).unwrap_or_default();
         let compact = monitor.geometry().width() < cfg.compact_width;
+        let ws_assigned = cfg.ws_assign.get(&output).cloned();
+        let numerals = cfg.numerals;
 
         let bar_box = CenterBox::new();
         bar_box.add_css_class("bar");
@@ -641,6 +647,8 @@ impl Surface {
             compact,
             bar_box,
             ws_box,
+            ws_assigned,
+            numerals,
             app_label,
             submap_box,
             submap_label,
@@ -682,21 +690,32 @@ impl Surface {
             self.ws_box.remove(&c);
         }
         let active = hypr::active_ws_for(&snap.monitors, &self.output);
-        let mut mine: Vec<&hypr::Workspace> = snap
-            .workspaces
-            .iter()
-            .filter(|w| w.id > 0 && (w.monitor == self.output || self.output.is_empty()))
-            .collect();
-        mine.sort_by_key(|w| w.id);
-        if mine.is_empty() {
+        let occupied = |id: i32| snap.workspaces.iter().any(|w| w.id == id && w.windows > 0);
+
+        // A configured set shows as fixed, persistent pills (empty ones included);
+        // otherwise mirror whatever Hyprland has placed on this monitor.
+        let ids: Vec<i32> = match &self.ws_assigned {
+            Some(list) => list.clone(),
+            None => {
+                let mut mine: Vec<i32> = snap
+                    .workspaces
+                    .iter()
+                    .filter(|w| w.id > 0 && (w.monitor == self.output || self.output.is_empty()))
+                    .map(|w| w.id)
+                    .collect();
+                mine.sort_unstable();
+                mine
+            }
+        };
+        let mayan = self.numerals == Numerals::Mayan;
+        if ids.is_empty() {
             // Never show an empty cluster.
-            let b = ws_button(active, true, false);
-            self.ws_box.append(&b);
+            self.ws_box.append(&ws_button(active, &ws_label(active, self.numerals), true, false, mayan));
             return;
         }
-        for w in mine {
-            let b = ws_button(w.id, w.id == active, w.windows > 0);
-            self.ws_box.append(&b);
+        for id in ids {
+            let label = ws_label(id, self.numerals);
+            self.ws_box.append(&ws_button(id, &label, id == active, occupied(id), mayan));
         }
     }
 
@@ -875,10 +894,14 @@ fn control_button() -> (Button, Label, Label) {
     (b, glyph, val)
 }
 
-/// A workspace pill button.
-fn ws_button(id: i32, active: bool, occupied: bool) -> Button {
-    let b = Button::with_label(&id.to_string());
+/// A workspace pill button showing `label`, switching to `id` on click.
+/// `mayan` styles it for Mayan bar-and-dot numerals (covering font + sizing).
+fn ws_button(id: i32, label: &str, active: bool, occupied: bool, mayan: bool) -> Button {
+    let b = Button::with_label(label);
     b.add_css_class("ws");
+    if mayan {
+        b.add_css_class("mayan");
+    }
     if active {
         b.add_css_class("active");
     } else if occupied {
@@ -886,6 +909,24 @@ fn ws_button(id: i32, active: bool, occupied: bool) -> Button {
     }
     b.connect_clicked(move |_| hypr::goto_workspace(id));
     b
+}
+
+/// A workspace's pill label in the configured numeral system.
+fn ws_label(id: i32, numerals: Numerals) -> String {
+    match numerals {
+        Numerals::Arabic => id.to_string(),
+        Numerals::Mayan => mayan(id),
+    }
+}
+
+/// Mayan numeral for `n` from the Unicode Mayan Numerals block
+/// (U+1D2E0 ZERO … U+1D2F3 NINETEEN — bars-and-dots), digits beyond 19.
+/// Needs a covering font (Noto Sans Mayan Numerals); see `button.ws.mayan`.
+fn mayan(n: i32) -> String {
+    match n {
+        0..=19 => char::from_u32(0x1D2E0 + n as u32).map(String::from).unwrap_or_else(|| n.to_string()),
+        _ => n.to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------

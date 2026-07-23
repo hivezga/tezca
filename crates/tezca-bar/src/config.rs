@@ -4,6 +4,7 @@
 //! stays dependency-light. Every field has a baked-in default, so a missing or
 //! partial file still runs.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Bar shape. `floating` is a rounded glass strip inset from the edges; `edge`
@@ -19,6 +20,25 @@ impl Shape {
         match s.trim().to_lowercase().as_str() {
             "floating" | "float" => Some(Shape::Floating),
             "edge" | "full" => Some(Shape::Edge),
+            _ => None,
+        }
+    }
+}
+
+/// How workspace pills are labelled: Western digits or Mayan bar-and-dot
+/// numerals (the Mesoamerican vigesimal glyphs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Numerals {
+    Arabic,
+    Mayan,
+}
+
+impl Numerals {
+    fn parse(s: &str) -> Option<Numerals> {
+        match s.trim().to_lowercase().as_str() {
+            "arabic" | "latin" | "western" | "digits" => Some(Numerals::Arabic),
+            // `nahuatl`/`aztec` kept as friendly aliases for the same glyph mode.
+            "mayan" | "maya" | "nahuatl" | "aztec" | "mexica" => Some(Numerals::Mayan),
             _ => None,
         }
     }
@@ -43,6 +63,12 @@ pub struct Config {
     /// Monitors narrower than this (px) render the compact layout: no per-app
     /// menu bar, tighter padding. The ultrawide primary stays full.
     pub compact_width: i32,
+    /// Workspace pill labels — Western digits or Nahuatl words.
+    pub numerals: Numerals,
+    /// Per-output workspace assignment: connector name → the workspace ids that
+    /// output's bar always shows, in this order. Empty = the default behaviour
+    /// (each bar shows whatever workspaces Hyprland has placed on its monitor).
+    pub ws_assign: HashMap<String, Vec<i32>>,
 }
 
 impl Default for Config {
@@ -58,6 +84,8 @@ impl Default for Config {
             net_interval: 5,
             clock_format: "%a %d %b   %H:%M".to_string(),
             compact_width: 3000,
+            numerals: Numerals::Arabic,
+            ws_assign: HashMap::new(),
         }
     }
 }
@@ -88,7 +116,10 @@ impl Config {
                 continue;
             }
             let Some((k, v)) = l.split_once('=') else { continue };
-            let (k, v) = (k.trim(), v.trim().trim_matches(|c| c == '"' || c == '\''));
+            // Strip a trailing `# comment` (matching `tezca bar config`'s reader)
+            // before quotes, so inline-documented values parse correctly.
+            let k = k.trim();
+            let v = v.split('#').next().unwrap_or("").trim().trim_matches(|c| c == '"' || c == '\'');
             match k {
                 "shape" => {
                     if let Some(s) = Shape::parse(v) {
@@ -104,6 +135,23 @@ impl Config {
                 "net_interval" => set_u32(&mut self.net_interval, v),
                 "clock_format" => self.clock_format = v.to_string(),
                 "compact_width" => set_i32(&mut self.compact_width, v),
+                "workspace_numerals" | "numerals" => {
+                    if let Some(n) = Numerals::parse(v) {
+                        self.numerals = n;
+                    }
+                }
+                // `workspaces.<connector> = <spec>` — per-output workspace sets.
+                _ if k.starts_with("workspaces.") => {
+                    let output = k["workspaces.".len()..].trim();
+                    match parse_ws_spec(v) {
+                        Some(ids) => {
+                            self.ws_assign.insert(output.to_string(), ids);
+                        }
+                        None => {
+                            self.ws_assign.remove(output);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -113,6 +161,31 @@ impl Config {
         self.mem_interval = self.mem_interval.max(1);
         self.gpu_interval = self.gpu_interval.max(1);
         self.net_interval = self.net_interval.max(1);
+    }
+}
+
+/// Parse a per-output workspace spec into an explicit id list:
+///   * `auto` / empty  → None (fall back to Hyprland's live placement)
+///   * `odd` / `even`  → 1,3,5,7,9 / 2,4,6,8,10
+///   * `1-5`           → an inclusive range
+///   * `1,3,5,7,9`     → an explicit comma list (order preserved)
+fn parse_ws_spec(v: &str) -> Option<Vec<i32>> {
+    let s = v.trim().to_lowercase();
+    match s.as_str() {
+        "" | "auto" | "dynamic" => None,
+        "odd" => Some((1..=10).filter(|n| n % 2 == 1).collect()),
+        "even" => Some((1..=10).filter(|n| n % 2 == 0).collect()),
+        _ => {
+            if let Some((a, b)) = s.split_once('-') {
+                if let (Ok(a), Ok(b)) = (a.trim().parse::<i32>(), b.trim().parse::<i32>()) {
+                    if a >= 1 && a <= b {
+                        return Some((a..=b).collect());
+                    }
+                }
+            }
+            let ids: Vec<i32> = s.split(',').filter_map(|p| p.trim().parse().ok()).filter(|n| *n > 0).collect();
+            (!ids.is_empty()).then_some(ids)
+        }
     }
 }
 

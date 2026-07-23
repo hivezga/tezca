@@ -26,7 +26,13 @@ const SCALARS: &[(&str, &str)] = &[
     ("net_interval", "5"),
     ("clock_format", "%a %d %b   %H:%M"),
     ("compact_width", "3000"),
+    ("workspace_numerals", "arabic"),
 ];
+
+/// Per-output workspace assignment keys look like `workspaces.<connector>` and
+/// so can't live in the fixed `SCALARS` table; `set` accepts anything under
+/// this prefix (e.g. `tezca bar set workspaces.DP-1 "1,3,5,7,9"`).
+const WS_ASSIGN_PREFIX: &str = "workspaces.";
 
 pub fn run(args: &[&str]) -> i32 {
     let r = match args.first().copied() {
@@ -121,6 +127,20 @@ fn cmd_config() -> Result<(), String> {
         let val = read_scalar(&text, key).unwrap_or_else(|| default.to_string());
         println!("{key} = {val}");
     }
+    // Plus any per-output workspace assignments the file defines (dynamic keys).
+    for l in text.lines() {
+        let t = l.trim();
+        if t.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = t.split_once('=') {
+            let k = k.trim();
+            if k.starts_with(WS_ASSIGN_PREFIX) {
+                let v = v.split('#').next().unwrap_or("").trim().trim_matches(|c| c == '"' || c == '\'');
+                println!("{k} = {v}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -136,7 +156,7 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
 
     for pair in args.chunks(2) {
         let (key, val) = (pair[0], pair[1]);
-        if SCALARS.iter().any(|(k, _)| *k == key) {
+        if SCALARS.iter().any(|(k, _)| *k == key) || key.starts_with(WS_ASSIGN_PREFIX) {
             set_line(&mut lines, key, val);
         } else {
             return Err(format!("unknown bar key: {key}"));

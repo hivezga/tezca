@@ -26,7 +26,35 @@ use signal_hook::consts::{SIGUSR1, SIGUSR2};
 
 const APP_ID: &str = "dev.tezca.bar";
 
+/// Put the directory this binary lives in onto `PATH`.
+///
+/// The bar is launched by uwsm / systemd `--user` at login, whose inherited
+/// PATH does NOT include `~/.local/bin` — where install.sh puts `tezca`,
+/// `tezca-settings`, `claude`, etc. (the very reason autostart.conf spells the
+/// bar's own path out in full). Without this, every shell-out to a sibling tool
+/// silently dies with "command not found": the mirror menu's Settings item, the
+/// AI module's `claude --version` probe, the "Sign in with claude" terminal.
+/// Deriving the dir from the running exe keeps it correct wherever it's installed.
+///
+/// Called once at the top of `main`, before any thread is spawned, so the
+/// `set_var` is race-free.
+fn ensure_sibling_bins_on_path() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(dir) = exe.parent().map(|p| p.to_path_buf()) else { return };
+    let cur = std::env::var_os("PATH").unwrap_or_default();
+    if std::env::split_paths(&cur).any(|p| p == dir) {
+        return; // already reachable — don't shuffle the user's PATH
+    }
+    let mut paths = vec![dir];
+    paths.extend(std::env::split_paths(&cur));
+    if let Ok(joined) = std::env::join_paths(paths) {
+        std::env::set_var("PATH", joined);
+    }
+}
+
 fn main() -> glib::ExitCode {
+    ensure_sibling_bins_on_path();
+
     // `--ai-dump`: poll the AI usage providers once, print what we can see, and
     // exit without opening a window. This is the supported way to debug the
     // module (or to check what it would send) without restarting a live bar.

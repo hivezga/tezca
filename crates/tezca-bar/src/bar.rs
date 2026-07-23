@@ -252,7 +252,7 @@ impl Bar {
                 s.tray_box.remove(&c);
             }
             for item in items.iter() {
-                s.tray_box.append(&self.tray_button(item));
+                s.tray_box.append(&self.tray_item(item));
             }
             if !items.is_empty() {
                 s.tray_box.append(&sep());
@@ -261,51 +261,43 @@ impl Bar {
         }
     }
 
-    /// One tray icon: left-click activates, right-click opens the menu (or falls
-    /// back to secondary-activate when the app exposes no DBusMenu).
-    fn tray_button(self: &Rc<Self>, item: &tray::TrayItemView) -> Button {
-        let btn = Button::new();
-        btn.add_css_class("tray-item");
-        btn.set_child(Some(&tray_icon_widget(&item.icon)));
+    /// One tray icon as a clickable box (a plain `Button`'s built-in primary
+    /// gesture swallows secondary/middle clicks, so — like the metric groups —
+    /// we drive every button off one `GestureClick` and branch on the button:
+    /// left = Activate, middle = SecondaryActivate, right = our rendered
+    /// DBusMenu popover (or ContextMenu when the app exposes no usable menu).
+    fn tray_item(self: &Rc<Self>, item: &tray::TrayItemView) -> GtkBox {
+        let row = GtkBox::new(Orientation::Horizontal, 0);
+        row.add_css_class("tray-item");
+        row.set_valign(Align::Center);
+        row.append(&tray_icon_widget(&item.icon));
         if !item.tooltip.is_empty() {
-            btn.set_tooltip_text(Some(&item.tooltip));
+            row.set_tooltip_text(Some(&item.tooltip));
         }
 
-        // Left-click → Activate.
-        let (cmd, key) = (self.tray_cmd.clone(), item.key.clone());
-        btn.connect_clicked(move |_| {
-            let _ = cmd.send_blocking(tray::TrayCmd::Activate(key.clone()));
-        });
-
-        // Right-click → our rendered DBusMenu popover when the app exposes a
-        // usable one; otherwise ask the app to show its own menu (ContextMenu).
         let menu = self.tray_menus.borrow().get(&item.key).cloned();
-        let right = gtk4::GestureClick::new();
-        right.set_button(gdk::BUTTON_SECONDARY);
-        let cmd = self.tray_cmd.clone();
-        let key = item.key.clone();
-        match menu {
-            Some(root) => {
-                let pop = popovers::tray_menu(&btn, &root, &item.key, self.tray_cmd.clone());
-                right.connect_released(move |_, _, _, _| pop.popup());
-            }
-            None => {
-                right.connect_released(move |_, _, _, _| {
-                    let _ = cmd.send_blocking(tray::TrayCmd::ContextMenu(key.clone()));
-                });
-            }
-        }
-        btn.add_controller(right);
+        let pop = menu.map(|root| popovers::tray_menu(&row, &root, &item.key, self.tray_cmd.clone()));
 
-        // Middle-click → SecondaryActivate (the SNI convention).
-        let middle = gtk4::GestureClick::new();
-        middle.set_button(gdk::BUTTON_MIDDLE);
+        let click = gtk4::GestureClick::new();
+        click.set_button(0); // every button; branch in the handler
         let (cmd, key) = (self.tray_cmd.clone(), item.key.clone());
-        middle.connect_released(move |_, _, _, _| {
-            let _ = cmd.send_blocking(tray::TrayCmd::SecondaryActivate(key.clone()));
+        click.connect_released(move |g, _, _, _| match g.current_button() {
+            gdk::BUTTON_PRIMARY => {
+                let _ = cmd.send_blocking(tray::TrayCmd::Activate(key.clone()));
+            }
+            gdk::BUTTON_MIDDLE => {
+                let _ = cmd.send_blocking(tray::TrayCmd::SecondaryActivate(key.clone()));
+            }
+            gdk::BUTTON_SECONDARY => match &pop {
+                Some(p) => p.popup(),
+                None => {
+                    let _ = cmd.send_blocking(tray::TrayCmd::ContextMenu(key.clone()));
+                }
+            },
+            _ => {}
         });
-        btn.add_controller(middle);
-        btn
+        row.add_controller(click);
+        row
     }
 }
 

@@ -189,14 +189,11 @@ button.ws.urgent {
 .tray {
     padding: 0 4px;
 }
-button.tray-item {
-    background: transparent;
+.tray-item {
     padding: 0 4px;
-    min-height: 0;
-    min-width: 0;
     color: @tz_subtext;
 }
-button.tray-item:hover {
+.tray-item:hover {
     background: alpha(@tz_accent, 0.10);
     border-radius: 7px;
 }

@@ -243,7 +243,7 @@ pub fn displays(window: &Window) -> Widget {
 }
 
 // ===========================================================================
-// Bar — the top menubar (tezca-bar): shape, geometry, poll intervals
+// Bar — the top menubar (tezca-bar): shape, clock, workspaces, metrics
 // ===========================================================================
 
 pub fn bar() -> Widget {
@@ -251,6 +251,7 @@ pub fn bar() -> Widget {
     let cfg = backend::bar_config();
     let get = |k: &str| cfg.iter().find(|(kk, _)| kk == k).map(|(_, v)| v.clone());
 
+    // --- Shape & geometry ---------------------------------------------------
     page.append(&section_header("Shape"));
 
     // floating | edge — index 0/1 into SHAPES.
@@ -269,6 +270,51 @@ pub fn bar() -> Widget {
     page.append(&control_row("Top margin (floating)", &mtop));
     page.append(&control_row("Side margin (floating)", &mside));
 
+    // --- Clock --------------------------------------------------------------
+    page.append(&section_header("Clock"));
+    let clock = Entry::new();
+    clock.set_text(&get("clock_format").unwrap_or_else(|| "%a %d %b   %H:%M".into()));
+    clock.set_width_chars(20);
+    page.append(&control_row("Format", &clock));
+    page.append(&hint("strftime-style — e.g. %a %d %b   %H:%M for “Wed 22 Jul  16:59”. See `man strftime`."));
+
+    // --- Workspaces ---------------------------------------------------------
+    page.append(&section_header("Workspaces"));
+
+    const NUMERALS: [&str; 2] = ["arabic", "mayan"];
+    let numerals = DropDown::from_strings(&["Arabic  (1 2 3)", "Mayan  (bar & dot)"]);
+    let cur_num = get("workspace_numerals").unwrap_or_else(|| "arabic".into());
+    if let Some(i) = NUMERALS.iter().position(|s| *s == cur_num) {
+        numerals.set_selected(i as u32);
+    }
+    page.append(&control_row("Numerals", &numerals));
+
+    let hide_empty = Switch::new();
+    hide_empty.set_valign(Align::Center);
+    hide_empty.set_active(get("workspace_hide_empty").as_deref() == Some("true"));
+    page.append(&control_row("Show only used workspaces", &hide_empty));
+
+    let compact_ws = Switch::new();
+    compact_ws.set_valign(Align::Center);
+    compact_ws.set_active(get("workspace_compact").as_deref() == Some("true"));
+    page.append(&control_row("Auto-compact gaps", &compact_ws));
+    page.append(&hint(
+        "Compaction slides a monitor's workspaces down to close a gap when one you're not on empties — assign each monitor a set below.",
+    ));
+
+    // Per-monitor workspace sets (automatic / odd / even / custom list).
+    let mut assign_rows: Vec<(String, DropDown, Entry)> = Vec::new();
+    for m in backend::monitors() {
+        let (row, dd, entry) = ws_assign_row(&m.name, get(&format!("workspaces.{}", m.name)));
+        page.append(&row);
+        assign_rows.push((m.name, dd, entry));
+    }
+    if assign_rows.is_empty() {
+        page.append(&hint("No monitors detected — per-monitor sets need a live Hyprland session."));
+    }
+    let assign_rows = Rc::new(assign_rows);
+
+    // --- Metrics ------------------------------------------------------------
     page.append(&section_header("Metrics"));
     let cpu_iv = spin_from("cpu_interval", 1.0, 30.0, 1.0, 0, &get);
     let mem_iv = spin_from("mem_interval", 1.0, 30.0, 1.0, 0, &get);
@@ -281,44 +327,103 @@ pub fn bar() -> Widget {
     page.append(&control_row("Network poll (s)", &net_iv));
     page.append(&control_row("Compact below width (px)", &compact));
 
+    // --- Apply --------------------------------------------------------------
     let apply = Button::with_label("Apply bar settings");
     apply.add_css_class("tz-primary");
     {
-        let (shape, height, mtop, mside, cpu_iv, mem_iv, gpu_iv, net_iv, compact) = (
-            shape.clone(), height.clone(), mtop.clone(), mside.clone(),
-            cpu_iv.clone(), mem_iv.clone(), gpu_iv.clone(), net_iv.clone(), compact.clone(),
-        );
+        let (shape, height, mtop, mside, clock) =
+            (shape.clone(), height.clone(), mtop.clone(), mside.clone(), clock.clone());
+        let (cpu_iv, mem_iv, gpu_iv, net_iv, compact) =
+            (cpu_iv.clone(), mem_iv.clone(), gpu_iv.clone(), net_iv.clone(), compact.clone());
+        let (numerals, hide_empty, compact_ws, assign_rows) =
+            (numerals.clone(), hide_empty.clone(), compact_ws.clone(), assign_rows.clone());
         apply.connect_clicked(move |_| {
-            let shape_s = SHAPES.get(shape.selected() as usize).copied().unwrap_or("floating");
-            let height_s = (height.value() as i64).to_string();
-            let mtop_s = (mtop.value() as i64).to_string();
-            let mside_s = (mside.value() as i64).to_string();
-            let cpu_s = (cpu_iv.value() as i64).to_string();
-            let mem_s = (mem_iv.value() as i64).to_string();
-            let gpu_s = (gpu_iv.value() as i64).to_string();
-            let net_s = (net_iv.value() as i64).to_string();
-            let compact_s = (compact.value() as i64).to_string();
-            backend::tezca(&[
-                "bar", "set",
-                "shape", shape_s,
-                "height", &height_s,
-                "margin_top", &mtop_s,
-                "margin_side", &mside_s,
-                "cpu_interval", &cpu_s,
-                "mem_interval", &mem_s,
-                "gpu_interval", &gpu_s,
-                "net_interval", &net_s,
-                "compact_width", &compact_s,
-            ]);
+            // Build a flat `key value key value …` arg list (some keys — the
+            // per-monitor sets — are dynamic, so a fixed array won't do).
+            let mut kvs: Vec<(String, String)> = vec![
+                ("shape".into(), SHAPES.get(shape.selected() as usize).copied().unwrap_or("floating").into()),
+                ("height".into(), (height.value() as i64).to_string()),
+                ("margin_top".into(), (mtop.value() as i64).to_string()),
+                ("margin_side".into(), (mside.value() as i64).to_string()),
+                ("clock_format".into(), clock.text().to_string()),
+                ("workspace_numerals".into(), NUMERALS.get(numerals.selected() as usize).copied().unwrap_or("arabic").into()),
+                ("workspace_hide_empty".into(), bool_str(hide_empty.is_active())),
+                ("workspace_compact".into(), bool_str(compact_ws.is_active())),
+                ("cpu_interval".into(), (cpu_iv.value() as i64).to_string()),
+                ("mem_interval".into(), (mem_iv.value() as i64).to_string()),
+                ("gpu_interval".into(), (gpu_iv.value() as i64).to_string()),
+                ("net_interval".into(), (net_iv.value() as i64).to_string()),
+                ("compact_width".into(), (compact.value() as i64).to_string()),
+            ];
+            for (name, dd, entry) in assign_rows.iter() {
+                kvs.push((format!("workspaces.{name}"), ws_spec_value(dd, entry)));
+            }
+            let mut args: Vec<String> = vec!["bar".into(), "set".into()];
+            for (k, v) in &kvs {
+                args.push(k.clone());
+                args.push(v.clone());
+            }
+            let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+            backend::tezca(&argv);
         });
     }
     let arow = Box::new(Orientation::Horizontal, 8);
     arow.set_halign(Align::End);
     arow.append(&apply);
     page.append(&arow);
-    page.append(&hint("Applying restarts the bar so the new geometry takes effect."));
+    page.append(&hint("Applying restarts the bar so the new settings take effect."));
 
     scrolled(&page)
+}
+
+/// A per-monitor workspace-set row: a preset dropdown (Automatic / Odd / Even /
+/// Custom) with an inline list entry that lights up only for Custom. Returns the
+/// row plus the two controls to read back at apply time.
+fn ws_assign_row(name: &str, current: Option<String>) -> (Box, DropDown, Entry) {
+    let dd = DropDown::from_strings(&["Automatic", "Odd (1 3 5…)", "Even (2 4 6…)", "Custom…"]);
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("1,3,5,7,9  or  1-5"));
+    entry.set_width_chars(14);
+
+    let cur = current.unwrap_or_default();
+    let cur = cur.trim();
+    let idx: u32 = match cur {
+        "" | "auto" | "dynamic" => 0,
+        "odd" => 1,
+        "even" => 2,
+        other => {
+            entry.set_text(other);
+            3
+        }
+    };
+    dd.set_selected(idx);
+    entry.set_sensitive(idx == 3);
+    {
+        let entry = entry.clone();
+        dd.connect_selected_notify(move |d| entry.set_sensitive(d.selected() == 3));
+    }
+
+    let ctl = Box::new(Orientation::Horizontal, 8);
+    ctl.append(&dd);
+    ctl.append(&entry);
+    (control_row(name, &ctl), dd, entry)
+}
+
+/// Read a per-monitor workspace spec back from its row's controls.
+fn ws_spec_value(dd: &DropDown, entry: &Entry) -> String {
+    match dd.selected() {
+        1 => "odd".into(),
+        2 => "even".into(),
+        3 => {
+            let t = entry.text().trim().to_string();
+            if t.is_empty() { "auto".into() } else { t }
+        }
+        _ => "auto".into(),
+    }
+}
+
+fn bool_str(on: bool) -> String {
+    if on { "true" } else { "false" }.to_string()
 }
 
 // ===========================================================================

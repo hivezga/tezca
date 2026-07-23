@@ -340,3 +340,23 @@ window.tz-capture {
     font-weight: 600;
     font-size: 10pt;
 }
+
+/* --- App picker (set-action dialog) ------------------------------------- */
+.tz-applist {
+    background-color: alpha(@tz_surface, 0.35);
+    border-radius: 12px;
+    padding: 4px;
+    margin: 2px 0 8px 0;
+}
+button.tz-approw {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 7px 12px;
+    color: @tz_subtext;
+    font-size: 10pt;
+}
+button.tz-approw:hover {
+    background-color: alpha(@tz_accent, 0.14);
+    color: @tz_text;
+}

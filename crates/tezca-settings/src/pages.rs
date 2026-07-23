@@ -9,6 +9,7 @@
 use crate::{backend, keybinds};
 use gtk4::gdk;
 use gtk4::gio;
+use gtk4::gio::prelude::AppInfoExt;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
@@ -787,6 +788,17 @@ fn keybind_row(window: &Window, b: &keybinds::Bind, on_done: Rc<dyn Fn()>) -> Bo
     desc.set_wrap(true);
     desc.set_max_width_chars(46);
 
+    // "Action" edits what the bind does (which app / dispatcher); "Rebind"
+    // edits the key combo.
+    let edit = small_btn("Action");
+    edit.add_css_class("tz-rebind");
+    {
+        let window = window.clone();
+        let b = b.clone();
+        let on_done = on_done.clone();
+        edit.connect_clicked(move |_| edit_action(&window, &b, on_done.clone()));
+    }
+
     let rebind = small_btn("Rebind");
     rebind.add_css_class("tz-rebind");
     {
@@ -798,8 +810,203 @@ fn keybind_row(window: &Window, b: &keybinds::Bind, on_done: Rc<dyn Fn()>) -> Bo
 
     row.append(&combo);
     row.append(&desc);
+    row.append(&edit);
     row.append(&rebind);
     row
+}
+
+/// Modal "set action" dialog: pick an installed app (→ `exec, uwsm app -- <id>`)
+/// or type a raw dispatcher+args. Writes through `tezca keybind set-action`,
+/// which guards the combo and backs the file up, then reloads Hyprland.
+fn edit_action(parent: &Window, b: &keybinds::Bind, on_done: Rc<dyn Fn()>) {
+    let dialog = Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .title("Set action")
+        .default_width(440)
+        .default_height(560)
+        .build();
+    dialog.add_css_class("tz-capture");
+
+    let v = Box::new(Orientation::Vertical, 10);
+    v.set_margin_top(20);
+    v.set_margin_bottom(20);
+    v.set_margin_start(22);
+    v.set_margin_end(22);
+
+    let title = Label::new(Some(&format!("What should “{}” do?", b.combo())));
+    title.add_css_class("tz-h2");
+    title.set_wrap(true);
+    title.set_xalign(0.0);
+    let now = Label::new(Some(&format!("Now: {}", b.action)));
+    now.add_css_class("tz-hint");
+    now.set_wrap(true);
+    now.set_xalign(0.0);
+    v.append(&title);
+    v.append(&now);
+
+    let status = Label::new(None);
+    status.add_css_class("tz-hint");
+    status.set_wrap(true);
+    status.set_xalign(0.0);
+
+    // --- App picker ---------------------------------------------------------
+    let search = Entry::new();
+    search.set_placeholder_text(Some("Search apps…"));
+    search.add_css_class("tz-search");
+    v.append(&search);
+
+    let list = Box::new(Orientation::Vertical, 2);
+    list.add_css_class("tz-applist");
+    let scroller = ScrolledWindow::new();
+    scroller.set_hscrollbar_policy(PolicyType::Never);
+    scroller.set_vexpand(true);
+    scroller.set_child(Some(&list));
+    v.append(&scroller);
+
+    let apps = Rc::new(installed_apps());
+    let populate: Rc<dyn Fn(&str)> = {
+        let (list, apps, dialog, b, on_done, status) =
+            (list.clone(), apps.clone(), dialog.clone(), b.clone(), on_done.clone(), status.clone());
+        Rc::new(move |filter: &str| {
+            while let Some(c) = list.first_child() {
+                list.remove(&c);
+            }
+            let f = filter.trim().to_lowercase();
+            for (name, id) in apps
+                .iter()
+                .filter(|(n, _)| f.is_empty() || n.to_lowercase().contains(&f))
+                .take(300)
+            {
+                let btn = Button::with_label(name);
+                btn.add_css_class("tz-approw");
+                btn.set_halign(Align::Fill);
+                if let Some(child) = btn.child() {
+                    child.set_halign(Align::Start);
+                }
+                let (id, name) = (id.clone(), name.clone());
+                let (dialog, b, on_done, status) =
+                    (dialog.clone(), b.clone(), on_done.clone(), status.clone());
+                btn.connect_clicked(move |_| {
+                    let action = format!("exec, uwsm app -- {id}");
+                    apply_action(&dialog, &b, &action, Some(&name), &on_done, &status);
+                });
+                list.append(&btn);
+            }
+        })
+    };
+    populate("");
+    {
+        let (populate, search2) = (populate.clone(), search.clone());
+        search.connect_changed(move |_| populate(&search2.text()));
+    }
+
+    // --- Custom action ------------------------------------------------------
+    let clbl = Label::new(Some("…or a custom action (dispatcher, args):"));
+    clbl.add_css_class("tz-hint");
+    clbl.set_xalign(0.0);
+    v.append(&clbl);
+
+    let crow = Box::new(Orientation::Horizontal, 8);
+    let custom = Entry::new();
+    custom.set_text(&b.action);
+    custom.set_hexpand(true);
+    let setbtn = Button::with_label("Set");
+    setbtn.add_css_class("tz-primary");
+    let apply_custom: Rc<dyn Fn()> = {
+        let (dialog, b, on_done, status, custom) =
+            (dialog.clone(), b.clone(), on_done.clone(), status.clone(), custom.clone());
+        Rc::new(move || {
+            let a = custom.text().trim().to_string();
+            if !a.is_empty() {
+                apply_action(&dialog, &b, &a, None, &on_done, &status);
+            }
+        })
+    };
+    {
+        let ac = apply_custom.clone();
+        setbtn.connect_clicked(move |_| ac());
+        custom.connect_activate(move |_| apply_custom());
+    }
+    crow.append(&custom);
+    crow.append(&setbtn);
+    v.append(&crow);
+    v.append(&status);
+    dialog.set_child(Some(&v));
+
+    // Esc cancels; other keys fall through to the entries.
+    let keyctl = EventControllerKey::new();
+    {
+        let dialog = dialog.clone();
+        keyctl.connect_key_pressed(move |_, keyval, _, _| {
+            if keyval == gdk::Key::Escape {
+                dialog.close();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    dialog.add_controller(keyctl);
+
+    dialog.present();
+    search.grab_focus();
+}
+
+/// Run `keybind set-action` for one bind; on success close + reload, else show
+/// the error inline.
+fn apply_action(
+    dialog: &Window,
+    b: &keybinds::Bind,
+    action: &str,
+    desc: Option<&str>,
+    on_done: &Rc<dyn Fn()>,
+    status: &Label,
+) {
+    let line = b.line.to_string();
+    let mut args: Vec<&str> = vec![
+        "keybind", "set-action",
+        "--line", &line,
+        "--action", action,
+        "--expect-mods", &b.mods,
+        "--expect-key", &b.key,
+    ];
+    if let Some(d) = desc {
+        args.push("--desc");
+        args.push(d);
+    }
+    let res = backend::tezca_result(&args);
+    if res.code == 0 {
+        dialog.close();
+        on_done();
+    } else {
+        status.set_text(&format!("Error: {}", res.stderr));
+        status.remove_css_class("tz-hint");
+        status.add_css_class("tz-warn");
+    }
+}
+
+/// Installed applications as `(display name, desktop id)`, de-duplicated and
+/// sorted — the source for the action picker's app list.
+fn installed_apps() -> Vec<(String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut v: Vec<(String, String)> = Vec::new();
+    for a in gio::AppInfo::all() {
+        if !a.should_show() {
+            continue;
+        }
+        let Some(id) = a.id() else { continue };
+        let id = id.to_string();
+        if !id.ends_with(".desktop") || !seen.insert(id.clone()) {
+            continue;
+        }
+        let name = a.display_name().to_string();
+        if !name.is_empty() {
+            v.push((name, id));
+        }
+    }
+    v.sort_by(|x, y| x.0.to_lowercase().cmp(&y.0.to_lowercase()));
+    v
 }
 
 /// Modal "press a shortcut" capture → `tezca keybind rebind`. Handles conflicts

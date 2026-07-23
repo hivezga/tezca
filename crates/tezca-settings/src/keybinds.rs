@@ -1,8 +1,8 @@
 //! Keybind data for the Keybinds page — loaded from `tezca keybind list
 //! --machine`, so the CLI owns the single authoritative parse of keybinds.conf
 //! (line numbers included, needed for rebinding). Machine format:
-//!   `S\t<title>`                         a section header
-//!   `B\t<line>\t<mods>\t<key>\t<desc>`    one documented bind
+//!   `S\t<title>`                                   a section header
+//!   `B\t<line>\t<mods>\t<key>\t<desc>\t<action>`   one documented bind
 
 use crate::backend;
 
@@ -12,6 +12,7 @@ pub struct Bind {
     pub mods: String, // normalized, SUPER (not $mod)
     pub key: String,
     pub desc: String,
+    pub action: String, // dispatcher + args, e.g. "exec, uwsm app -- brave"
 }
 
 pub struct Section {
@@ -47,6 +48,7 @@ pub fn load() -> Vec<Section> {
                 let mods = f.next().unwrap_or("").to_string();
                 let key = f.next().unwrap_or("").to_string();
                 let desc = f.next().unwrap_or("").to_string();
+                let action = f.next().unwrap_or("").to_string();
                 if sections.is_empty() {
                     sections.push(Section { title: "General".into(), binds: Vec::new() });
                 }
@@ -54,7 +56,7 @@ pub fn load() -> Vec<Section> {
                     .last_mut()
                     .unwrap()
                     .binds
-                    .push(Bind { line: line_no, mods, key, desc });
+                    .push(Bind { line: line_no, mods, key, desc, action });
             }
             _ => {}
         }

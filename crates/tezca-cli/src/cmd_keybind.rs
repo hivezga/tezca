@@ -2,7 +2,9 @@
 //!
 //! The tezca-settings "Keybinds" page drives this. `list --machine` emits every
 //! documented bind with its 1-based line number in keybinds.conf; `rebind`
-//! rewrites one line's modifier+key in place, with three safety rails:
+//! rewrites one line's modifier+key in place and `set-action` rewrites what it
+//! does (dispatcher + args, e.g. which app it launches), each with three safety
+//! rails:
 //!   1. an --expect guard: the CLI refuses to touch the line unless it still
 //!      carries the combo the GUI showed (so a stale window can't clobber the
 //!      wrong bind);
@@ -36,6 +38,7 @@ pub fn run(args: &[&str]) -> i32 {
     let r = match args.first().copied() {
         None | Some("list") => cmd_list(args.get(1..).unwrap_or(&[])),
         Some("rebind") => return cmd_rebind(&args[1..]),
+        Some("set-action") => cmd_set_action(&args[1..]),
         Some("restore") => cmd_restore(),
         Some("-h") | Some("--help") => {
             print_help();
@@ -61,10 +64,11 @@ pub fn run(args: &[&str]) -> i32 {
 /// A parsed bind line (1-based `line`).
 struct Bind {
     line: usize,
-    flags: String, // "bind", "binde", "bindm", …
-    mods: String,  // normalized, $mod → SUPER
+    flags: String,  // "bind", "binde", "bindm", …
+    mods: String,   // normalized, $mod → SUPER
     key: String,
-    desc: String, // trailing `# comment`, or "" if undocumented
+    desc: String,   // trailing `# comment`, or "" if undocumented
+    action: String, // dispatcher + args, e.g. "exec, uwsm app -- brave"
 }
 
 /// Parse `bind[flags] = MODS, KEY, dispatcher…  # desc` — None if not a bind.
@@ -83,10 +87,11 @@ fn parse_bind(no: usize, raw: &str) -> Option<Bind> {
         Some((b, d)) => (b, d.trim().to_string()),
         None => (body, String::new()),
     };
-    let mut it = before.split(',');
+    let mut it = before.splitn(3, ',');
     let mods = it.next().unwrap_or("").trim().replace("$mod", "SUPER");
     let key = it.next().unwrap_or("").trim().to_string();
-    Some(Bind { line: no, flags, mods, key, desc })
+    let action = it.next().unwrap_or("").trim().to_string();
+    Some(Bind { line: no, flags, mods, key, desc, action })
 }
 
 /// "# ==== Title ====" / "# ---- Title ----" → the inner Title.
@@ -105,7 +110,8 @@ fn section_title(line: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// `tezca keybind list [--machine]` — documented binds with line numbers.
-/// Machine format:  `S\t<title>`  for a section, `B\t<line>\t<mods>\t<key>\t<desc>`.
+/// Machine format:  `S\t<title>`  for a section,
+/// `B\t<line>\t<mods>\t<key>\t<desc>\t<action>`  for a bind.
 fn cmd_list(args: &[&str]) -> Result<(), String> {
     let text = fs::read_to_string(conf_path()?).map_err(|e| format!("cannot read keybinds.conf: {e}"))?;
     let machine = args.iter().any(|a| *a == "--machine" || *a == "-m");
@@ -125,7 +131,7 @@ fn cmd_list(args: &[&str]) -> Result<(), String> {
             }
             let combo = format_combo(&b.mods, &b.key);
             if machine {
-                println!("B\t{}\t{}\t{}\t{}", b.line, b.mods, b.key, b.desc);
+                println!("B\t{}\t{}\t{}\t{}\t{}", b.line, b.mods, b.key, b.desc, b.action);
             } else {
                 println!("  {:<24} {}", combo, term::dim(&b.desc));
             }
@@ -266,6 +272,93 @@ fn rebind(args: &[&str]) -> Result<(), RebindErr> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// set-action  (change what a bind does — dispatcher + args)
+// ---------------------------------------------------------------------------
+
+/// `tezca keybind set-action --line N --action "exec, uwsm app -- firefox.desktop"
+/// [--desc "Firefox"] [--expect-mods … --expect-key …]` — rewrite one line's
+/// dispatcher+args (and optionally its `# comment` label), keeping its combo.
+fn cmd_set_action(args: &[&str]) -> Result<(), String> {
+    let mut line: Option<usize> = None;
+    let mut action: Option<String> = None;
+    let mut desc: Option<String> = None;
+    let mut expect_mods: Option<String> = None;
+    let mut expect_key: Option<String> = None;
+
+    let mut it = args.iter().copied();
+    while let Some(a) = it.next() {
+        match a {
+            "--line" => line = it.next().and_then(|v| v.parse().ok()),
+            "--action" => action = it.next().map(str::to_string),
+            "--desc" => desc = it.next().map(str::to_string),
+            "--expect-mods" => expect_mods = it.next().map(str::to_string),
+            "--expect-key" => expect_key = it.next().map(str::to_string),
+            other => return Err(format!("unknown flag: {other}")),
+        }
+    }
+    let line = line.ok_or("set-action needs --line N")?;
+    let action = action.ok_or("set-action needs --action")?;
+    let action = action.trim();
+    if action.is_empty() {
+        return Err("set-action needs a non-empty --action".into());
+    }
+
+    let path = conf_path()?;
+    let text = fs::read_to_string(&path).map_err(|e| format!("cannot read keybinds.conf: {e}"))?;
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let idx = line
+        .checked_sub(1)
+        .filter(|&i| i < lines.len())
+        .ok_or_else(|| format!("line {line} is out of range"))?;
+    let target =
+        parse_bind(line, &lines[idx]).ok_or_else(|| format!("line {line} is not a bind line"))?;
+
+    // Guard: the line must still carry the combo the GUI showed us.
+    if let (Some(em), Some(ek)) = (&expect_mods, &expect_key) {
+        if !same_combo(&target.mods, &target.key, em, ek) {
+            return Err(
+                "keybinds.conf changed since it was read — reopen Settings and try again".into(),
+            );
+        }
+    }
+
+    lines[idx] = rewrite_action_line(&lines[idx], action, desc.as_deref())
+        .ok_or_else(|| format!("could not rewrite line {line}"))?;
+
+    write_backup(&text)?;
+    let mut body = lines.join("\n");
+    body.push('\n');
+    fs::write(&path, body).map_err(|e| format!("cannot write keybinds.conf: {e}"))?;
+
+    if hypr::in_session() {
+        let _ = hypr::reload();
+    }
+    println!("  {} {} → {}", term::green("✓"), term::dim(&format!("line {line}")), action);
+    Ok(())
+}
+
+/// Replace the dispatcher+args of a bind line, keeping flags/mods/key; when
+/// `desc` is given (non-empty) it becomes the new `# comment` label, else the
+/// existing comment is preserved.
+fn rewrite_action_line(raw: &str, action: &str, desc: Option<&str>) -> Option<String> {
+    let indent: String = raw.chars().take_while(|c| c.is_whitespace()).collect();
+    let line = raw.trim();
+    let eq = line.find('=')?;
+    let head = line[..eq].trim_end(); // "bind" / "binde" / …
+    let body = &line[eq + 1..];
+    let (before, existing_desc) = match body.split_once('#') {
+        Some((b, d)) => (b, Some(d.trim().to_string())),
+        None => (body, None),
+    };
+    let mut it = before.splitn(3, ',');
+    let mods = it.next()?.trim();
+    let key = it.next()?.trim();
+    let desc_final = desc.filter(|s| !s.is_empty()).map(String::from).or(existing_desc);
+    let comment = desc_final.map(|d| format!("  # {d}")).unwrap_or_default();
+    Some(format!("{indent}{head} = {mods}, {key}, {action}{comment}"))
+}
+
 fn cmd_restore() -> Result<(), String> {
     let bak = backup_path()?;
     let text = fs::read_to_string(&bak)
@@ -348,5 +441,9 @@ fn print_help() {
         "  {}  rebind a line's combo",
         term::cyan("rebind --line N --mods \"SUPER SHIFT\" --key W")
     );
-    println!("  {}                         undo the last rebind", term::cyan("restore"));
+    println!(
+        "  {}  change what a bind does",
+        term::cyan("set-action --line N --action \"exec, uwsm app -- app.desktop\"")
+    );
+    println!("  {}                         undo the last change", term::cyan("restore"));
 }

@@ -344,6 +344,8 @@ struct Surface {
     /// Fixed workspace ids this output's bar always shows (from config), or None
     /// to mirror whatever Hyprland has placed on this monitor.
     ws_assigned: Option<Vec<i32>>,
+    /// Hide empty workspaces — show only occupied + the focused one.
+    hide_empty: bool,
     numerals: Numerals,
     app_label: Label,
 
@@ -400,6 +402,7 @@ impl Surface {
         let output = monitor.connector().map(|s| s.to_string()).unwrap_or_default();
         let compact = monitor.geometry().width() < cfg.compact_width;
         let ws_assigned = cfg.ws_assign.get(&output).cloned();
+        let hide_empty = cfg.hide_empty;
         let numerals = cfg.numerals;
 
         let bar_box = CenterBox::new();
@@ -648,6 +651,7 @@ impl Surface {
             bar_box,
             ws_box,
             ws_assigned,
+            hide_empty,
             numerals,
             app_label,
             submap_box,
@@ -692,9 +696,9 @@ impl Surface {
         let active = hypr::active_ws_for(&snap.monitors, &self.output);
         let occupied = |id: i32| snap.workspaces.iter().any(|w| w.id == id && w.windows > 0);
 
-        // A configured set shows as fixed, persistent pills (empty ones included);
-        // otherwise mirror whatever Hyprland has placed on this monitor.
-        let ids: Vec<i32> = match &self.ws_assigned {
+        // A configured set enumerates this output's pills (in order); otherwise
+        // mirror whatever Hyprland has placed on this monitor.
+        let mut ids: Vec<i32> = match &self.ws_assigned {
             Some(list) => list.clone(),
             None => {
                 let mut mine: Vec<i32> = snap
@@ -707,6 +711,11 @@ impl Surface {
                 mine
             }
         };
+        // Optionally drop empty pills, keeping the focused one so the cluster
+        // always shows where you are.
+        if self.hide_empty {
+            ids.retain(|id| occupied(*id) || *id == active);
+        }
         let mayan = self.numerals == Numerals::Mayan;
         if ids.is_empty() {
             // Never show an empty cluster.

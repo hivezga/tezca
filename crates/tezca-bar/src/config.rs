@@ -69,6 +69,9 @@ pub struct Config {
     /// output's bar always shows, in this order. Empty = the default behaviour
     /// (each bar shows whatever workspaces Hyprland has placed on its monitor).
     pub ws_assign: HashMap<String, Vec<i32>>,
+    /// Show only occupied (windowed) workspaces plus the focused one, hiding
+    /// empty pills. Applies whether the set is assigned or dynamic.
+    pub hide_empty: bool,
 }
 
 impl Default for Config {
@@ -86,6 +89,7 @@ impl Default for Config {
             compact_width: 3000,
             numerals: Numerals::Arabic,
             ws_assign: HashMap::new(),
+            hide_empty: false,
         }
     }
 }
@@ -140,6 +144,7 @@ impl Config {
                         self.numerals = n;
                     }
                 }
+                "workspace_hide_empty" | "hide_empty_workspaces" => set_bool(&mut self.hide_empty, v),
                 // `workspaces.<connector> = <spec>` — per-output workspace sets.
                 _ if k.starts_with("workspaces.") => {
                     let output = k["workspaces.".len()..].trim();
@@ -197,5 +202,12 @@ fn set_i32(dst: &mut i32, v: &str) {
 fn set_u32(dst: &mut u32, v: &str) {
     if let Ok(n) = v.parse() {
         *dst = n;
+    }
+}
+fn set_bool(dst: &mut bool, v: &str) {
+    match v.trim().to_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => *dst = true,
+        "false" | "no" | "off" | "0" => *dst = false,
+        _ => {}
     }
 }

@@ -41,6 +41,10 @@ compact_width = 3000
 # Needs the Noto Sans Mayan Numerals font (Noto extra fonts).
 workspace_numerals = mayan
 
+# Show only workspaces that are in use — occupied by a window, or focused —
+# hiding empty pills. Applies to both assigned and dynamic sets.
+workspace_hide_empty = true
+
 # Assign which workspaces each monitor's bar shows, by connector name. A monitor
 # listed here shows exactly those pills, always (empty ones included), in order;
 # unlisted monitors mirror whatever Hyprland has placed on them. Accepts an

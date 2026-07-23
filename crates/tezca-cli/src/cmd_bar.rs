@@ -27,6 +27,7 @@ const SCALARS: &[(&str, &str)] = &[
     ("clock_format", "%a %d %b   %H:%M"),
     ("compact_width", "3000"),
     ("workspace_numerals", "arabic"),
+    ("workspace_hide_empty", "false"),
 ];
 
 /// Per-output workspace assignment keys look like `workspaces.<connector>` and

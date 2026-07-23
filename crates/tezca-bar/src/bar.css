@@ -206,6 +206,32 @@ button.ws.urgent {
     border-radius: 7px;
 }
 
+/* ── AI provider usage ──────────────────────────────────────────────────────
+   Jade while there's headroom, gold past the warn threshold, urgent past
+   critical — the same three-step language the battery and bell use, so a red
+   glyph means the same thing everywhere on the bar. */
+.ai {
+    padding: 0 9px;
+    border-radius: 9px;
+    color: @tz_subtext;
+}
+.ai.clickable:hover {
+    background: alpha(@tz_accent, 0.08);
+}
+.ai-val {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 12px;
+    color: @tz_subtext;
+}
+.ai.warn,
+.ai.warn .ai-val {
+    color: @tz_gold;
+}
+.ai.crit,
+.ai.crit .ai-val {
+    color: @tz_urgent;
+}
+
 /* ── Notification bell ──────────────────────────────────────────────────── */
 button.bell {
     background: transparent;
@@ -301,6 +327,11 @@ popover.tz-popover > contents {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
     font-size: 11px;
     color: @tz_muted;
+}
+/* Hairline between provider sections in the AI popover. */
+.pop-sep {
+    background: alpha(@tz_text, 0.10);
+    margin: 2px 0;
 }
 .pop-mono-val {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;

@@ -14,7 +14,7 @@ use crate::config::{Config, Numerals, Shape};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
-use crate::{hypr, nowplaying, notify, popovers, tray};
+use crate::{ai, hypr, nowplaying, notify, popovers, tray};
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
 use gtk4::prelude::*;
@@ -38,6 +38,7 @@ const G_GAME: &str = "\u{F02B4}";
 const G_BRIGHT: &str = "\u{F00DF}";
 const G_BATT: &str = "\u{F0079}";
 const G_BATT_CHG: &str = "\u{F0084}";
+const G_AI: &str = "\u{F06A9}"; // nf-md-robot — the AI usage module
 
 // ===========================================================================
 // Manager
@@ -54,6 +55,9 @@ pub struct Bar {
     tray_cmd: async_channel::Sender<tray::TrayCmd>,
     tray_items: RefCell<Vec<tray::TrayItemView>>,
     tray_menus: RefCell<HashMap<String, tray::MenuNode>>,
+    /// Latest AI usage snapshot, shared with every surface's popover so they
+    /// all render the same poll without re-fetching.
+    ai: Rc<RefCell<ai::Snapshot>>,
     /// The moves the last compaction pass dispatched — if the same plan recurs
     /// (a window that wouldn't move), we skip it rather than loop forever.
     last_compaction: RefCell<Vec<(i32, i32)>>,
@@ -70,13 +74,14 @@ impl Bar {
         let display = gdk::Display::default().expect("no display");
         let shared: SharedPalette = Rc::new(RefCell::new(palette));
         let throughput = Rc::new(RefCell::new(Throughput { down_mbps: 0.0, up_mbps: 0.0 }));
+        let ai_state: Rc<RefCell<ai::Snapshot>> = Rc::new(RefCell::new(ai::Snapshot::default()));
 
         let mut surfaces = Vec::new();
         let monitors = display.monitors();
         for i in 0..monitors.n_items() {
             let Some(obj) = monitors.item(i) else { continue };
             let Ok(monitor) = obj.downcast::<gdk::Monitor>() else { continue };
-            let s = Surface::build(app, &monitor, &cfg, &shared, throughput.clone());
+            let s = Surface::build(app, &monitor, &cfg, &shared, throughput.clone(), ai_state.clone());
             surfaces.push(s);
         }
 
@@ -91,6 +96,7 @@ impl Bar {
             tray_cmd,
             tray_items: RefCell::new(Vec::new()),
             tray_menus: RefCell::new(HashMap::new()),
+            ai: ai_state,
             last_compaction: RefCell::new(Vec::new()),
         });
 
@@ -265,6 +271,21 @@ impl Bar {
         }
     }
 
+    /// Apply an AI usage snapshot from the poll thread. The module shows the
+    /// single highest window utilisation across every provider — the number
+    /// that actually constrains you — and colours itself at the configured
+    /// warn/critical thresholds. It hides entirely when nothing is configured
+    /// or no provider's tooling is installed.
+    pub fn apply_ai(&self, snap: ai::Snapshot) {
+        let pct = snap.peak_pct();
+        let empty = snap.is_empty();
+        let (warn, crit) = (self.cfg.ai.warn, self.cfg.ai.critical);
+        *self.ai.borrow_mut() = snap;
+        for s in &self.surfaces {
+            s.set_ai(pct, empty, warn, crit);
+        }
+    }
+
     /// Apply a tray update from the D-Bus thread, then repaint every bar's tray.
     pub fn apply_tray(self: &Rc<Self>, update: tray::TrayUpdate) {
         match update {
@@ -420,6 +441,9 @@ struct Surface {
     gamemode_box: GtkBox,
     tray_box: GtkBox,
 
+    ai_box: GtkBox,
+    ai_val: Label,
+
     mirror: gtk4::DrawingArea,
 }
 
@@ -430,6 +454,7 @@ impl Surface {
         cfg: &Config,
         pal: &SharedPalette,
         throughput: Rc<RefCell<Throughput>>,
+        ai_state: Rc<RefCell<ai::Snapshot>>,
     ) -> Rc<Surface> {
         let output = monitor.connector().map(|s| s.to_string()).unwrap_or_default();
         let compact = monitor.geometry().width() < cfg.compact_width;
@@ -530,6 +555,22 @@ impl Surface {
         gamemode_box.append(&game_glyph);
         gamemode_box.set_visible(false);
         right.append(&gamemode_box);
+
+        // AI provider usage — hidden until the poll thread reports something
+        // worth showing (see ai.rs). Sits beside the tray because that is where
+        // "ambient status from elsewhere" lives on this bar.
+        let ai_box = GtkBox::new(Orientation::Horizontal, 6);
+        ai_box.add_css_class("ai");
+        ai_box.set_valign(Align::Center);
+        let ai_glyph = Label::new(Some(G_AI));
+        ai_glyph.add_css_class("glyph");
+        let ai_val = Label::new(None);
+        ai_val.add_css_class("ai-val");
+        ai_box.append(&ai_glyph);
+        ai_box.append(&ai_val);
+        ai_box.set_visible(false);
+        attach_detail(&ai_box, popovers::ai_detail(&ai_box, ai_state));
+        right.append(&ai_box);
 
         // System tray (StatusNotifierItem icons) — filled live by the tray
         // thread; hidden until the first item registers.
@@ -715,6 +756,8 @@ impl Surface {
             clock_label,
             gamemode_box,
             tray_box,
+            ai_box,
+            ai_val,
             mirror,
         })
     }
@@ -850,6 +893,30 @@ impl Surface {
             self.bell_glyph.set_text(G_NOTIF);
             self.bell_btn.remove_css_class("unread");
             self.bell_dot.set_visible(false);
+        }
+    }
+
+    /// Update the AI module: peak utilisation, visibility, and the threshold
+    /// colour class. A provider that reports only local token counts has no
+    /// percentage, so the module shows the glyph alone rather than inventing a
+    /// number — the popover still carries the detail.
+    fn set_ai(&self, pct: Option<f64>, empty: bool, warn: f64, crit: f64) {
+        self.ai_box.set_visible(!empty);
+        if empty {
+            return;
+        }
+        match pct {
+            Some(p) => self.ai_val.set_text(&format!("{p:.0}%")),
+            None => self.ai_val.set_text(""),
+        }
+        self.ai_val.set_visible(pct.is_some());
+        let p = pct.unwrap_or(0.0);
+        self.ai_box.remove_css_class("warn");
+        self.ai_box.remove_css_class("crit");
+        if p >= crit {
+            self.ai_box.add_css_class("crit");
+        } else if p >= warn {
+            self.ai_box.add_css_class("warn");
         }
     }
 

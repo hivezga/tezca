@@ -6,6 +6,7 @@
 //! the four-Tezcatlipoca theming. Wired to the Tezca theme engine: SIGUSR2
 //! reloads the palette after `tezca theme`; SIGUSR1 toggles visibility.
 
+mod ai;
 mod bar;
 mod config;
 mod draw;
@@ -26,6 +27,16 @@ use signal_hook::consts::{SIGUSR1, SIGUSR2};
 const APP_ID: &str = "dev.tezca.bar";
 
 fn main() -> glib::ExitCode {
+    // `--ai-dump`: poll the AI usage providers once, print what we can see, and
+    // exit without opening a window. This is the supported way to debug the
+    // module (or to check what it would send) without restarting a live bar.
+    // It honours the same config, so `ai_live = false` keeps it fully offline.
+    if std::env::args().any(|a| a == "--ai-dump") {
+        let cfg = config::Config::load();
+        print!("{}", ai::dump(&ai::poll_once(&cfg.ai)));
+        return glib::ExitCode::SUCCESS;
+    }
+
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(activate);
     app.run()
@@ -33,6 +44,7 @@ fn main() -> glib::ExitCode {
 
 fn activate(app: &Application) {
     let cfg = config::Config::load();
+    let ai_cfg = cfg.ai.clone();
     let palette = theme::Palette::load();
     let display = Display::default().expect("no display");
     let css = theme::CssStack::install(&display);
@@ -51,6 +63,21 @@ fn activate(app: &Application) {
         async move {
             while let Ok(update) = tray_upd_rx.recv().await {
                 bar.apply_tray(update);
+            }
+        }
+    ));
+
+    // AI provider usage. No-ops unless `ai_enabled`; the poll thread owns the
+    // slow work (network + log parsing) so the GTK loop only ever applies a
+    // finished snapshot. See ai.rs for the privacy posture.
+    let (ai_tx, ai_rx) = async_channel::unbounded::<ai::Snapshot>();
+    ai::spawn(ai_cfg, ai_tx);
+    glib::spawn_future_local(glib::clone!(
+        #[strong]
+        bar,
+        async move {
+            while let Ok(snap) = ai_rx.recv().await {
+                bar.apply_ai(snap);
             }
         }
     ));

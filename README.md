@@ -49,6 +49,11 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
   magnification, glass blur, running dots, autohide) as the flagship component.
 - **Gaming & AI profiles** — `tezca game` flips blur/animations off + tearing on;
   a dedicated AI workspace with Claude launchers and a drop-down Claude Code terminal.
+- **AI usage at a glance** — an opt-in bar module showing how much of your Claude
+  (or Codex) rate-limit window is left, plus today's local token spend. Private by
+  construction: no credential is ever stored, the token never touches a command
+  line, hosts are allowlisted in source, and `ai_live = false` makes it fully
+  offline. See [`ai.rs`](crates/tezca-bar/src/ai.rs) for the full posture.
 - **Non-destructive** — everything lives in this repo and is symlinked in; `tezca link`
   backs up whatever was there. Your previous session (KDE, …) stays selectable at login.
 

@@ -29,6 +29,52 @@ net_interval = 5  # network glyph + throughput
 # strftime-style; matches the Waybar format the bar reaches parity with.
 clock_format = "%a %d %b   %H:%M"
 
+# --- AI provider usage -----------------------------------------------------
+# The [󰚩 41%] module: how much of your AI subscription's rate-limit window
+# you've burned. Click it for the per-provider breakdown.
+#
+# This is the ONLY module that can make a network request, so it is opt-in and
+# deliberately conservative. What it will and won't do:
+#   * It never stores a credential. There is no Tezca keyring entry and no
+#     token in this file. It reads the credential file the provider's own CLI
+#     already wrote (e.g. ~/.claude/.credentials.json, mode 0600) for one
+#     request, and never writes to it.
+#   * The token is passed to curl on stdin, never on the command line, so it
+#     can't be scraped out of /proc/<pid>/cmdline by other local processes.
+#   * Hosts are allowlisted in the source (crates/tezca-bar/src/ai.rs), HTTPS
+#     is pinned, and redirects are refused — no config value can widen that.
+#   * Error text is scrubbed of anything token-shaped before display.
+#   * No telemetry. Nothing is ever reported back to Tezca.
+# Set ai_live = false for a fully offline mode: no network at all, just the
+# token counts computed from your own local logs.
+ai_enabled = true
+
+# Which providers to poll, comma-separated: anthropic, openai, google.
+# A provider whose CLI/credentials aren't installed hides itself silently, so
+# listing one you don't use costs nothing. Unknown names are ignored.
+#   anthropic → live 5h/weekly plan limits + local token & cost totals
+#   openai    → Codex 5h/weekly limits via the local `codex app-server`
+#   google    → approximate daily token count from Gemini CLI session files
+#               (Google exposes no quota API — treat it as a warning signal)
+ai_providers = anthropic
+
+# Seconds between polls. Clamped to a 60s floor: the Anthropic usage endpoint
+# is aggressively rate-limited and shares its 429 bucket with Claude Code
+# itself, so polling hard would throttle your actual work. 300 is plenty.
+ai_interval = 300
+
+# Allow network requests. false = offline mode — local logs only, so no plan
+# percentages (those are server-side state), just today's tokens and cost.
+ai_live = true
+
+# Compute today's token totals and API-equivalent cost from local logs.
+# Purely local filesystem work; needs no credentials and no network.
+ai_local = true
+
+# Percent thresholds where the module turns gold, then urgent-red.
+ai_warn = 60
+ai_critical = 85
+
 # --- Per-monitor adaptive --------------------------------------------------
 # Monitors narrower than this (px) render the COMPACT layout — no per-app menu
 # label, tighter padding. The 3440×1440 ultrawide primary stays full; the

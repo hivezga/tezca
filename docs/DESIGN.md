@@ -152,6 +152,66 @@ visibility (the `ALT+Right-Ctrl` bind). Waybar's `config/waybar/` is kept as a
 fallback. Data sources stay shell-out/`/proc` (hyprctl, wpctl, nmcli, playerctl,
 swaync-client) so the crate carries no deps beyond the dock's.
 
+**Update — AI provider usage module (`ai.rs`).** The right cluster gains a
+`[󰚩 41%]` module showing how much of your AI subscription's rate-limit window is
+spent, with a glass popover breaking it down per provider (windows as meters +
+reset countdowns, plus today's local token/cost totals). It runs on one poll
+thread feeding the same `async-channel`→glib bridge as `hypr::subscribe` and
+`tray::spawn`, so the GTK loop never blocks on a network call.
+
+This is the **only module in Tezca that can reach the internet**, so its rules
+are enforced in code rather than trusted to convention:
+
+| Rule | Mechanism |
+|---|---|
+| Opt-in | `ai_enabled` off by default; each provider must be listed in `ai_providers` |
+| No credential storage | Tezca stores nothing — it reads the provider CLI's own 0600 credential file for one request and never writes to it |
+| Token never on argv | curl is driven by a config file on **stdin** (`curl -K -`); a `-H` header would be readable via `/proc/<pid>/cmdline` by any local process |
+| Host allowlist | `ALLOWED_HOSTS` const, checked pre-request; `--proto =https`, redirects refused — no config value can widen it |
+| No credential leakage in UI | `redact()` scrubs token-shaped runs from every error string before it can reach a tooltip or popover |
+| Rate-limit safety | 60s poll floor + exponential backoff to 30 min on 429 — the Anthropic endpoint shares its 429 bucket with Claude Code itself |
+| Offline mode | `ai_live = false` disables the network path entirely; local log analytics still work |
+
+Data sources: **Anthropic** — the undocumented `api.anthropic.com/api/oauth/usage`
+endpoint Claude Code itself calls (5h / weekly / per-model windows), plus
+offline token & API-equivalent cost totals parsed from
+`~/.claude/projects/**/*.jsonl` (the data `ccusage` reads, deduped on
+message+request id and priced per model family). **OpenAI** — `codex app-server`
+JSON-RPC over stdio. **Google** — approximate daily token counts from Gemini CLI
+session files; Google publishes no quota API, so this is presented as a token
+count, never a percentage. The OpenAI and Google adapters are written to
+published third-party findings and are **unverified** (neither CLI is installed
+here); both auto-hide until their tooling exists. The Anthropic endpoint is
+undocumented and beta-versioned — every field is parsed defensively and an
+unrecognised shape degrades to a visible status line rather than a panic or a
+silently empty row.
+
+**Reading the usage payload.** The endpoint states the same facts twice: a
+modern `limits: [...]` array and the legacy top-level `five_hour` /
+`seven_day` / `seven_day_<model>` objects it grew out of. The array is
+authoritative — it is the only form carrying `scope.model` (*which* model a
+window applies to) and `is_active` (which of several overlapping limits is
+actually binding) — so `parse_usage` builds from it alone when present and
+falls back to the legacy keys otherwise. Reading both renders every number
+twice. Each window therefore carries a plain-English `scope` string
+("all models on your plan", "this model only") shown as a caption under its
+meter: a bare `37%` is unreadable when an account has a session limit, an
+all-model weekly limit, and a per-model weekly limit at once.
+
+`extra_usage` / `spend` are deliberately **not** windows. They describe a
+pay-as-you-go credit balance, not throttling, and both carry percent-shaped
+fields — folding them into the window list would let a topped-up balance drive
+the bar's warn/critical colour for a reason unrelated to rate limits. They are
+parsed separately into `Spend` and rendered below the windows, captioned as
+money.
+
+**Session expiry.** The credential file records `expiresAt`, so an expired
+OAuth token is detected locally and the request is skipped rather than spent on
+a certain 401 — which matters because that request would land in the 429 bucket
+shared with Claude Code. The module reports `Status::NeedsLogin` and the
+popover offers a button that launches `claude` itself; refreshing the token is
+the CLI's job, and Tezca never writes to its credential file.
+
 ---
 
 ## 7. Theming architecture — the heart of Tezca

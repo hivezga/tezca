@@ -4,6 +4,7 @@
 //! stays dependency-light. Every field has a baked-in default, so a missing or
 //! partial file still runs.
 
+use crate::ai::AiConfig;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -76,6 +77,9 @@ pub struct Config {
     /// empties, pull the higher workspaces in that monitor's set down to close
     /// the gap (windows move, staying on the same monitor). Needs `ws_assign`.
     pub compact: bool,
+    /// AI provider usage module — opt-in, and the only module that can make a
+    /// network request. See `ai.rs` for the privacy posture.
+    pub ai: AiConfig,
 }
 
 impl Default for Config {
@@ -95,6 +99,7 @@ impl Default for Config {
             ws_assign: HashMap::new(),
             hide_empty: false,
             compact: false,
+            ai: AiConfig::default(),
         }
     }
 }
@@ -151,6 +156,22 @@ impl Config {
                 }
                 "workspace_hide_empty" | "hide_empty_workspaces" => set_bool(&mut self.hide_empty, v),
                 "workspace_compact" | "compact_workspaces" => set_bool(&mut self.compact, v),
+                // --- AI usage module -------------------------------------
+                "ai_enabled" => set_bool(&mut self.ai.enabled, v),
+                "ai_providers" => {
+                    // Unknown names are dropped rather than passed through, so
+                    // a typo can never become a request to an unexpected host.
+                    self.ai.providers = v
+                        .split(',')
+                        .map(|s| s.trim().to_lowercase())
+                        .filter(|s| matches!(s.as_str(), "anthropic" | "openai" | "google"))
+                        .collect();
+                }
+                "ai_interval" => set_u32(&mut self.ai.interval, v),
+                "ai_live" => set_bool(&mut self.ai.live, v),
+                "ai_local" => set_bool(&mut self.ai.local, v),
+                "ai_warn" => set_f64(&mut self.ai.warn, v),
+                "ai_critical" => set_f64(&mut self.ai.critical, v),
                 // `workspaces.<connector> = <spec>` — per-output workspace sets.
                 _ if k.starts_with("workspaces.") => {
                     let output = k["workspaces.".len()..].trim();
@@ -172,6 +193,11 @@ impl Config {
         self.mem_interval = self.mem_interval.max(1);
         self.gpu_interval = self.gpu_interval.max(1);
         self.net_interval = self.net_interval.max(1);
+        // A too-eager AI poll earns a machine-wide 429 from the provider — and
+        // the same 429 bucket is the one Claude Code itself uses. Clamp hard.
+        self.ai.interval = self.ai.interval.max(60);
+        self.ai.warn = self.ai.warn.clamp(0.0, 100.0);
+        self.ai.critical = self.ai.critical.clamp(self.ai.warn, 100.0);
     }
 }
 
@@ -206,6 +232,11 @@ fn set_i32(dst: &mut i32, v: &str) {
     }
 }
 fn set_u32(dst: &mut u32, v: &str) {
+    if let Ok(n) = v.parse() {
+        *dst = n;
+    }
+}
+fn set_f64(dst: &mut f64, v: &str) {
     if let Ok(n) = v.parse() {
         *dst = n;
     }

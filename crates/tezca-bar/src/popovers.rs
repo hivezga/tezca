@@ -8,6 +8,7 @@
 //!   * network → SSID + connection detail
 //! Plus the Tezca "mirror" system menu.
 
+use crate::ai;
 use crate::sysinfo::{self, Net, Throughput};
 use crate::tray;
 use gtk4::prelude::*;
@@ -396,6 +397,167 @@ pub fn gpu_detail(anchor: &impl IsA<gtk4::Widget>) -> Popover {
         }
     });
     pop
+}
+
+/// AI usage detail: one section per provider — its rate-limit windows as
+/// meters with reset countdowns, plus today's locally-computed token/cost
+/// totals. Rebuilt from the shared snapshot on every show, so it always
+/// reflects the last poll rather than the state at construction time.
+///
+/// Deliberately shows no account identifiers and no credential material — the
+/// most this popover ever names is the plan tier the provider reported.
+pub fn ai_detail(anchor: &impl IsA<gtk4::Widget>, state: Rc<RefCell<ai::Snapshot>>) -> Popover {
+    let (pop, content) = glass(anchor);
+    content.set_width_request(280);
+    let c = content.clone();
+    // Weak, so the sign-in button below can dismiss the popover it lives in
+    // without the popover owning a reference cycle back to itself.
+    let pw = pop.downgrade();
+    pop.connect_show(move |_| {
+        clear(&c);
+        let snap = state.borrow();
+
+        let shown: Vec<_> = snap.providers.iter().filter(|p| p.status.visible()).collect();
+        if shown.is_empty() {
+            c.append(&pop_title("AI usage"));
+            c.append(&mono_row("status", "no provider configured", false));
+            return;
+        }
+
+        for (i, p) in shown.iter().enumerate() {
+            if i > 0 {
+                c.append(&sep_row());
+            }
+            let title = match &p.plan {
+                Some(plan) if !plan.is_empty() => format!("{}  ·  {}", p.name, plan),
+                _ => p.name.to_string(),
+            };
+            c.append(&pop_title(&title));
+
+            for w in &p.windows {
+                c.append(&window_row(w));
+            }
+            if let Some(sp) = &p.spend {
+                // Below the windows and captioned as money, because "20%" next
+                // to a stack of rate limits otherwise reads as a fifth limit.
+                let row = meter_row(
+                    "Extra credits",
+                    &format!("{} / {}", sp.money(sp.used), sp.money(sp.limit)),
+                    sp.pct / 100.0,
+                );
+                row.append(&caption("pay-as-you-go, not a rate limit"));
+                c.append(&row);
+            }
+
+            // Whatever went wrong is stated plainly rather than leaving an
+            // empty section the user has to interpret.
+            let note = match &p.status {
+                ai::Status::RateLimited { until } if *until > 0 => {
+                    Some(format!("rate limited · retry in {}", ai::until(*until)))
+                }
+                ai::Status::RateLimited { .. } => Some("rate limited".to_string()),
+                ai::Status::NeedsLogin => Some("session expired".to_string()),
+                ai::Status::Error(e) => Some(e.clone()),
+                ai::Status::LocalOnly if p.windows.is_empty() => {
+                    Some("local data only (offline)".to_string())
+                }
+                _ => None,
+            };
+            if let Some(note) = note {
+                c.append(&mono_row("status", &note, false));
+            }
+
+            // A session about to lapse is worth flagging before it starts
+            // returning 401s. One that's weeks out is just noise, so it's only
+            // shown inside the last three days.
+            if let Some(t) = p.session_expires {
+                let left = t - ai::now_unix();
+                if left > 0 && left < 3 * 86_400 {
+                    c.append(&mono_row("session", &format!("expires in {}", ai::until(t)), false));
+                }
+            }
+
+            // Tezca never writes the credential — it belongs to Claude Code. So
+            // "sign in" means launching the real client, on the same AI
+            // scratchpad that SUPER+ALT+SHIFT+A uses.
+            if p.status == ai::Status::NeedsLogin {
+                let b = Button::with_label("Sign in with claude");
+                b.add_css_class("appmenu-item");
+                b.set_halign(Align::Fill);
+                if let Some(child) = b.child() {
+                    child.set_halign(Align::Start);
+                }
+                let pw = pw.clone();
+                b.connect_clicked(move |_| {
+                    if let Some(pop) = pw.upgrade() {
+                        pop.popdown();
+                    }
+                    sh("uwsm app -- kitty --class tezca-ai -e claude \
+                        || kitty --class tezca-ai -e claude");
+                });
+                c.append(&b);
+            }
+
+            if let Some(l) = &p.local {
+                let rows = GtkBox::new(Orientation::Vertical, 7);
+                rows.append(&mono_row("today", &format!("{} tok", ai::compact_count(l.total_tokens())), false));
+                if l.cost_usd > 0.0 {
+                    // Named "API-equivalent" because on a subscription plan
+                    // this is not money you are actually charged.
+                    rows.append(&mono_row("api-equiv", &format!("${:.2}", l.cost_usd), true));
+                }
+                if l.messages > 0 {
+                    rows.append(&mono_row("messages", &l.messages.to_string(), false));
+                }
+                c.append(&rows);
+            }
+        }
+
+        // Freshness footer — the poll interval is minutes, so "when did this
+        // last update" is real information, not decoration.
+        if snap.updated > 0 {
+            c.append(&sep_row());
+            c.append(&mono_row("updated", &ai::ago(snap.updated), false));
+        }
+    });
+    pop
+}
+
+/// One rate-limit window: title, percent + countdown, meter, and a caption
+/// spelling out what the number actually covers.
+///
+/// The caption is the point of this function. A bare `37%` is unreadable —
+/// weekly or daily? this model or all of them? — and the account can carry
+/// several overlapping windows at once, so each one has to say which it is.
+fn window_row(w: &ai::Window) -> GtkBox {
+    let value = match w.resets_at {
+        Some(t) => format!("{:.0}%   {}", w.pct, ai::until(t)),
+        None => format!("{:.0}%", w.pct),
+    };
+    let row = meter_row(&w.label, &value, w.pct / 100.0);
+    // Of several limits only one is binding; saying so beats making the reader
+    // compare percentages and guess.
+    let scope = if w.active { format!("{}  ·  in use now", w.scope) } else { w.scope.clone() };
+    row.append(&caption(&scope));
+    row
+}
+
+/// Muted sub-line under a meter, explaining what it measures.
+fn caption(text: &str) -> Label {
+    let l = Label::new(Some(text));
+    l.add_css_class("pop-sub");
+    l.set_halign(Align::Start);
+    l.set_max_width_chars(34);
+    l.set_wrap(true);
+    l
+}
+
+/// A hairline divider between provider sections.
+fn sep_row() -> GtkBox {
+    let s = GtkBox::new(Orientation::Horizontal, 0);
+    s.add_css_class("pop-sep");
+    s.set_size_request(-1, 1);
+    s
 }
 
 fn mono_row(key: &str, val: &str, accent: bool) -> GtkBox {

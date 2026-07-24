@@ -1,7 +1,7 @@
 //! `tezca doctor` — verify the machine is set up for a correct, buttery
 //! NVIDIA + dual-165 Hz Hyprland/uwsm session.
 
-use crate::{repo, term};
+use crate::{cmd_theme, repo, term};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -440,6 +440,30 @@ fn dependency_checks() -> Vec<Check> {
         Check::warn("menubar", "tezca-bar not running — Waybar fallback is up")
     } else {
         Check::warn("menubar", "no menubar running — start it with `tezca bar start`")
+    });
+
+    // Runtime: the launcher's two resident halves. Both fail *quietly* — the
+    // launcher still opens either way — so nothing surfaces them but this check.
+    //   - elephant down  → walker opens but sits on "Waiting for elephant...",
+    //     i.e. no results at all.
+    //   - walker service down → every SUPER+SPACE cold-starts GTK4 instead of
+    //     activating a warm instance: ~1.2s to paint instead of ~90ms, and slow
+    //     enough that a second keypress lands mid-startup and `close_when_open`
+    //     cancels the launch outright.
+    checks.push(if proc_running("elephant") {
+        Check::pass("elephant", "provider backend is running")
+    } else {
+        Check::warn("elephant", "not running — walker will show no results")
+    });
+
+    checks.push(if cmd_theme::walker_service_running() {
+        Check::pass("walker service", "resident — launcher opens in ~90ms")
+    } else {
+        Check::warn(
+            "walker service",
+            "not resident — SUPER+SPACE cold-starts (~1.2s); \
+             check the `walker --gapplication-service` line in autostart.conf",
+        )
     });
 
     checks

@@ -12,7 +12,7 @@
 use crate::{repo, term};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// The generated files every component imports from ~/.config/tezca/current/.
 const FILES: &[&str] = &[
@@ -332,8 +332,11 @@ fn reload_components() {
     // kitty — SIGUSR1 makes every instance re-read its config.
     report("kitty", signal("kitty", "USR1"));
 
-    // Walker re-reads its theme CSS on each on-demand launch — nothing to signal.
-    report("walker", Outcome::Skipped("re-reads on next launch".into()));
+    // Walker now runs as a resident GApplication service (autostart.conf) so the
+    // launcher opens in ~90ms instead of cold-starting per keypress. The tradeoff
+    // is that it no longer re-reads the theme CSS on launch — it has no reload
+    // signal and no config watcher — so a theme switch has to restart it.
+    report("walker", reload_walker());
 
     // tezca-dock re-reads the theme palette on SIGUSR2 — a live recolor with no
     // restart and no flicker.
@@ -351,6 +354,58 @@ fn reload_dock() -> Outcome {
         Ok(s) if s.success() => Outcome::Done("palette reloaded".into()),
         Ok(_) => Outcome::Skipped("not running".into()),
         Err(e) => Outcome::Failed(e.to_string()),
+    }
+}
+
+/// `pkill -f` pattern matching the resident walker service (autostart.conf).
+///
+/// Matched by full command line, not by name: `pkill -x walker` would also hit a
+/// transient client instance — the ~90ms process a keybind spawns to activate the
+/// service — and `--gapplication-service` is the distinctive part.
+///
+/// The leading `[^ ]*` is load-bearing: systemd/uwsm exec the service by absolute
+/// path, so the live cmdline is `/usr/bin/walker --gapplication-service`, not
+/// `walker …`. It still won't match the `uwsm app -- walker …` launcher wrapper,
+/// since that has spaces before `walker`.
+///
+/// Shared with `cmd_doctor`, which reports whether the service is up — one source
+/// of truth so the two can't drift apart.
+pub const WALKER_SERVICE_PATTERN: &str = "^[^ ]*walker --gapplication-service$";
+
+/// True if the resident walker service is alive.
+pub fn walker_service_running() -> bool {
+    Command::new("pkill")
+        .args(["-0", "-f", WALKER_SERVICE_PATTERN])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Restart the resident walker service so it picks up the new theme CSS.
+///
+/// If the service isn't running, walker is being cold-started per keypress and
+/// will read the new CSS on its own — nothing to do.
+fn reload_walker() -> Outcome {
+    if !walker_service_running() {
+        return Outcome::Skipped("service not running — re-reads on next launch".into());
+    }
+
+    if let Err(e) = Command::new("pkill").arg("-f").arg(WALKER_SERVICE_PATTERN).status() {
+        return Outcome::Failed(e.to_string());
+    }
+
+    // Relaunch through uwsm so the service lands back in the same systemd slice
+    // autostart.conf put it in. Detached: the service is long-lived, so waiting
+    // on it would hang the theme switch.
+    let spawned = Command::new("uwsm")
+        .args(["app", "--", "walker", "--gapplication-service"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    match spawned {
+        Ok(_) => Outcome::Done("service restarted".into()),
+        Err(e) => Outcome::Failed(format!("restart failed: {e}")),
     }
 }
 

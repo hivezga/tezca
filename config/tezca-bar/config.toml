@@ -107,11 +107,14 @@ workspace_compact = true
 workspaces.DP-1 = odd  # 1 3 5 7 9  on the Xiaomi ultrawide
 workspaces.DP-3 = even  # 2 4 6 8 10 on the LG
 
-# --- Volume OSD ------------------------------------------------------------
+# --- On-screen display (OSD) ----------------------------------------------
 # The transient glass pill that fades in mid-screen when the volume goes up,
 # down, or mutes — from ANY source (the volume keys, an app, the bar's own
 # mixer), because it watches PipeWire/PulseAudio for the change rather than only
 # our keybinds. Needs `pactl` (ships with pipewire-pulse); silently off without.
+# The same pill also shows backlight brightness changes on laptops (any panel
+# under /sys/class/backlight); desktops with DDC-only monitors have no such
+# panel, so the brightness OSD simply never fires there — zero cost.
 osd_enabled = true
 
 # How long the pill stays up before it fades out, milliseconds (clamped 400 …

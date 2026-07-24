@@ -23,9 +23,10 @@ use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Label, LevelBar, Orientation, Window};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 
-// Volume glyphs (MDI, supplementary plane so the Write tool keeps them).
+// Glyphs (MDI, supplementary plane so the Write tool keeps them).
 const G_VOL: [&str; 3] = ["\u{F057F}", "\u{F0580}", "\u{F057E}"]; // low / mid / high
 const G_MUTED: &str = "\u{F075F}";
+const G_BRIGHT: &str = "\u{F00DF}"; // matches the bar's brightness module glyph
 
 /// Watch PipeWire/PulseAudio for default-sink changes on a background thread,
 /// pinging `tx` (with no payload — the GTK side re-reads the real volume) each
@@ -126,8 +127,8 @@ impl Osd {
         })
     }
 
-    /// Reveal (or refresh) the OSD for the given sink state, then arm the
-    /// auto-hide. Called on every change event; re-calling resets the timer.
+    /// Reveal the OSD for the given sink state, then arm the auto-hide. Called on
+    /// every volume change event; re-calling resets the timer.
     pub fn show(self: &Rc<Self>, volume: u32, muted: bool) {
         if muted {
             self.glyph.set_text(G_MUTED);
@@ -145,7 +146,23 @@ impl Osd {
             self.level.set_value(volume.min(100) as f64);
             self.root.remove_css_class("muted");
         }
+        self.flash();
+    }
 
+    /// Reveal the OSD for a backlight brightness change (laptop panels). Same
+    /// pill as the volume OSD, a sun glyph, no mute concept.
+    pub fn show_brightness(self: &Rc<Self>, percent: u32) {
+        self.glyph.set_text(G_BRIGHT);
+        self.value.set_text(&format!("{percent}%"));
+        self.level.set_value(percent.min(100) as f64);
+        self.root.remove_css_class("muted");
+        self.flash();
+    }
+
+    /// Shared reveal + auto-hide: cancel any pending timers, show the pill with
+    /// the opacity-fade class, then schedule the fade-out and unmap. Re-calling
+    /// resets the dwell so holding a key keeps it up.
+    fn flash(self: &Rc<Self>) {
         cancel(&self.fade);
         cancel(&self.hide);
 

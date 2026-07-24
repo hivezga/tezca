@@ -66,6 +66,9 @@ pub struct Bar {
     /// Last (volume, muted) the OSD reacted to — so a sink event that didn't
     /// actually change the master volume (e.g. an app stream) doesn't flash it.
     last_audio: RefCell<Option<(u32, bool)>>,
+    /// Last backlight brightness percent the OSD reacted to. `None` when there's
+    /// no backlight (a desktop) — the fast brightness poll never starts there.
+    last_brightness: RefCell<Option<u32>>,
     /// True when the camera indicator is in some layout region — gates the
     /// `/proc` scan so the poll costs nothing when the module isn't shown.
     has_camera: bool,
@@ -103,6 +106,9 @@ impl Bar {
         // first volume change flashes it. `pactl subscribe` emits nothing on
         // connect, so there's no spurious launch event to swallow.
         let a0 = sysinfo::audio();
+        // Seed the brightness baseline too — Some only on a machine with a
+        // backlight, which is what gates the fast brightness-OSD poll below.
+        let b0 = sysinfo::brightness();
         let bar = Rc::new(Bar {
             surfaces,
             cfg,
@@ -117,6 +123,7 @@ impl Bar {
             ai: ai_state,
             last_compaction: RefCell::new(Vec::new()),
             last_audio: RefCell::new(Some((a0.volume, a0.muted))),
+            last_brightness: RefCell::new(b0),
             has_camera,
             has_mic,
         });
@@ -158,6 +165,37 @@ impl Bar {
         every(self.cfg.gpu_interval, Box::new(|b| b.tick_gpu()), self);
         // Controls (audio/net/battery/brightness/bell/gamemode/now-playing).
         every(2, Box::new(|b| b.tick_controls()), self);
+
+        // Brightness OSD: there's no event source for a backlight the way `pactl
+        // subscribe` gives one for volume, so poll the (one tiny) sysfs file
+        // quickly and flash the pill on a change. Only started when a backlight
+        // actually exists (Some at seed time) and the OSD is enabled — so this
+        // costs literally nothing on a desktop (DDC monitors, no sysfs backlight).
+        if self.cfg.osd_enabled && self.last_brightness.borrow().is_some() {
+            let weak = Rc::downgrade(self);
+            glib::timeout_add_local(std::time::Duration::from_millis(250), move || {
+                match weak.upgrade() {
+                    Some(b) => {
+                        b.tick_brightness_osd();
+                        ControlFlow::Continue
+                    }
+                    None => ControlFlow::Break,
+                }
+            });
+        }
+    }
+
+    /// Fast backlight poll: if the brightness moved since last look, flash the
+    /// OSD on every monitor. Seeded at startup so the first change flashes.
+    fn tick_brightness_osd(&self) {
+        let Some(pct) = sysinfo::brightness() else { return };
+        if self.last_brightness.borrow().map(|prev| prev == pct).unwrap_or(false) {
+            return; // unchanged
+        }
+        *self.last_brightness.borrow_mut() = Some(pct);
+        for s in &self.surfaces {
+            s.osd.show_brightness(pct);
+        }
     }
 
     /// Refresh workspaces + the per-app label from live Hyprland state.

@@ -93,9 +93,50 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::SUCCESS;
     }
 
+    // `--osd-demo <volume|brightness>`: flash one OSD pill on the primary monitor
+    // for a couple of seconds, then quit. The way to eyeball the OSD's look (e.g.
+    // the brightness variant on a machine with no backlight to trigger it) without
+    // the whole bar. Uses its own app-id, so it can't disturb a running bar.
+    if let Some(kind) = osd_demo_kind() {
+        return run_osd_demo(kind);
+    }
+
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(activate);
     app.run()
+}
+
+/// Parse `--osd-demo <volume|brightness>` (defaulting to volume) from argv.
+fn osd_demo_kind() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    let i = args.iter().position(|a| a == "--osd-demo")?;
+    Some(args.get(i + 1).cloned().unwrap_or_else(|| "volume".to_string()))
+}
+
+/// Show a single OSD pill on the primary monitor, then quit — a visual preview.
+fn run_osd_demo(kind: String) -> glib::ExitCode {
+    let app = Application::builder().application_id("dev.tezca.osd-demo").build();
+    app.connect_activate(move |app| {
+        let display = Display::default().expect("no display");
+        // Keep the stack alive for the app's lifetime so the pill is themed.
+        let css = theme::CssStack::install(&display);
+        std::mem::forget(css);
+        let monitors = display.monitors();
+        let Some(obj) = monitors.item(0) else { return };
+        let Ok(monitor) = obj.downcast::<gtk4::gdk::Monitor>() else { return };
+        let osd = osd::Osd::build(app, &monitor, 1800);
+        match kind.as_str() {
+            "brightness" | "bright" => osd.show_brightness(72),
+            _ => osd.show(45, false),
+        }
+        let app2 = app.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(2500), move || {
+            app2.quit();
+        });
+        let hold = app.hold();
+        std::mem::forget(hold);
+    });
+    app.run_with_args(&["tezca-bar"])
 }
 
 fn activate(app: &Application) {

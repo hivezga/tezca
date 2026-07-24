@@ -41,7 +41,7 @@ impl Default for Config {
             margin_bottom: 8,
             hotspot_height: 6,
             hide_delay_ms: 350,
-            pinned: ["kitty", "firefox"].iter().map(|s| s.to_string()).collect(),
+            pinned: ["Alacritty", "firefox"].iter().map(|s| s.to_string()).collect(),
         }
     }
 }

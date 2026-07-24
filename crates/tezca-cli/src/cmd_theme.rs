@@ -16,10 +16,11 @@ use std::process::{Command, Stdio};
 
 /// The generated files every component imports from ~/.config/tezca/current/.
 const FILES: &[&str] = &[
-    "colors.css",          // GTK: Waybar, swaync, Walker
-    "colors-kitty.conf",   // kitty
-    "colors-hypr.conf",    // hypr/conf.d/decoration.conf (borders/shadows)
-    "colors-hyprlock.conf", // hypr/hyprlock.conf (+ wallpaper path)
+    "colors.css",             // GTK: Waybar, swaync, Walker
+    "colors-alacritty.toml",  // Alacritty (the default terminal)
+    "colors-kitty.conf",      // kitty (documented fallback)
+    "colors-hypr.conf",       // hypr/conf.d/decoration.conf (borders/shadows)
+    "colors-hyprlock.conf",   // hypr/hyprlock.conf (+ wallpaper path)
 ];
 
 /// Token in colors-hyprlock.conf we substitute with the wallpaper's abs path.
@@ -329,7 +330,21 @@ fn reload_components() {
         report("swaync", Outcome::Skipped("swaync-client not found".into()));
     }
 
-    // kitty — SIGUSR1 makes every instance re-read its config.
+    // Alacritty — the default terminal. `live_config_reload` (alacritty.toml)
+    // watches the imported palette, so open terminals recolor on their own the
+    // moment the file lands. Nothing to signal; report it so the absence of a
+    // line here doesn't read as "the terminal was forgotten".
+    report(
+        "alacritty",
+        if proc_running("alacritty") {
+            Outcome::Done("live_config_reload picks it up".into())
+        } else {
+            Outcome::Skipped("not running".into())
+        },
+    );
+
+    // kitty — retained as a documented fallback. SIGUSR1 makes every instance
+    // re-read its config; a no-op when kitty isn't running, which is the norm now.
     report("kitty", signal("kitty", "USR1"));
 
     // Walker now runs as a resident GApplication service (autostart.conf) so the

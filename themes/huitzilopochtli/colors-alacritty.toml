@@ -1,0 +1,37 @@
+# Project:Tezca — huitzilopochtli (curated) Alacritty palette.
+# Copied verbatim into ~/.config/tezca/current/colors-alacritty.toml and
+# imported by alacritty.toml. Huitzilopochtli — south · sun · will; the obsidian base with a blue accent.
+# Mirrors templates/colors-alacritty.toml token-for-token, and carries the
+# same hexes as this theme's colors-kitty.conf.
+
+[colors.primary]
+foreground = "#D6DBDC"
+background = "#0B0E0F"
+
+[colors.cursor]
+text   = "#0B0E0F"
+cursor = "#5B93E8"
+
+[colors.selection]
+text       = "#0B0E0F"
+background = "#5B93E8"
+
+[colors.normal]
+black   = "#14181A"
+red     = "#E06B74"
+green   = "#56C596"
+yellow  = "#D4B36A"
+blue    = "#5AA9E6"
+magenta = "#B58BD6"
+cyan    = "#5B93E8"
+white   = "#B7BEBF"
+
+[colors.bright]
+black   = "#2A3033"
+red     = "#E88A91"
+green   = "#7BD6AF"
+yellow  = "#E2C88A"
+blue    = "#82C0EE"
+magenta = "#C9A8E4"
+cyan    = "#6BCEC7"
+white   = "#EDF1F1"

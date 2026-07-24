@@ -1406,7 +1406,7 @@ pub fn system() -> Widget {
     let diag = action("Diagnostics");
     diag.connect_clicked(|_| {
         let t = backend::tezca_bin();
-        backend::spawn("kitty", &["--hold", "-e", t.as_str(), "doctor"]);
+        backend::spawn("alacritty", &["--hold", "-e", t.as_str(), "doctor"]);
     });
     let logout = action("Logout menu");
     logout.connect_clicked(|_| backend::spawn("wlogout", &["-b", "4"]));

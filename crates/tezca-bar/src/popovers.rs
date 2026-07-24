@@ -492,8 +492,8 @@ pub fn ai_detail(anchor: &impl IsA<gtk4::Widget>, state: Rc<RefCell<ai::Snapshot
                     if let Some(pop) = pw.upgrade() {
                         pop.popdown();
                     }
-                    sh("uwsm app -- kitty --class tezca-ai -e claude \
-                        || kitty --class tezca-ai -e claude");
+                    sh("uwsm app -- alacritty --class tezca-ai -e claude \
+                        || alacritty --class tezca-ai -e claude");
                 });
                 c.append(&b);
             }

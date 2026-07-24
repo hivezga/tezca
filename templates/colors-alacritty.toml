@@ -1,0 +1,40 @@
+# Project:Tezca — Alacritty palette (matugen template).
+#
+# Rendered by matugen into ~/.config/tezca/current/colors-alacritty.toml and
+# imported by alacritty.toml. Only the surfaces (bg/fg/cursor/selection) track
+# the wallpaper; the 16 ANSI colors stay a fixed, tasteful obsidian set so
+# terminal semantics survive (git-diff red never becomes teal on a teal
+# wallpaper). Mirrors templates/colors-kitty.conf token-for-token.
+
+[colors.primary]
+foreground = "{{colors.on_surface.default.hex}}"
+background = "{{colors.surface_container_lowest.default.hex}}"
+
+[colors.cursor]
+text   = "{{colors.surface_container_lowest.default.hex}}"
+cursor = "{{colors.primary.default.hex}}"
+
+[colors.selection]
+text       = "{{colors.on_primary.default.hex}}"
+background = "{{colors.primary.default.hex}}"
+
+# --- Fixed obsidian ANSI (turquoise/jade-leaning accents, smoke greys) ---
+[colors.normal]
+black   = "#14181A"
+red     = "#E06B74"
+green   = "#56C596"
+yellow  = "#D4B36A"
+blue    = "#5AA9E6"
+magenta = "#B58BD6"
+cyan    = "#3FB8AF"
+white   = "#B7BEBF"
+
+[colors.bright]
+black   = "#2A3033"
+red     = "#E88A91"
+green   = "#7BD6AF"
+yellow  = "#E2C88A"
+blue    = "#82C0EE"
+magenta = "#C9A8E4"
+cyan    = "#6BCEC7"
+white   = "#EDF1F1"

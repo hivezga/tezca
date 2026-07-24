@@ -1,0 +1,59 @@
+# Project:Tezca — Alacritty terminal (obsidian glass).
+#
+# The default terminal ($mod+T, $mod+Return, the SUPER+ALT+T dropdown, the AI
+# workspace, and the btop sysmon bind). kitty is retained in the repo as a
+# documented fallback (config/kitty/), the same way Waybar and nwg-dock are.
+#
+# The palette lives in the theme engine: imported from the stable path the
+# `tezca` CLI repoints per theme. Alacritty's `live_config_reload` watches the
+# imported file too, so `tezca theme set …` recolors open terminals with no
+# signal and no restart — unlike kitty, which needed SIGUSR1.
+#
+# The import is written ~/-absolute on purpose. Alacritty resolves relative
+# imports against the config file's *real* path, and ~/.config/alacritty is a
+# symlink into the repo — a relative `../tezca/current/…` would resolve to
+# <repo>/config/tezca/current/, which does not exist. Edit templates/ or
+# themes/, never the hexes here.
+
+[general]
+import = ["~/.config/tezca/current/colors-alacritty.toml"]
+live_config_reload = true
+
+# --- Font -----------------------------------------------------------------
+[font]
+size = 11.5
+
+[font.normal]
+family = "JetBrainsMono Nerd Font"
+style = "Regular"
+
+[font.bold]
+family = "JetBrainsMono Nerd Font"
+style = "Bold"
+
+[font.italic]
+family = "JetBrainsMono Nerd Font"
+style = "Italic"
+
+# --- Window / glass -------------------------------------------------------
+# opacity mirrors kitty's 0.90 so the compositor blur reads through identically.
+# `blur` is a macOS/KDE-only request — on Hyprland the glass comes from the
+# windowrule in conf.d/, not from here.
+[window]
+opacity = 0.90
+padding = { x = 10, y = 10 }
+dynamic_padding = true
+decorations = "None"
+
+# --- Behaviour ------------------------------------------------------------
+[scrolling]
+history = 10000
+
+[selection]
+save_to_clipboard = true
+
+[bell]
+duration = 0
+
+[cursor]
+style = { shape = "Block", blinking = "Off" }

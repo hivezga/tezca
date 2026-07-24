@@ -87,7 +87,7 @@ in CachyOS repos; `AUR` installs via `paru`.
 | Idle | **hypridle** | repo | Native idle/dpms/lock orchestration |
 | Logout | **wlogout** | repo | Themable power menu |
 | Theme engine | **matugen** | repo | **Rust** Material-You extraction + templating — the core (see §7) |
-| Terminal | **kitty** (keep) | repo | GPU-accel, ligatures, themable via templates |
+| Terminal | **Alacritty** | repo | GPU-accel, minimal, themable via templates; `live_config_reload` needs no signal. kitty kept in-repo as a fallback |
 | Polkit agent | **hyprpolkitagent** | repo | Native GUI auth prompts |
 | Clipboard | **cliphist** + wl-clipboard | repo | History, Walker-integrated |
 | Screenshots | **hyprshot** (+ grim/slurp/swappy) | repo | Region/window/annotate |
@@ -228,8 +228,8 @@ feel like *one* designed system instead of a rice.
                   │ renders templates → colors for every app
    ┌──────┬───────┼───────┬────────┬────────┐
    ▼      ▼       ▼        ▼        ▼        ▼
- Hyprland Waybar swaync  kitty   Walker    GTK
- (borders)(CSS)  (CSS)  (theme) (CSS)   (gtk.css)
+ Hyprland Waybar swaync Alacritty Walker   GTK
+ (borders)(CSS)  (CSS)   (toml)  (CSS)  (gtk.css)
                   │
              `tezca theme` reloads each component live
 ```
@@ -248,7 +248,8 @@ feel like *one* designed system instead of a rice.
   (and per-app equivalents). Components never hardcode colors.
 - Switching a theme = matugen re-renders templates → repoint the `current/` symlink →
   `tezca` sends each app its reload signal (Waybar SIGUSR2, swaync reload, hyprctl
-  reload, kitty remote, Walker restart). No app restarts visible to the user.
+  reload, Alacritty live_config_reload, Walker restart). No app restarts visible to
+  the user.
 - Templates live in `templates/`; generated output in `~/.config/tezca/current/`.
 
 **Signature palette (`obsidian`, dark-first):** obsidian `#0B0E0F` base, smoke greys,
@@ -336,7 +337,8 @@ Project:Tezca/
 │   ├── waybar/{config.jsonc, style.css}
 │   ├── swaync/{config.json, style.css}
 │   ├── walker/
-│   ├── kitty/
+│   ├── alacritty/
+│   ├── kitty/                # documented fallback
 │   └── nwg-dock-hyprland/
 ├── themes/                   # obsidian/, smoke/, ... (palette + wallpaper + accent)
 ├── templates/                # matugen templates → current/colors.*
@@ -404,8 +406,8 @@ renders the same. Full map in `conf.d/keybinds.conf`; helper scripts in `conf.d/
 - **Per phase, live**: after Phase 1 we switch you to the Tezca session and validate on
   the real hardware (both monitors, refresh rate, no NVIDIA flicker) via `tezca doctor`
   + visual check. KDE remains selectable at SDDM the entire time.
-- **Theme engine**: switch wallpaper → confirm Waybar/kitty/swaync/Hyprland all recolor
-  live with no restarts.
+- **Theme engine**: switch wallpaper → confirm Waybar/Alacritty/swaync/Hyprland all
+  recolor live with no restarts.
 - **Gaming**: launch a title, confirm tearing/VRR active, blur off, MangoHud overlay,
   frame pacing on 165 Hz.
 - **Reversibility**: `tezca link` backs up originals; uninstall path restores them.

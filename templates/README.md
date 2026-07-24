@@ -11,7 +11,8 @@ component picks it up.
              ▼
   ~/.config/tezca/current/
     ├── colors.css            → @imported by Waybar, swaync, Walker (GTK CSS)
-    ├── colors-kitty.conf     → included by kitty.conf
+    ├── colors-alacritty.toml → imported by alacritty.toml (the default terminal)
+    ├── colors-kitty.conf     → included by kitty.conf (documented fallback)
     ├── colors-hypr.conf      → sourced by hypr/conf.d/decoration.conf (borders)
     ├── colors-hyprlock.conf  → sourced by hypr/hyprlock.conf (+ wallpaper path)
     ├── wallpaper             → one line: the active wallpaper's absolute path
@@ -29,6 +30,9 @@ component picks it up.
 Either way the `tezca` CLI then points every component's stable import at the
 new files and sends each one its live-reload signal (Waybar SIGUSR2, swaync
 `--reload-css`, `hyprctl reload`, kitty SIGUSR1, awww wallpaper) — no restarts.
+Alacritty needs no signal: its `live_config_reload` watches the imported palette
+and recolors open terminals on its own. Walker is the one exception — it runs as
+a resident service with no reload signal, so `tezca theme` restarts it.
 
 ## Color tokens
 

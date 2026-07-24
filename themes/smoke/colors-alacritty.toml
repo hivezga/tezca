@@ -1,0 +1,37 @@
+# Project:Tezca — smoke (curated) Alacritty palette.
+# Copied verbatim into ~/.config/tezca/current/colors-alacritty.toml and
+# imported by alacritty.toml. The soft light variant — pale smoke, deep jade accent, obsidian ink.
+# Mirrors templates/colors-alacritty.toml token-for-token, and carries the
+# same hexes as this theme's colors-kitty.conf.
+
+[colors.primary]
+foreground = "#1B1F21"
+background = "#F1F4F5"
+
+[colors.cursor]
+text   = "#FFFFFF"
+cursor = "#1F8A82"
+
+[colors.selection]
+text       = "#FFFFFF"
+background = "#1F8A82"
+
+[colors.normal]
+black   = "#33383A"
+red     = "#C0392F"
+green   = "#1E7F4E"
+yellow  = "#9C7A22"
+blue    = "#2C6FB0"
+magenta = "#8250B0"
+cyan    = "#1F8A82"
+white   = "#55605F"
+
+[colors.bright]
+black   = "#5A6265"
+red     = "#D65449"
+green   = "#2F9E67"
+yellow  = "#B8912F"
+blue    = "#3D89D0"
+magenta = "#9D6BCB"
+cyan    = "#2FA79E"
+white   = "#22282A"

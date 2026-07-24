@@ -46,7 +46,7 @@ fi
 # skipped by --needed.
 PKGS_CORE=(hyprland uwsm hyprpolkitagent
            xdg-desktop-portal-hyprland xdg-desktop-portal-gtk
-           qt5-wayland qt6-wayland kitty
+           qt5-wayland qt6-wayland alacritty
            cliphist wl-clipboard
            pipewire wireplumber
            polkit brightnessctl playerctl)
@@ -62,7 +62,9 @@ PKGS_AESTHETIC=(waybar swaync
 PKGS_WORKFLOW=(gamemode mangohud gamescope libnotify)
 
 # AUR / possibly-AUR (paru resolves either way).
-PKGS_AUR=(walker-bin swww matugen-bin nwg-dock-hyprland)
+# elephant-all-bin is walker's provider backend — without it the launcher opens
+# but returns zero results, so it is not optional despite living here.
+PKGS_AUR=(walker-bin elephant-all-bin swww matugen-bin nwg-dock-hyprland)
 
 say "Packages"
 info "core:      ${DIM}${PKGS_CORE[*]}${RST}"

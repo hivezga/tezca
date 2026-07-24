@@ -397,7 +397,9 @@ fn dependency_checks() -> Vec<Check> {
         ("Hyprland", true, &[]),
         ("uwsm", true, &[]),
         ("hyprctl", true, &[]),
-        ("kitty", true, &[]),
+        ("alacritty", true, &[]), // the default terminal ($mod+T, dropdown, AI, sysmon)
+        ("kitty", false, &[]),    // documented fallback (config/kitty/ still themed)
+        ("elephant", false, &[]), // walker's provider backend — no results without it
         ("hyprpolkitagent", false, &["/usr/lib/hyprpolkitagent/hyprpolkitagent"]),
         ("waybar", false, &[]),
         ("swaync", false, &[]),

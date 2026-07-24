@@ -43,7 +43,7 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
 - **NVIDIA-correct session** — uwsm-managed env, explicit sync, `nvidia_drm.modeset`,
   fullscreen VRR, per-monitor workspaces on dual 165 Hz. `tezca doctor` verifies it all.
 - **One wallpaper drives every color** — [matugen](https://github.com/InioX/matugen)
-  extracts a Material-You palette and re-skins Waybar, swaync, Walker, kitty, Hyprland
+  extracts a Material-You palette and re-skins Waybar, swaync, Walker, Alacritty, Hyprland
   borders, and the lock screen live — no restarts, no hand-syncing hex codes.
 - **`tezca-dock`** — a bespoke **Rust + GTK4** magnifying macOS dock (cosine
   magnification, glass blur, running dots, autohide) as the flagship component.
@@ -111,8 +111,10 @@ tezca theme set smoke                        # curated — the soft light varian
 Every component `@import`s / `source`s a stable path
 (`~/.config/tezca/current/colors.*`) and never hardcodes a color, so switching a
 theme re-renders those files and sends each app its live-reload signal — Waybar
-`SIGUSR2`, swaync `--reload-css`, `hyprctl reload`, kitty `SIGUSR1`, the dock
-`SIGUSR2`, wallpaper via `awww`. No visible restarts. See
+`SIGUSR2`, swaync `--reload-css`, `hyprctl reload`, the dock `SIGUSR2`, wallpaper
+via `awww`. Alacritty needs no signal (`live_config_reload` watches the imported
+palette); Walker is restarted, since a resident service has neither. No visible
+restarts. See
 [`templates/README.md`](templates/README.md) for the token contract.
 
 ## Keybindings
@@ -124,7 +126,7 @@ A **HyDE-style layout** (mirrors [HyDE's map](https://github.com/HyDE-Project/Hy
 | Key | Action |
 |---|---|
 | `SUPER + A` · `SUPER + Space` | application finder (Walker) |
-| `SUPER + T` / `Return` | terminal (kitty) |
+| `SUPER + T` / `Return` | terminal (Alacritty) |
 | `SUPER + E` / `SHIFT + E` | file manager · file finder |
 | `SUPER + C` / `B` | text editor (code) · browser (Brave) |
 | `SUPER + Tab` / `V` / `,` / `.` | window switcher · clipboard · emoji · glyph |
@@ -164,15 +166,15 @@ A **HyDE-style layout** (mirrors [HyDE's map](https://github.com/HyDE-Project/Hy
 
 Waybar (menubar) · **tezca-dock** (Rust dock) · **tezca-settings** (Rust control
 center) · Walker (launcher) · swaync (notifications) · hyprlock + hypridle
-(lock/idle) · wlogout (power) · matugen (theme engine) · awww (wallpaper) · kitty
-(terminal) · cliphist · hyprshot + swappy (snip + annotate) · hyprpicker.
+(lock/idle) · wlogout (power) · matugen (theme engine) · awww (wallpaper) · Alacritty
+(terminal, kitty kept as a fallback) · cliphist · hyprshot + swappy (snip + annotate) · hyprpicker.
 NVIDIA env lives in uwsm's `env` / `env-hyprland`. Rationale for each choice is in
 [`docs/DESIGN.md §5`](docs/DESIGN.md).
 
 ## Layout
 
 ```
-config/       → symlinked into ~/.config (hypr, uwsm, waybar, swaync, walker, kitty, …)
+config/       → symlinked into ~/.config (hypr, uwsm, waybar, swaync, walker, alacritty, …)
 crates/       the Rust core — tezca-cli (`tezca`) + tezca-dock (dock) + tezca-settings (control center)
 themes/       curated palettes — obsidian (dark), smoke (light)
 templates/    matugen templates → ~/.config/tezca/current/colors.*

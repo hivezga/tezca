@@ -328,6 +328,18 @@ pub fn bar() -> Widget {
     page.append(&control_row("Network poll (s)", &net_iv));
     page.append(&control_row("Compact below width (px)", &compact));
 
+    // --- On-screen display (OSD) --------------------------------------------
+    page.append(&section_header("On-screen display"));
+    let osd_enabled = Switch::new();
+    osd_enabled.set_valign(Align::Center);
+    osd_enabled.set_active(get("osd_enabled").as_deref() != Some("false"));
+    page.append(&control_row("Volume / brightness OSD", &osd_enabled));
+    let osd_timeout = spin_from("osd_timeout_ms", 400.0, 10000.0, 100.0, 0, &get);
+    page.append(&control_row("Dwell before fading (ms)", &osd_timeout));
+    page.append(&hint(
+        "The glass pill that flashes when you change the volume (or a laptop's brightness). The camera and microphone privacy indicators are modules — add them under Modules below.",
+    ));
+
     // --- Modules ------------------------------------------------------------
     page.append(&section_header("Modules"));
     page.append(&hint(
@@ -343,7 +355,7 @@ pub fn bar() -> Widget {
     const DEF_LEFT: &str = "mirror, sep, appname, sep, workspaces, submap";
     const DEF_CENTER: &str = "nowplaying";
     const DEF_RIGHT: &str =
-        "gamemode, ai, tray, cpu, mem, gpu, sep, network, volume, brightness, battery, sep, bell, clock, power";
+        "gamemode, camera, microphone, ai, tray, cpu, mem, gpu, sep, network, volume, brightness, battery, sep, bell, clock, power";
     let (left_w, left_ids) = module_region("Left", seed_modules(get("layout_left"), DEF_LEFT), defs.clone());
     let (center_w, center_ids) =
         module_region("Center", seed_modules(get("layout_center"), DEF_CENTER), defs.clone());
@@ -371,6 +383,7 @@ pub fn bar() -> Widget {
             (cpu_iv.clone(), mem_iv.clone(), gpu_iv.clone(), net_iv.clone(), compact.clone());
         let (numerals, hide_empty, compact_ws, assign_rows) =
             (numerals.clone(), hide_empty.clone(), compact_ws.clone(), assign_rows.clone());
+        let (osd_enabled, osd_timeout) = (osd_enabled.clone(), osd_timeout.clone());
         let (left_ids, center_ids, right_ids) = (left_ids.clone(), center_ids.clone(), right_ids.clone());
         apply.connect_clicked(move |_| {
             // Build a flat `key value key value …` arg list (some keys — the
@@ -389,6 +402,8 @@ pub fn bar() -> Widget {
                 ("gpu_interval".into(), (gpu_iv.value() as i64).to_string()),
                 ("net_interval".into(), (net_iv.value() as i64).to_string()),
                 ("compact_width".into(), (compact.value() as i64).to_string()),
+                ("osd_enabled".into(), bool_str(osd_enabled.is_active())),
+                ("osd_timeout_ms".into(), (osd_timeout.value() as i64).to_string()),
             ];
             for (name, dd, entry) in assign_rows.iter() {
                 kvs.push((format!("workspaces.{name}"), ws_spec_value(dd, entry)));
@@ -470,6 +485,8 @@ const MODULE_DEFS: &[(&str, &str)] = &[
     ("submap", "Submap indicator"),
     ("nowplaying", "Now playing"),
     ("gamemode", "Game mode"),
+    ("camera", "Camera indicator"),
+    ("microphone", "Microphone indicator"),
     ("ai", "AI usage"),
     ("tray", "System tray"),
     ("cpu", "CPU"),

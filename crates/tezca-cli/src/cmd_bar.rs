@@ -29,6 +29,14 @@ const SCALARS: &[(&str, &str)] = &[
     ("workspace_numerals", "arabic"),
     ("workspace_hide_empty", "false"),
     ("workspace_compact", "false"),
+    // Per-region module layout (ordered, comma-separated ids). Defaults mirror
+    // crates/tezca-bar/src/config.rs so `config` reports the real arrangement.
+    ("layout_left", "mirror, sep, appname, sep, workspaces, submap"),
+    ("layout_center", "nowplaying"),
+    (
+        "layout_right",
+        "gamemode, ai, tray, cpu, mem, gpu, sep, network, volume, brightness, battery, sep, bell, clock, power",
+    ),
 ];
 
 /// Per-output workspace assignment keys look like `workspaces.<connector>` and

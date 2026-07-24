@@ -45,6 +45,113 @@ impl Numerals {
     }
 }
 
+/// A placeable bar module — one widget slot in a region's ordered layout.
+/// `Sep` is a thin vertical divider and may repeat; every other variant maps to
+/// exactly one built-in widget built in `bar.rs`. Unknown names never parse (so
+/// a typo in config can't inject anything), mirroring how `ai_providers` filters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Mod {
+    Mirror,
+    Appname,
+    Workspaces,
+    Submap,
+    NowPlaying,
+    GameMode,
+    Ai,
+    Tray,
+    Cpu,
+    Mem,
+    Gpu,
+    Network,
+    Volume,
+    Brightness,
+    Battery,
+    Bell,
+    Clock,
+    Power,
+    Sep,
+}
+
+impl Mod {
+    /// Parse one module id (with a few friendly aliases). None for anything
+    /// unrecognised — the caller drops it.
+    pub fn parse(s: &str) -> Option<Mod> {
+        Some(match s.trim().to_lowercase().as_str() {
+            "mirror" | "menu" => Mod::Mirror,
+            "appname" | "app" | "window" | "title" => Mod::Appname,
+            "workspaces" | "ws" => Mod::Workspaces,
+            "submap" => Mod::Submap,
+            "nowplaying" | "now-playing" | "media" | "mpris" => Mod::NowPlaying,
+            "gamemode" | "game" => Mod::GameMode,
+            "ai" => Mod::Ai,
+            "tray" => Mod::Tray,
+            "cpu" => Mod::Cpu,
+            "mem" | "memory" | "ram" => Mod::Mem,
+            "gpu" => Mod::Gpu,
+            "network" | "net" | "wifi" => Mod::Network,
+            "volume" | "vol" | "audio" => Mod::Volume,
+            "brightness" | "backlight" => Mod::Brightness,
+            "battery" | "bat" => Mod::Battery,
+            "bell" | "notifications" | "notif" => Mod::Bell,
+            "clock" | "time" | "date" => Mod::Clock,
+            "power" | "logout" => Mod::Power,
+            "sep" | "separator" | "|" => Mod::Sep,
+            _ => return None,
+        })
+    }
+}
+
+/// One entry in a region's layout: either a built-in module or a user/community
+/// `custom:<name>` exec module (see `custom.rs`). Kept separate from `Mod` so the
+/// built-in vocabulary stays `Copy` and exhaustively matched.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Slot {
+    Mod(Mod),
+    Custom(String),
+}
+
+impl Slot {
+    /// Parse one layout token. `custom:<name>` is the explicit escape hatch for a
+    /// third-party module; every other token must be a known built-in id (a bare
+    /// unknown token is dropped, so only an intentional `custom:` prefix can ever
+    /// introduce a non-built-in slot).
+    pub fn parse(s: &str) -> Option<Slot> {
+        let t = s.trim();
+        if let Some(rest) = t.strip_prefix("custom:") {
+            let name = rest.trim();
+            return (!name.is_empty()).then(|| Slot::Custom(name.to_string()));
+        }
+        Mod::parse(t).map(Slot::Mod)
+    }
+
+    pub fn is_sep(&self) -> bool {
+        matches!(self, Slot::Mod(Mod::Sep))
+    }
+    pub fn is_appname(&self) -> bool {
+        matches!(self, Slot::Mod(Mod::Appname))
+    }
+}
+
+/// Parse a comma-separated region layout into slots, dropping unknown ids.
+fn parse_layout(v: &str) -> Vec<Slot> {
+    v.split(',').filter_map(Slot::parse).collect()
+}
+
+fn default_layout_left() -> Vec<Slot> {
+    use Mod::*;
+    [Mirror, Sep, Appname, Sep, Workspaces, Submap].into_iter().map(Slot::Mod).collect()
+}
+fn default_layout_center() -> Vec<Slot> {
+    vec![Slot::Mod(Mod::NowPlaying)]
+}
+fn default_layout_right() -> Vec<Slot> {
+    use Mod::*;
+    [GameMode, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
+        .into_iter()
+        .map(Slot::Mod)
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub shape: Shape,
@@ -80,6 +187,13 @@ pub struct Config {
     /// AI provider usage module — opt-in, and the only module that can make a
     /// network request. See `ai.rs` for the privacy posture.
     pub ai: AiConfig,
+    /// Which modules each region shows, in order. `layout_*` config keys (a
+    /// comma-separated list of module ids) override these; the defaults
+    /// reproduce the historical hardcoded arrangement exactly. Entries are
+    /// built-ins or `custom:<name>` exec modules (see `custom.rs`).
+    pub layout_left: Vec<Slot>,
+    pub layout_center: Vec<Slot>,
+    pub layout_right: Vec<Slot>,
 }
 
 impl Default for Config {
@@ -100,6 +214,9 @@ impl Default for Config {
             hide_empty: false,
             compact: false,
             ai: AiConfig::default(),
+            layout_left: default_layout_left(),
+            layout_center: default_layout_center(),
+            layout_right: default_layout_right(),
         }
     }
 }
@@ -172,6 +289,27 @@ impl Config {
                 "ai_local" => set_bool(&mut self.ai.local, v),
                 "ai_warn" => set_f64(&mut self.ai.warn, v),
                 "ai_critical" => set_f64(&mut self.ai.critical, v),
+                // --- Module layout (per region, ordered) -----------------
+                // An empty / all-unknown value keeps the built-in default so a
+                // stray line can never blank out a region.
+                "layout_left" => {
+                    let l = parse_layout(v);
+                    if !l.is_empty() {
+                        self.layout_left = l;
+                    }
+                }
+                "layout_center" => {
+                    let l = parse_layout(v);
+                    if !l.is_empty() {
+                        self.layout_center = l;
+                    }
+                }
+                "layout_right" => {
+                    let l = parse_layout(v);
+                    if !l.is_empty() {
+                        self.layout_right = l;
+                    }
+                }
                 // `workspaces.<connector> = <spec>` — per-output workspace sets.
                 _ if k.starts_with("workspaces.") => {
                     let output = k["workspaces.".len()..].trim();
@@ -246,5 +384,69 @@ fn set_bool(dst: &mut bool, v: &str) {
         "true" | "yes" | "on" | "1" => *dst = true,
         "false" | "no" | "off" | "0" => *dst = false,
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn m(x: Mod) -> Slot {
+        Slot::Mod(x)
+    }
+
+    #[test]
+    fn layout_defaults_match_historical_arrangement() {
+        let c = Config::default();
+        assert_eq!(c.layout_left, default_layout_left());
+        assert_eq!(c.layout_center, vec![m(Mod::NowPlaying)]);
+        // The right cluster, in the exact order bar.rs used to hardcode.
+        use Mod::*;
+        assert_eq!(
+            c.layout_right,
+            [GameMode, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
+                .into_iter()
+                .map(Slot::Mod)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn layout_csv_round_trips_with_aliases_and_whitespace() {
+        let mut c = Config::default();
+        c.apply("layout_right = clock , power ,vol\nlayout_center = media");
+        assert_eq!(c.layout_right, vec![m(Mod::Clock), m(Mod::Power), m(Mod::Volume)]);
+        assert_eq!(c.layout_center, vec![m(Mod::NowPlaying)]);
+    }
+
+    #[test]
+    fn unknown_module_ids_are_dropped_not_injected() {
+        let mut c = Config::default();
+        c.apply("layout_left = mirror, bogus, workspaces");
+        assert_eq!(c.layout_left, vec![m(Mod::Mirror), m(Mod::Workspaces)]);
+    }
+
+    #[test]
+    fn empty_or_all_unknown_layout_keeps_default() {
+        let mut c = Config::default();
+        c.apply("layout_left =\nlayout_right = nonsense, alsobad");
+        assert_eq!(c.layout_left, default_layout_left());
+        assert_eq!(c.layout_right, default_layout_right());
+    }
+
+    #[test]
+    fn sep_token_repeats() {
+        let mut c = Config::default();
+        c.apply("layout_right = cpu, sep, sep, mem");
+        assert_eq!(c.layout_right, vec![m(Mod::Cpu), m(Mod::Sep), m(Mod::Sep), m(Mod::Mem)]);
+    }
+
+    #[test]
+    fn custom_prefix_makes_a_custom_slot_bare_unknown_is_still_dropped() {
+        let mut c = Config::default();
+        c.apply("layout_right = cpu, custom:weather, custom: , weather");
+        // `custom:weather` → a custom slot; the empty `custom:` and the bare
+        // `weather` (not a built-in id) are both dropped.
+        assert_eq!(c.layout_right, vec![m(Mod::Cpu), Slot::Custom("weather".into())]);
     }
 }

@@ -10,11 +10,11 @@
 //! Data all comes from std/shell-out readers (see `hypr`, `sysinfo`,
 //! `nowplaying`, `notify`); this file is purely the GTK4 widget tree + wiring.
 
-use crate::config::{Config, Numerals, Shape};
+use crate::config::{Config, Mod, Numerals, Shape, Slot};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
-use crate::{ai, hypr, nowplaying, notify, popovers, tray};
+use crate::{ai, custom, hypr, nowplaying, notify, popovers, tray};
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
 use gtk4::prelude::*;
@@ -70,6 +70,7 @@ impl Bar {
         palette: Palette,
         css: CssStack,
         tray_cmd: async_channel::Sender<tray::TrayCmd>,
+        customs: &[custom::CustomModule],
     ) -> Rc<Bar> {
         let display = gdk::Display::default().expect("no display");
         let shared: SharedPalette = Rc::new(RefCell::new(palette));
@@ -81,7 +82,7 @@ impl Bar {
         for i in 0..monitors.n_items() {
             let Some(obj) = monitors.item(i) else { continue };
             let Ok(monitor) = obj.downcast::<gdk::Monitor>() else { continue };
-            let s = Surface::build(app, &monitor, &cfg, &shared, throughput.clone(), ai_state.clone());
+            let s = Surface::build(app, &monitor, &cfg, &shared, throughput.clone(), ai_state.clone(), customs);
             surfaces.push(s);
         }
 
@@ -286,6 +287,13 @@ impl Bar {
         }
     }
 
+    /// Apply one custom-module poll result to every surface that hosts it.
+    pub fn apply_custom(&self, out: custom::Output) {
+        for s in &self.surfaces {
+            s.set_custom(&out);
+        }
+    }
+
     /// Apply a tray update from the D-Bus thread, then repaint every bar's tray.
     pub fn apply_tray(self: &Rc<Self>, update: tray::TrayUpdate) {
         match update {
@@ -445,6 +453,9 @@ struct Surface {
     ai_val: Label,
 
     mirror: gtk4::DrawingArea,
+
+    /// Community/user exec modules, keyed by manifest name.
+    custom: HashMap<String, CustomCell>,
 }
 
 impl Surface {
@@ -455,6 +466,7 @@ impl Surface {
         pal: &SharedPalette,
         throughput: Rc<RefCell<Throughput>>,
         ai_state: Rc<RefCell<ai::Snapshot>>,
+        customs: &[custom::CustomModule],
     ) -> Rc<Surface> {
         let output = monitor.connector().map(|s| s.to_string()).unwrap_or_default();
         let compact = monitor.geometry().width() < cfg.compact_width;
@@ -470,9 +482,16 @@ impl Surface {
         }
         bar_box.set_size_request(-1, cfg.height);
 
-        // ── LEFT ────────────────────────────────────────────────────────
+        // The three regions. Widgets below are all built unconditionally so the
+        // update methods (which poke them by field) always have a live target;
+        // which ones actually get *parented*, and in what order, is decided by
+        // `place_region` from the configured layout at the end of `build`.
         let left = GtkBox::new(Orientation::Horizontal, 0);
         left.set_halign(Align::Start);
+        let center = GtkBox::new(Orientation::Horizontal, 0);
+        center.set_halign(Align::Center);
+        let right = GtkBox::new(Orientation::Horizontal, 0);
+        right.set_halign(Align::End);
 
         // Tezca mirror menu (drawn glyph inside a flat button).
         let mirror = draw::mirror_glyph(pal, 16.0);
@@ -482,7 +501,6 @@ impl Surface {
         mirror_btn.set_child(Some(&mirror));
         let tezca_pop = popovers::tezca_menu(&mirror_btn);
         mirror_btn.connect_clicked(move |_| tezca_pop.popup());
-        left.append(&mirror_btn);
 
         let app_label = Label::new(Some("Tezca"));
         app_label.add_css_class("appname");
@@ -500,17 +518,6 @@ impl Surface {
         submap_box.append(&submap_label);
         submap_box.append(&submap_hint);
         submap_box.set_visible(false);
-
-        if compact {
-            left.append(&sep());
-            left.append(&ws_box);
-        } else {
-            left.append(&sep());
-            left.append(&app_label);
-            left.append(&sep());
-            left.append(&ws_box);
-        }
-        left.append(&submap_box);
 
         // ── CENTER: now-playing ─────────────────────────────────────────
         let np_box = GtkBox::new(Orientation::Horizontal, 10);
@@ -543,10 +550,7 @@ impl Surface {
         });
         np_box.add_controller(scroll);
 
-        // ── RIGHT ───────────────────────────────────────────────────────
-        let right = GtkBox::new(Orientation::Horizontal, 0);
-        right.set_halign(Align::End);
-
+        // ── RIGHT cluster widgets (parented by place_region below) ───────
         // Game mode (hidden unless on).
         let gamemode_box = GtkBox::new(Orientation::Horizontal, 0);
         gamemode_box.add_css_class("gamemode");
@@ -554,7 +558,6 @@ impl Surface {
         game_glyph.add_css_class("glyph");
         gamemode_box.append(&game_glyph);
         gamemode_box.set_visible(false);
-        right.append(&gamemode_box);
 
         // AI provider usage — hidden until the poll thread reports something
         // worth showing (see ai.rs). Sits beside the tray because that is where
@@ -570,7 +573,6 @@ impl Surface {
         ai_box.append(&ai_val);
         ai_box.set_visible(false);
         attach_detail(&ai_box, popovers::ai_detail(&ai_box, ai_state));
-        right.append(&ai_box);
 
         // System tray (StatusNotifierItem icons) — filled live by the tray
         // thread; hidden until the first item registers.
@@ -578,7 +580,6 @@ impl Surface {
         tray_box.add_css_class("tray");
         tray_box.set_valign(Align::Center);
         tray_box.set_visible(false);
-        right.append(&tray_box);
 
         // Metrics: CPU + MEM sparklines.
         let cpu_spark = draw::sparkline(pal, draw::SparkColor::Accent);
@@ -603,24 +604,17 @@ impl Surface {
         attach_detail(&mem_metric, popovers::mem_detail(&mem_metric));
         attach_detail(&gpu_metric, popovers::gpu_detail(&gpu_metric));
 
-        right.append(&cpu_metric);
-        right.append(&mem_metric);
-        right.append(&gpu_metric);
-        right.append(&sep());
-
         // Controls: network (button → popover).
         let (net_ctl, net_glyph, net_val) = control_button();
         net_glyph.set_text(G_WIFI);
         let net_pop = popovers::network(&net_ctl, throughput.clone());
         net_ctl.connect_clicked(move |_| net_pop.popup());
-        right.append(&net_ctl);
 
         // Volume (button → mixer popover).
         let (vol_ctl, vol_glyph, vol_val) = control_button();
         vol_glyph.set_text(G_VOL[2]);
         let mix_pop = popovers::mixer(&vol_ctl);
         vol_ctl.connect_clicked(move |_| mix_pop.popup());
-        right.append(&vol_ctl);
 
         // Brightness (display-only; hidden on desktops with no backlight).
         let bri_ctl = GtkBox::new(Orientation::Horizontal, 5);
@@ -632,7 +626,6 @@ impl Surface {
         bri_ctl.append(&bri_glyph);
         bri_ctl.append(&bri_val);
         bri_ctl.set_visible(false);
-        right.append(&bri_ctl);
 
         // Battery (hidden on desktops with no battery).
         let bat_ctl = GtkBox::new(Orientation::Horizontal, 5);
@@ -644,9 +637,6 @@ impl Surface {
         bat_ctl.append(&bat_glyph);
         bat_ctl.append(&bat_val);
         bat_ctl.set_visible(false);
-        right.append(&bat_ctl);
-
-        right.append(&sep());
 
         // Notification bell with an urgent dot badge.
         let bell_overlay = Overlay::new();
@@ -667,7 +657,6 @@ impl Surface {
         bell_right.set_button(gdk::BUTTON_SECONDARY);
         bell_right.connect_released(|_, _, _, _| notify::toggle_dnd());
         bell_btn.add_controller(bell_right);
-        right.append(&bell_btn);
 
         // Clock (button → calendar popover).
         let clock_btn = Button::new();
@@ -676,7 +665,6 @@ impl Surface {
         clock_btn.set_child(Some(&clock_label));
         let cal_pop = popovers::calendar(&clock_btn);
         clock_btn.connect_clicked(move |_| cal_pop.popup());
-        right.append(&clock_btn);
 
         // Power → wlogout.
         let power_btn = Button::new();
@@ -688,10 +676,54 @@ impl Surface {
                 .arg("uwsm app -- wlogout -b 4 || wlogout -b 4")
                 .spawn();
         });
-        right.append(&power_btn);
+
+        // ── Custom (community/user exec) modules ─────────────────────────
+        // Build one widget per discovered manifest, keyed by name, so a
+        // `custom:<name>` slot in the layout can resolve to it. Filled live by
+        // the poll thread via `apply_custom`; each stays hidden until it first
+        // prints something.
+        let mut custom_cells: HashMap<String, CustomCell> = HashMap::new();
+        for m in customs {
+            custom_cells.insert(m.name.clone(), CustomCell::build(m));
+        }
+
+        // ── Place modules per the configured layout ──────────────────────
+        // Resolve a slot to the widget built above. Separators are handled by
+        // `place_region`; every built-in maps to exactly one widget, so a
+        // duplicate in the layout is ignored (a GTK widget has one parent).
+        let resolve = |slot: &Slot| -> Option<gtk4::Widget> {
+            use gtk4::prelude::Cast;
+            Some(match slot {
+                Slot::Custom(name) => return custom_cells.get(name).map(|c| c.container.clone().upcast()),
+                Slot::Mod(m) => match m {
+                    Mod::Mirror => mirror_btn.clone().upcast(),
+                    Mod::Appname => app_label.clone().upcast(),
+                    Mod::Workspaces => ws_box.clone().upcast(),
+                    Mod::Submap => submap_box.clone().upcast(),
+                    Mod::NowPlaying => np_box.clone().upcast(),
+                    Mod::GameMode => gamemode_box.clone().upcast(),
+                    Mod::Ai => ai_box.clone().upcast(),
+                    Mod::Tray => tray_box.clone().upcast(),
+                    Mod::Cpu => cpu_metric.clone().upcast(),
+                    Mod::Mem => mem_metric.clone().upcast(),
+                    Mod::Gpu => gpu_metric.clone().upcast(),
+                    Mod::Network => net_ctl.clone().upcast(),
+                    Mod::Volume => vol_ctl.clone().upcast(),
+                    Mod::Brightness => bri_ctl.clone().upcast(),
+                    Mod::Battery => bat_ctl.clone().upcast(),
+                    Mod::Bell => bell_btn.clone().upcast(),
+                    Mod::Clock => clock_btn.clone().upcast(),
+                    Mod::Power => power_btn.clone().upcast(),
+                    Mod::Sep => return None,
+                },
+            })
+        };
+        place_region(&left, &cfg.layout_left, compact, &resolve);
+        place_region(&center, &cfg.layout_center, compact, &resolve);
+        place_region(&right, &cfg.layout_right, compact, &resolve);
 
         bar_box.set_start_widget(Some(&left));
-        bar_box.set_center_widget(Some(&np_box));
+        bar_box.set_center_widget(Some(&center));
         bar_box.set_end_widget(Some(&right));
 
         // ── window / layer-shell ────────────────────────────────────────
@@ -759,6 +791,7 @@ impl Surface {
             ai_box,
             ai_val,
             mirror,
+            custom: custom_cells,
         })
     }
 
@@ -920,6 +953,12 @@ impl Surface {
         }
     }
 
+    fn set_custom(&self, out: &custom::Output) {
+        if let Some(cell) = self.custom.get(&out.name) {
+            cell.set(out);
+        }
+    }
+
     fn set_gamemode(&self, on: bool) {
         if on {
             self.gamemode_box.set_visible(true);
@@ -965,6 +1004,149 @@ fn sep() -> GtkBox {
     s.set_size_request(1, 18);
     s.set_valign(Align::Center);
     s
+}
+
+/// Append the configured modules to a region, in order.
+///
+/// `resolve` turns a non-separator module id into the widget built for it (or
+/// `None` for `Sep`). We honour a couple of layout niceties so the built-in
+/// defaults reproduce the old hardcoded look *and* hand-written layouts stay
+/// tidy:
+///   * on a compact monitor the `appname` module is dropped (as the old code
+///     did — the ultrawide keeps it),
+///   * separators are collapsed: leading, trailing, and runs of adjacent
+///     `Sep`s render as at most one hairline (so a dropped module can't leave a
+///     doubled or dangling divider),
+///   * a widget already placed in this region is skipped (a GTK widget can have
+///     only one parent, so a duplicate id would otherwise panic on reparent).
+/// A community/user exec module's widget: an optional static glyph plus a value
+/// label the poll thread fills. Hidden until it first prints something; a
+/// script-supplied `class` is swapped in on each update so CSS/themes can react.
+struct CustomCell {
+    container: GtkBox,
+    value: Label,
+    /// The class(es) the last output added, to remove before the next.
+    last_class: RefCell<Option<String>>,
+}
+
+impl CustomCell {
+    fn build(m: &custom::CustomModule) -> CustomCell {
+        let container = GtkBox::new(Orientation::Horizontal, 6);
+        container.add_css_class("custom");
+        container.set_valign(Align::Center);
+        if let Some(icon) = &m.icon {
+            let g = Label::new(Some(icon));
+            g.add_css_class("glyph");
+            container.append(&g);
+        }
+        let value = Label::new(None);
+        value.add_css_class("custom-val");
+        container.append(&value);
+        container.set_visible(false);
+
+        // Left click → on_click, right click → on_right_click. One all-buttons
+        // gesture on the box (a plain GtkButton's built-in primary gesture
+        // swallows secondary/middle — the tray hit the same snag).
+        let (lc, rc) = (m.on_click.clone(), m.on_right_click.clone());
+        if lc.is_some() || rc.is_some() {
+            let click = gtk4::GestureClick::new();
+            click.set_button(0); // 0 = listen for every button
+            click.connect_released(move |g, _, _, _| match g.current_button() {
+                gdk::BUTTON_SECONDARY => {
+                    if let Some(c) = &rc {
+                        custom::run_action(c);
+                    }
+                }
+                _ => {
+                    if let Some(c) = &lc {
+                        custom::run_action(c);
+                    }
+                }
+            });
+            container.add_controller(click);
+            container.add_css_class("clickable");
+        }
+
+        CustomCell { container, value, last_class: RefCell::new(None) }
+    }
+
+    fn set(&self, out: &custom::Output) {
+        let show = !out.text.is_empty();
+        self.container.set_visible(show);
+        if !show {
+            return;
+        }
+        self.value.set_text(&out.text);
+        self.container.set_tooltip_text(out.tooltip.as_deref());
+        // Swap the script-provided class(es).
+        if let Some(prev) = self.last_class.borrow_mut().take() {
+            for c in prev.split_whitespace() {
+                self.container.remove_css_class(c);
+            }
+        }
+        if let Some(cls) = &out.class {
+            for c in cls.split_whitespace() {
+                self.container.add_css_class(c);
+            }
+            *self.last_class.borrow_mut() = Some(cls.clone());
+        }
+    }
+}
+
+fn place_region(
+    container: &GtkBox,
+    slots: &[Slot],
+    compact: bool,
+    resolve: &dyn Fn(&Slot) -> Option<gtk4::Widget>,
+) {
+    for slot in plan_region(slots, compact) {
+        if slot.is_sep() {
+            // A fresh hairline per occurrence.
+            container.append(&sep());
+        } else if let Some(w) = resolve(&slot) {
+            container.append(&w);
+        }
+        // A custom slot with no matching manifest resolves to None → nothing
+        // placed (the module just isn't installed), which is fine.
+    }
+}
+
+/// Resolve a region's raw slot list into the ordered sequence to append (still
+/// as `Slot`s, separators included but collapsed). Pure (no GTK) so the fiddly
+/// rules are unit-testable:
+///   * `appname` is dropped on a compact monitor,
+///   * a non-separator slot already emitted is skipped (a GTK widget has one
+///     parent, so a duplicate would panic on reparent),
+///   * separators collapse — leading, trailing, and adjacent `Sep`s reduce to
+///     at most one, so a dropped module never leaves a doubled or dangling one.
+fn plan_region(slots: &[Slot], compact: bool) -> Vec<Slot> {
+    use std::collections::HashSet;
+    let mut placed: HashSet<Slot> = HashSet::new();
+    let mut out: Vec<Slot> = Vec::new();
+    let mut last_real = false; // suppress a leading separator
+    let mut pending_sep = false; // only flushed when a real widget follows
+
+    for slot in slots {
+        if slot.is_sep() {
+            if last_real {
+                pending_sep = true;
+            }
+            continue;
+        }
+        if slot.is_appname() && compact {
+            continue;
+        }
+        if !placed.insert(slot.clone()) {
+            continue;
+        }
+        if pending_sep {
+            out.push(Slot::Mod(Mod::Sep));
+            pending_sep = false;
+        }
+        out.push(slot.clone());
+        last_real = true;
+    }
+    out
 }
 
 /// `LABEL  <spark>  val%` metric group.
@@ -1070,5 +1252,65 @@ fn pretty(class: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => class.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn m(x: Mod) -> Slot {
+        Slot::Mod(x)
+    }
+    fn slots(xs: &[Mod]) -> Vec<Slot> {
+        xs.iter().copied().map(Slot::Mod).collect()
+    }
+
+    #[test]
+    fn default_left_full_reproduces_the_old_layout() {
+        let plan = plan_region(&Config::default().layout_left, false);
+        use Mod::*;
+        assert_eq!(plan, slots(&[Mirror, Sep, Appname, Sep, Workspaces, Submap]));
+    }
+
+    #[test]
+    fn compact_drops_appname_and_collapses_the_freed_separator() {
+        // mirror, sep, appname, sep, workspaces, submap  →  mirror | workspaces submap
+        let plan = plan_region(&Config::default().layout_left, true);
+        use Mod::*;
+        assert_eq!(plan, slots(&[Mirror, Sep, Workspaces, Submap]));
+    }
+
+    #[test]
+    fn default_right_plan_matches_the_old_hardcoded_order() {
+        // The default right layout has no dups/edge seps, so the plan is identical.
+        let right = Config::default().layout_right;
+        assert_eq!(plan_region(&right, false), right);
+    }
+
+    #[test]
+    fn leading_trailing_and_doubled_separators_collapse() {
+        use Mod::*;
+        let plan = plan_region(&slots(&[Sep, Sep, Cpu, Sep, Sep, Mem, Sep, Sep]), false);
+        assert_eq!(plan, slots(&[Cpu, Sep, Mem]));
+    }
+
+    #[test]
+    fn duplicate_modules_are_dropped_and_their_orphaned_separator_too() {
+        use Mod::*;
+        // cpu, sep, cpu → the second cpu is a dup; the sep before it is then
+        // trailing and disappears, leaving a single cpu.
+        let plan = plan_region(&slots(&[Cpu, Sep, Cpu]), false);
+        assert_eq!(plan, slots(&[Cpu]));
+    }
+
+    #[test]
+    fn custom_slot_places_and_dedupes_like_a_builtin() {
+        use Mod::*;
+        let weather = Slot::Custom("weather".into());
+        let input = vec![m(Cpu), m(Sep), weather.clone(), m(Sep), weather.clone()];
+        // second weather is a dup; its leading sep becomes trailing and drops.
+        assert_eq!(plan_region(&input, false), vec![m(Cpu), m(Sep), weather]);
     }
 }

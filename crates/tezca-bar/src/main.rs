@@ -9,6 +9,7 @@
 mod ai;
 mod bar;
 mod config;
+mod custom;
 mod draw;
 mod hypr;
 mod nowplaying;
@@ -65,6 +66,14 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::SUCCESS;
     }
 
+    // `--custom-dump`: discover the custom (community/user exec) modules, run
+    // each once, and print what they emit — the way to verify a module's exec +
+    // output parsing without opening a window or restarting the live bar.
+    if std::env::args().any(|a| a == "--custom-dump") {
+        print!("{}", custom::dump(&custom::load()));
+        return glib::ExitCode::SUCCESS;
+    }
+
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(activate);
     app.run()
@@ -82,7 +91,11 @@ fn activate(app: &Application) {
     let (tray_upd_tx, tray_upd_rx) = async_channel::unbounded::<tray::TrayUpdate>();
     let (tray_cmd_tx, tray_cmd_rx) = async_channel::unbounded::<tray::TrayCmd>();
 
-    let bar = bar::Bar::build(app, cfg, palette, css, tray_cmd_tx);
+    // Community/user exec modules, discovered from ~/.config/tezca-bar/modules.
+    // Loaded before the bar so each `custom:<name>` slot has a widget to bind.
+    let customs = custom::load();
+
+    let bar = bar::Bar::build(app, cfg, palette, css, tray_cmd_tx, &customs);
 
     tray::spawn(tray_upd_tx, tray_cmd_rx);
     glib::spawn_future_local(glib::clone!(
@@ -109,6 +122,22 @@ fn activate(app: &Application) {
             }
         }
     ));
+
+    // Custom exec modules: one poll thread per module owns the shell-out; the
+    // GTK loop only applies a finished Output. No-op when none are installed.
+    if !customs.is_empty() {
+        let (custom_tx, custom_rx) = async_channel::unbounded::<custom::Output>();
+        custom::spawn(customs, custom_tx);
+        glib::spawn_future_local(glib::clone!(
+            #[strong]
+            bar,
+            async move {
+                while let Ok(out) = custom_rx.recv().await {
+                    bar.apply_custom(out);
+                }
+            }
+        ));
+    }
 
     // Live Hyprland updates → refresh workspaces / app label / submap.
     let (tx, rx) = async_channel::unbounded::<hypr::Event>();

@@ -198,6 +198,57 @@ pub fn bar_config() -> Vec<(String, String)> {
     config_pairs(&["bar", "config"])
 }
 
+/// Discovered custom bar modules: (layout id `custom:<name>`, display label).
+/// Scans `~/.config/tezca-bar/modules/*.toml` — the same drop-in directory the
+/// bar reads — so a manifest dropped in there shows up in the Modules editor.
+pub fn custom_bar_modules() -> Vec<(String, String)> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    let Some(dir) = base.map(|b| b.join("tezca-bar").join("modules")) else { return Vec::new() };
+    let Ok(rd) = std::fs::read_dir(&dir) else { return Vec::new() };
+    let mut out: Vec<(String, String)> = Vec::new();
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("toml") {
+            continue;
+        }
+        let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else { continue };
+        // A manifest with no `exec` is a no-op module; skip it here too.
+        let text = std::fs::read_to_string(&p).unwrap_or_default();
+        let has_exec = text.lines().any(|l| {
+            let l = l.trim();
+            l.split_once('=').map(|(k, _)| matches!(k.trim(), "exec" | "command")).unwrap_or(false)
+        });
+        if !has_exec {
+            continue;
+        }
+        let label = text
+            .lines()
+            .find_map(|l| {
+                let (k, v) = l.trim().split_once('=')?;
+                matches!(k.trim(), "label" | "name")
+                    .then(|| v.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| title_case(stem));
+        out.push((format!("custom:{stem}"), label));
+    }
+    out.sort();
+    out
+}
+
+/// `weather-city` → `Weather city`.
+fn title_case(s: &str) -> String {
+    let s = s.replace(['-', '_'], " ");
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => s.clone(),
+    }
+}
+
 /// Shared `key = value` parse for the `tezca <x> config` commands.
 fn config_pairs(args: &[&str]) -> Vec<(String, String)> {
     let Some(out) = tezca_out(args) else { return Vec::new() };

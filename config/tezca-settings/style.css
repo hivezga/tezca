@@ -319,6 +319,31 @@ button.tz-rebind:hover {
     color: @tz_subtext;
 }
 
+/* --- Bar module editor (three regions, reorderable) --------------------- */
+.tz-modcols {
+    margin: 4px 0 8px 0;
+}
+.tz-modregion {
+    background-color: alpha(@tz_surface, 0.35);
+    border-radius: 12px;
+    padding: 8px 10px;
+}
+.tz-modregion > .tz-key2 {
+    font-size: 9.5pt;
+    color: @tz_muted;
+    margin-bottom: 4px;
+}
+.tz-modrow {
+    padding: 2px 2px;
+}
+.tz-modrow > label {
+    font-size: 10pt;
+    color: @tz_subtext;
+}
+.tz-modadd {
+    margin-top: 6px;
+}
+
 /* --- Search + rebind capture dialog ------------------------------------- */
 entry.tz-search {
     background-color: alpha(@tz_surface, 0.80);

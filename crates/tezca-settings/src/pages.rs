@@ -328,6 +328,39 @@ pub fn bar() -> Widget {
     page.append(&control_row("Network poll (s)", &net_iv));
     page.append(&control_row("Compact below width (px)", &compact));
 
+    // --- Modules ------------------------------------------------------------
+    page.append(&section_header("Modules"));
+    page.append(&hint(
+        "Choose which modules each region of the bar shows, and their order. Reorder with ↑ ↓, remove with ✕, or add one below. “Separator” inserts a divider. On a narrow (compact) monitor the App name is dropped automatically.",
+    ));
+    // The Add menu offers the built-ins plus any custom exec modules discovered
+    // in ~/.config/tezca-bar/modules (see the hint below).
+    let mut defs: Vec<(String, String)> =
+        MODULE_DEFS.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    defs.extend(backend::custom_bar_modules());
+    let defs = Rc::new(defs);
+
+    const DEF_LEFT: &str = "mirror, sep, appname, sep, workspaces, submap";
+    const DEF_CENTER: &str = "nowplaying";
+    const DEF_RIGHT: &str =
+        "gamemode, ai, tray, cpu, mem, gpu, sep, network, volume, brightness, battery, sep, bell, clock, power";
+    let (left_w, left_ids) = module_region("Left", seed_modules(get("layout_left"), DEF_LEFT), defs.clone());
+    let (center_w, center_ids) =
+        module_region("Center", seed_modules(get("layout_center"), DEF_CENTER), defs.clone());
+    let (right_w, right_ids) = module_region("Right", seed_modules(get("layout_right"), DEF_RIGHT), defs.clone());
+    let modules_row = Box::new(Orientation::Horizontal, 16);
+    modules_row.add_css_class("tz-modcols");
+    left_w.set_hexpand(true);
+    center_w.set_hexpand(true);
+    right_w.set_hexpand(true);
+    modules_row.append(&left_w);
+    modules_row.append(&center_w);
+    modules_row.append(&right_w);
+    page.append(&modules_row);
+    page.append(&hint(
+        "Custom modules: drop a <name>.toml manifest in ~/.config/tezca-bar/modules/ (a shell command whose output becomes the widget) and it appears in the Add menu here. See the example shipped in that folder.",
+    ));
+
     // --- Apply --------------------------------------------------------------
     let apply = Button::with_label("Apply bar settings");
     apply.add_css_class("tz-primary");
@@ -338,6 +371,7 @@ pub fn bar() -> Widget {
             (cpu_iv.clone(), mem_iv.clone(), gpu_iv.clone(), net_iv.clone(), compact.clone());
         let (numerals, hide_empty, compact_ws, assign_rows) =
             (numerals.clone(), hide_empty.clone(), compact_ws.clone(), assign_rows.clone());
+        let (left_ids, center_ids, right_ids) = (left_ids.clone(), center_ids.clone(), right_ids.clone());
         apply.connect_clicked(move |_| {
             // Build a flat `key value key value …` arg list (some keys — the
             // per-monitor sets — are dynamic, so a fixed array won't do).
@@ -359,6 +393,9 @@ pub fn bar() -> Widget {
             for (name, dd, entry) in assign_rows.iter() {
                 kvs.push((format!("workspaces.{name}"), ws_spec_value(dd, entry)));
             }
+            kvs.push(("layout_left".into(), left_ids.borrow().join(", ")));
+            kvs.push(("layout_center".into(), center_ids.borrow().join(", ")));
+            kvs.push(("layout_right".into(), right_ids.borrow().join(", ")));
             let mut args: Vec<String> = vec!["bar".into(), "set".into()];
             for (k, v) in &kvs {
                 args.push(k.clone());
@@ -421,6 +458,168 @@ fn ws_spec_value(dd: &DropDown, entry: &Entry) -> String {
         }
         _ => "auto".into(),
     }
+}
+
+/// The placeable bar modules — id (matching crates/tezca-bar/src/config.rs) and
+/// the friendly name shown in the Modules editor. Mirrored vocabulary, the same
+/// way the CLI's SCALARS table mirrors the bar's config keys.
+const MODULE_DEFS: &[(&str, &str)] = &[
+    ("mirror", "Tezca menu"),
+    ("appname", "App name"),
+    ("workspaces", "Workspaces"),
+    ("submap", "Submap indicator"),
+    ("nowplaying", "Now playing"),
+    ("gamemode", "Game mode"),
+    ("ai", "AI usage"),
+    ("tray", "System tray"),
+    ("cpu", "CPU"),
+    ("mem", "Memory"),
+    ("gpu", "GPU"),
+    ("network", "Network"),
+    ("volume", "Volume"),
+    ("brightness", "Brightness"),
+    ("battery", "Battery"),
+    ("bell", "Notifications"),
+    ("clock", "Clock"),
+    ("power", "Power"),
+    ("sep", "│  Separator"),
+];
+
+/// Friendly label for a module id, looked up in `defs` (built-ins + discovered
+/// customs). A `custom:<name>` id with no matching manifest is flagged as
+/// missing so the user can spot and remove a stale reference.
+fn label_for(id: &str, defs: &[(String, String)]) -> String {
+    if let Some((_, name)) = defs.iter().find(|(k, _)| k == id) {
+        return name.clone();
+    }
+    if let Some(name) = id.strip_prefix("custom:") {
+        return format!("{} (missing)", capitalize(name));
+    }
+    capitalize(id)
+}
+
+/// Split a `layout_*` CSV into module ids, falling back to `default` when the
+/// config value is missing or blank.
+fn seed_modules(current: Option<String>, default: &str) -> Vec<String> {
+    let src = current.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| default.to_string());
+    src.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
+/// One region's module editor: a titled, reorderable list (↑ / ↓ / ✕ per row)
+/// plus an "Add" dropdown. Returns the widget to append and a shared handle on
+/// the ordered id list to read back at Apply time. Rows are fully rebuilt on
+/// every edit, so the per-row captured indices are always current.
+fn module_region(
+    title: &str,
+    ids: Vec<String>,
+    defs: Rc<Vec<(String, String)>>,
+) -> (Box, Rc<RefCell<Vec<String>>>) {
+    let wrap = Box::new(Orientation::Vertical, 4);
+    wrap.add_css_class("tz-modregion");
+    let head = Label::new(Some(title));
+    head.add_css_class("tz-key2");
+    head.set_halign(Align::Start);
+    wrap.append(&head);
+
+    let list = Box::new(Orientation::Vertical, 4);
+    list.add_css_class("tz-modlist");
+    wrap.append(&list);
+
+    let state = Rc::new(RefCell::new(ids));
+
+    // A self-referential render closure: each row's buttons call back into it to
+    // repaint the list after mutating `state`.
+    let render: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    {
+        let list = list.clone();
+        let state = state.clone();
+        let render_ref = render.clone();
+        let defs = defs.clone();
+        let f: Rc<dyn Fn()> = Rc::new(move || {
+            while let Some(c) = list.first_child() {
+                list.remove(&c);
+            }
+            let ids = state.borrow().clone();
+            let len = ids.len();
+            for (i, id) in ids.iter().enumerate() {
+                let row = Box::new(Orientation::Horizontal, 6);
+                row.add_css_class("tz-modrow");
+                let name = Label::new(Some(&label_for(id, &defs)));
+                name.set_halign(Align::Start);
+                name.set_hexpand(true);
+                name.set_xalign(0.0);
+                row.append(&name);
+
+                let up = small_btn("↑");
+                up.set_sensitive(i > 0);
+                let down = small_btn("↓");
+                down.set_sensitive(i + 1 < len);
+                let del = small_btn("✕");
+
+                for (btn, delta) in [(&up, -1i32), (&down, 1i32)] {
+                    let state = state.clone();
+                    let render_ref = render_ref.clone();
+                    btn.connect_clicked(move |_| {
+                        let j = i as i32 + delta;
+                        if j >= 0 && (j as usize) < state.borrow().len() {
+                            state.borrow_mut().swap(i, j as usize);
+                        }
+                        if let Some(f) = render_ref.borrow().clone() {
+                            f();
+                        }
+                    });
+                }
+                {
+                    let state = state.clone();
+                    let render_ref = render_ref.clone();
+                    del.connect_clicked(move |_| {
+                        if i < state.borrow().len() {
+                            state.borrow_mut().remove(i);
+                        }
+                        if let Some(f) = render_ref.borrow().clone() {
+                            f();
+                        }
+                    });
+                }
+                row.append(&up);
+                row.append(&down);
+                row.append(&del);
+                list.append(&row);
+            }
+        });
+        *render.borrow_mut() = Some(f);
+    }
+    if let Some(f) = render.borrow().clone() {
+        f();
+    }
+
+    // Add row: pick any module (built-in or a discovered custom one). Duplicates
+    // land harmlessly — the bar parents each non-separator widget once and skips
+    // repeats.
+    let labels: Vec<&str> = defs.iter().map(|(_, n)| n.as_str()).collect();
+    let dd = DropDown::from_strings(&labels);
+    let add = small_btn("Add");
+    {
+        let state = state.clone();
+        let render_ref = render.clone();
+        let dd = dd.clone();
+        let defs = defs.clone();
+        add.connect_clicked(move |_| {
+            if let Some((id, _)) = defs.get(dd.selected() as usize) {
+                state.borrow_mut().push(id.clone());
+                if let Some(f) = render_ref.borrow().clone() {
+                    f();
+                }
+            }
+        });
+    }
+    let add_row = Box::new(Orientation::Horizontal, 8);
+    add_row.add_css_class("tz-modadd");
+    add_row.append(&dd);
+    add_row.append(&add);
+    wrap.append(&add_row);
+
+    (wrap, state)
 }
 
 fn bool_str(on: bool) -> String {

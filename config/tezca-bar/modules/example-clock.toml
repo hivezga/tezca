@@ -1,0 +1,28 @@
+# Example custom module — a live seconds clock.
+#
+# This is a self-contained demo of the custom-module format. It does NOTHING
+# until you place it: add `custom:example-clock` to a layout region, either in
+# config.toml (e.g. `layout_right = ... , custom:example-clock, clock`) or from
+# Settings ▸ Bar ▸ Modules (it appears in the "Add" menu). Then restart the bar.
+#
+# A manifest is a flat `key = value` file (one module per file). Keys:
+#   exec            (required) shell command; its stdout drives the widget.
+#   interval        seconds between runs (default 10, min 1).
+#   label           display name in Settings (default: prettified file name).
+#   icon            optional static leading glyph/text.
+#   tooltip         static hover text (a script may override it — see below).
+#   on_click        shell command run on left-click.
+#   on_right_click  shell command run on right-click.
+#
+# Output protocol — the script may print EITHER:
+#   * plain text: the first non-empty line becomes the widget text, or
+#   * a JSON object: {"text": "...", "tooltip": "...", "class": "..."}
+#     where `class` adds a CSS class to the widget (e.g. `.custom.cold`), so a
+#     theme or the script can recolour it. `class` may be an array of strings.
+# Empty output hides the widget until it has something to show.
+
+label = Example clock
+icon = 󰥔
+interval = 1
+exec = date +%H:%M:%S
+on_click = notify-send "Tezca" "$(date)"

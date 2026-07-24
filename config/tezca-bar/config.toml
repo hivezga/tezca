@@ -27,7 +27,7 @@ net_interval = 5  # network glyph + throughput
 
 # --- Clock -----------------------------------------------------------------
 # strftime-style; matches the Waybar format the bar reaches parity with.
-clock_format = "%a %d %b   %H:%M"
+clock_format = %a %d %b   %H:%M
 
 # --- AI provider usage -----------------------------------------------------
 # The [󰚩 41%] module: how much of your AI subscription's rate-limit window
@@ -104,5 +104,39 @@ workspace_compact = true
 # Keep these in step with the Hyprland `workspace = N, monitor:X` binding rules
 # in conf.d/monitors.conf so a pill switches to a workspace that lives here.
 #   DP-1 = Xiaomi ultrawide · DP-3 = LG UltraGear (see `hyprctl monitors`).
-workspaces.DP-1 = odd    # 1 3 5 7 9  on the Xiaomi ultrawide
-workspaces.DP-3 = even   # 2 4 6 8 10 on the LG
+workspaces.DP-1 = odd  # 1 3 5 7 9  on the Xiaomi ultrawide
+workspaces.DP-3 = even  # 2 4 6 8 10 on the LG
+
+# --- Modules / layout ------------------------------------------------------
+# Which modules each region of the bar shows, and in what order. Edit these by
+# hand or from Settings ▸ Bar ▸ Modules (which writes the same keys). A module
+# left out of every region simply doesn't render; `sep` inserts a hairline
+# divider and may be repeated. Leading/trailing and doubled separators are
+# collapsed automatically, and on a compact (narrow) monitor `appname` is
+# dropped — so one layout serves both the ultrawide and the secondary.
+#
+# Valid ids:
+#   mirror      Tezca menu (the smoking-mirror glyph)
+#   appname     focused window's app name (full monitors only)
+#   workspaces  workspace pills
+#   submap      active-submap indicator (auto-hides)
+#   nowplaying  media title/artist + equaliser (auto-hides)
+#   gamemode    game-mode glyph (auto-hides)
+#   ai          AI provider usage (auto-hides; see the AI section above)
+#   tray        system tray / StatusNotifierItem icons (auto-hides)
+#   cpu mem gpu hardware metric sparklines (gpu auto-hides without a source)
+#   network volume brightness battery   controls (brightness/battery auto-hide)
+#   bell        notification bell
+#   clock       clock → calendar popover
+#   power       power / logout button
+#   sep         a thin divider (repeatable)
+#
+# Community / custom modules: drop a `<name>.toml` manifest in
+# ~/.config/tezca-bar/modules/ (a shell command whose output drives a widget —
+# see the example + README in that folder) and reference it in a region as
+# `custom:<name>`, e.g.  layout_right = cpu, sep, custom:weather, clock
+#
+# The defaults below reproduce the original built-in arrangement exactly.
+layout_left = mirror, sep, appname, sep, workspaces, submap
+layout_center = nowplaying
+layout_right = gamemode, ai, tray, cpu, mem, gpu, sep, volume, brightness, battery, sep, bell, clock, power

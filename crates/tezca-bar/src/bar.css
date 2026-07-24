@@ -232,6 +232,35 @@ button.ws.urgent {
     color: @tz_urgent;
 }
 
+/* ── Custom (community / user exec) modules ─────────────────────────────────
+   A neutral pill by default; a module's script can add its own class (e.g.
+   `cold`, `urgent`) which lands here so themes/authors can recolour it. The
+   `warn`/`crit` aliases give any module the bar's standard gold/red language
+   for free. */
+.custom {
+    padding: 0 9px;
+    border-radius: 9px;
+    color: @tz_subtext;
+}
+.custom.clickable:hover {
+    background: alpha(@tz_accent, 0.08);
+}
+.custom-val {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 12px;
+    color: @tz_subtext;
+}
+.custom.warn,
+.custom.warn .custom-val {
+    color: @tz_gold;
+}
+.custom.crit,
+.custom.crit .custom-val,
+.custom.urgent,
+.custom.urgent .custom-val {
+    color: @tz_urgent;
+}
+
 /* ── Notification bell ──────────────────────────────────────────────────── */
 button.bell {
     background: transparent;

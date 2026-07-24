@@ -8,12 +8,15 @@
 
 mod ai;
 mod bar;
+mod camera;
 mod config;
 mod custom;
 mod draw;
 mod hypr;
+mod mic;
 mod nowplaying;
 mod notify;
+mod osd;
 mod popovers;
 mod sysinfo;
 mod theme;
@@ -74,6 +77,22 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::SUCCESS;
     }
 
+    // `--camera-dump`: scan `/proc` once for who (if anyone) has the webcam open
+    // and print it — the way to check the privacy indicator's detection without
+    // opening a window. Prints "Camera idle" when nothing holds `/dev/video*`.
+    if std::env::args().any(|a| a == "--camera-dump") {
+        println!("{}", camera::poll().tooltip());
+        return glib::ExitCode::SUCCESS;
+    }
+
+    // `--mic-dump`: ask PipeWire/PulseAudio who (if anyone) is recording and
+    // print it — the windowless way to check the mic indicator. Prints
+    // "Microphone idle" when nothing holds a live capture stream.
+    if std::env::args().any(|a| a == "--mic-dump") {
+        println!("{}", mic::poll().tooltip());
+        return glib::ExitCode::SUCCESS;
+    }
+
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(activate);
     app.run()
@@ -82,6 +101,7 @@ fn main() -> glib::ExitCode {
 fn activate(app: &Application) {
     let cfg = config::Config::load();
     let ai_cfg = cfg.ai.clone();
+    let cfg_osd_enabled = cfg.osd_enabled;
     let palette = theme::Palette::load();
     let display = Display::default().expect("no display");
     let css = theme::CssStack::install(&display);
@@ -134,6 +154,27 @@ fn activate(app: &Application) {
             async move {
                 while let Ok(out) = custom_rx.recv().await {
                     bar.apply_custom(out);
+                }
+            }
+        ));
+    }
+
+    // Volume on-screen display. A background thread watches PipeWire/PulseAudio
+    // for default-sink changes and pings the GTK loop, which flashes the glass
+    // volume pill on every monitor. No-op if `osd_enabled = false` or `pactl` is
+    // absent. See osd.rs.
+    if cfg_osd_enabled {
+        let (osd_tx, osd_rx) = async_channel::unbounded::<()>();
+        osd::subscribe(osd_tx);
+        glib::spawn_future_local(glib::clone!(
+            #[strong]
+            bar,
+            async move {
+                while let Ok(()) = osd_rx.recv().await {
+                    // Coalesce a burst (dragging a slider fires many events) into
+                    // a single re-read + flash.
+                    while osd_rx.try_recv().is_ok() {}
+                    bar.show_osd();
                 }
             }
         ));

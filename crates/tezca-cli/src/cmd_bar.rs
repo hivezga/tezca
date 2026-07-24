@@ -29,13 +29,16 @@ const SCALARS: &[(&str, &str)] = &[
     ("workspace_numerals", "arabic"),
     ("workspace_hide_empty", "false"),
     ("workspace_compact", "false"),
+    // Volume on-screen display (the glass pill that flashes on a volume change).
+    ("osd_enabled", "true"),
+    ("osd_timeout_ms", "1400"),
     // Per-region module layout (ordered, comma-separated ids). Defaults mirror
     // crates/tezca-bar/src/config.rs so `config` reports the real arrangement.
     ("layout_left", "mirror, sep, appname, sep, workspaces, submap"),
     ("layout_center", "nowplaying"),
     (
         "layout_right",
-        "gamemode, ai, tray, cpu, mem, gpu, sep, network, volume, brightness, battery, sep, bell, clock, power",
+        "gamemode, camera, microphone, ai, tray, cpu, mem, gpu, sep, network, volume, brightness, battery, sep, bell, clock, power",
     ),
 ];
 

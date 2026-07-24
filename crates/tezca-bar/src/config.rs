@@ -57,6 +57,8 @@ pub enum Mod {
     Submap,
     NowPlaying,
     GameMode,
+    Camera,
+    Microphone,
     Ai,
     Tray,
     Cpu,
@@ -83,6 +85,8 @@ impl Mod {
             "submap" => Mod::Submap,
             "nowplaying" | "now-playing" | "media" | "mpris" => Mod::NowPlaying,
             "gamemode" | "game" => Mod::GameMode,
+            "camera" | "cam" | "webcam" => Mod::Camera,
+            "microphone" | "mic" => Mod::Microphone,
             "ai" => Mod::Ai,
             "tray" => Mod::Tray,
             "cpu" => Mod::Cpu,
@@ -146,7 +150,7 @@ fn default_layout_center() -> Vec<Slot> {
 }
 fn default_layout_right() -> Vec<Slot> {
     use Mod::*;
-    [GameMode, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
+    [GameMode, Camera, Microphone, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
         .into_iter()
         .map(Slot::Mod)
         .collect()
@@ -187,6 +191,11 @@ pub struct Config {
     /// AI provider usage module — opt-in, and the only module that can make a
     /// network request. See `ai.rs` for the privacy posture.
     pub ai: AiConfig,
+    /// Show the transient volume on-screen display (the glass pill that fades in
+    /// when the volume changes or mutes). See `osd.rs`.
+    pub osd_enabled: bool,
+    /// How long the volume OSD dwells before fading out, milliseconds.
+    pub osd_timeout_ms: u32,
     /// Which modules each region shows, in order. `layout_*` config keys (a
     /// comma-separated list of module ids) override these; the defaults
     /// reproduce the historical hardcoded arrangement exactly. Entries are
@@ -214,6 +223,8 @@ impl Default for Config {
             hide_empty: false,
             compact: false,
             ai: AiConfig::default(),
+            osd_enabled: true,
+            osd_timeout_ms: 1400,
             layout_left: default_layout_left(),
             layout_center: default_layout_center(),
             layout_right: default_layout_right(),
@@ -230,6 +241,15 @@ impl Config {
         let Ok(text) = std::fs::read_to_string(&path) else { return cfg };
         cfg.apply(&text);
         cfg
+    }
+
+    /// Does any region's layout include this built-in module? Lets callers skip
+    /// work for a module the user has removed (e.g. the camera `/proc` scan).
+    pub fn uses_mod(&self, m: Mod) -> bool {
+        let want = Slot::Mod(m);
+        self.layout_left.contains(&want)
+            || self.layout_center.contains(&want)
+            || self.layout_right.contains(&want)
     }
 
     pub fn path() -> Option<PathBuf> {
@@ -289,6 +309,9 @@ impl Config {
                 "ai_local" => set_bool(&mut self.ai.local, v),
                 "ai_warn" => set_f64(&mut self.ai.warn, v),
                 "ai_critical" => set_f64(&mut self.ai.critical, v),
+                // --- Volume OSD ------------------------------------------
+                "osd_enabled" => set_bool(&mut self.osd_enabled, v),
+                "osd_timeout_ms" | "osd_timeout" => set_u32(&mut self.osd_timeout_ms, v),
                 // --- Module layout (per region, ordered) -----------------
                 // An empty / all-unknown value keeps the built-in default so a
                 // stray line can never blank out a region.
@@ -336,6 +359,7 @@ impl Config {
         self.ai.interval = self.ai.interval.max(60);
         self.ai.warn = self.ai.warn.clamp(0.0, 100.0);
         self.ai.critical = self.ai.critical.clamp(self.ai.warn, 100.0);
+        self.osd_timeout_ms = self.osd_timeout_ms.clamp(400, 10_000);
     }
 }
 
@@ -404,7 +428,7 @@ mod tests {
         use Mod::*;
         assert_eq!(
             c.layout_right,
-            [GameMode, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
+            [GameMode, Camera, Microphone, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
                 .into_iter()
                 .map(Slot::Mod)
                 .collect::<Vec<_>>()

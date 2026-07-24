@@ -107,6 +107,17 @@ workspace_compact = true
 workspaces.DP-1 = odd  # 1 3 5 7 9  on the Xiaomi ultrawide
 workspaces.DP-3 = even  # 2 4 6 8 10 on the LG
 
+# --- Volume OSD ------------------------------------------------------------
+# The transient glass pill that fades in mid-screen when the volume goes up,
+# down, or mutes — from ANY source (the volume keys, an app, the bar's own
+# mixer), because it watches PipeWire/PulseAudio for the change rather than only
+# our keybinds. Needs `pactl` (ships with pipewire-pulse); silently off without.
+osd_enabled = true
+
+# How long the pill stays up before it fades out, milliseconds (clamped 400 …
+# 10000). Each new change resets the timer, so holding volume-up keeps it up.
+osd_timeout_ms = 1400
+
 # --- Modules / layout ------------------------------------------------------
 # Which modules each region of the bar shows, and in what order. Edit these by
 # hand or from Settings ▸ Bar ▸ Modules (which writes the same keys). A module
@@ -122,6 +133,8 @@ workspaces.DP-3 = even  # 2 4 6 8 10 on the LG
 #   submap      active-submap indicator (auto-hides)
 #   nowplaying  media title/artist + equaliser (auto-hides)
 #   gamemode    game-mode glyph (auto-hides)
+#   camera      camera-in-use privacy indicator (auto-hides; red when live)
+#   microphone  mic-in-use privacy indicator (auto-hides; gold when recording)
 #   ai          AI provider usage (auto-hides; see the AI section above)
 #   tray        system tray / StatusNotifierItem icons (auto-hides)
 #   cpu mem gpu hardware metric sparklines (gpu auto-hides without a source)
@@ -139,4 +152,4 @@ workspaces.DP-3 = even  # 2 4 6 8 10 on the LG
 # The defaults below reproduce the original built-in arrangement exactly.
 layout_left = mirror, sep, appname, sep, workspaces, submap
 layout_center = nowplaying
-layout_right = gamemode, ai, tray, cpu, mem, gpu, sep, volume, brightness, battery, sep, bell, clock, power
+layout_right = gamemode, camera, microphone, ai, tray, cpu, mem, gpu, sep, volume, brightness, battery, sep, bell, clock, power

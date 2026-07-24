@@ -14,7 +14,7 @@ use crate::config::{Config, Mod, Numerals, Shape, Slot};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
-use crate::{ai, custom, hypr, nowplaying, notify, popovers, tray};
+use crate::{ai, camera, custom, hypr, mic, nowplaying, notify, osd, popovers, tray};
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
 use gtk4::prelude::*;
@@ -39,6 +39,8 @@ const G_BRIGHT: &str = "\u{F00DF}";
 const G_BATT: &str = "\u{F0079}";
 const G_BATT_CHG: &str = "\u{F0084}";
 const G_AI: &str = "\u{F06A9}"; // nf-md-robot — the AI usage module
+const G_CAM: &str = "\u{F05A0}"; // nf-md-webcam — camera-in-use privacy indicator
+const G_MIC: &str = "\u{F036C}"; // nf-md-microphone — mic-in-use privacy indicator
 
 // ===========================================================================
 // Manager
@@ -61,6 +63,15 @@ pub struct Bar {
     /// The moves the last compaction pass dispatched — if the same plan recurs
     /// (a window that wouldn't move), we skip it rather than loop forever.
     last_compaction: RefCell<Vec<(i32, i32)>>,
+    /// Last (volume, muted) the OSD reacted to — so a sink event that didn't
+    /// actually change the master volume (e.g. an app stream) doesn't flash it.
+    last_audio: RefCell<Option<(u32, bool)>>,
+    /// True when the camera indicator is in some layout region — gates the
+    /// `/proc` scan so the poll costs nothing when the module isn't shown.
+    has_camera: bool,
+    /// True when the mic indicator is in some layout region — gates the `pactl`
+    /// query the same way.
+    has_mic: bool,
 }
 
 impl Bar {
@@ -86,6 +97,12 @@ impl Bar {
             surfaces.push(s);
         }
 
+        let has_camera = cfg.uses_mod(Mod::Camera);
+        let has_mic = cfg.uses_mod(Mod::Microphone);
+        // Seed the OSD's baseline with the current volume so the user's very
+        // first volume change flashes it. `pactl subscribe` emits nothing on
+        // connect, so there's no spurious launch event to swallow.
+        let a0 = sysinfo::audio();
         let bar = Rc::new(Bar {
             surfaces,
             cfg,
@@ -99,6 +116,9 @@ impl Bar {
             tray_menus: RefCell::new(HashMap::new()),
             ai: ai_state,
             last_compaction: RefCell::new(Vec::new()),
+            last_audio: RefCell::new(Some((a0.volume, a0.muted))),
+            has_camera,
+            has_mic,
         });
 
         bar.refresh_hypr();
@@ -241,6 +261,9 @@ impl Bar {
         let bell = notify::state();
         let game = sysinfo::gamemode_on();
         let np = nowplaying::current();
+        // Privacy indicators — only probe when the module is actually shown.
+        let cam = self.has_camera.then(camera::poll).unwrap_or_default();
+        let microphone = self.has_mic.then(mic::poll).unwrap_or_default();
 
         *self.throughput.borrow_mut() = self.netmeter.borrow_mut().sample(2.0);
 
@@ -251,7 +274,32 @@ impl Bar {
             s.set_brightness(brightness);
             s.set_bell(&bell);
             s.set_gamemode(game);
+            s.set_camera(&cam);
+            s.set_mic(&microphone);
             s.set_nowplaying(np.as_ref());
+        }
+    }
+
+    /// A default-sink change came in from `osd::subscribe`. Re-read the real
+    /// volume and, if the master level or mute state actually changed, flash the
+    /// OSD on every monitor. Comparing against the last value keeps unrelated
+    /// sink events (and the burst some servers emit) from flashing it spuriously.
+    pub fn show_osd(&self) {
+        if !self.cfg.osd_enabled {
+            return;
+        }
+        let a = sysinfo::audio();
+        let now = (a.volume, a.muted);
+        // The baseline is seeded at startup (see Bar::build), so a sink event
+        // that didn't actually move the master volume/mute — an app stream, a
+        // routing change — compares equal and is ignored; only a real change
+        // flashes the pill.
+        if self.last_audio.borrow().map(|prev| prev == now).unwrap_or(false) {
+            return;
+        }
+        *self.last_audio.borrow_mut() = Some(now);
+        for s in &self.surfaces {
+            s.osd.show(a.volume, a.muted);
         }
     }
 
@@ -449,8 +497,16 @@ struct Surface {
     gamemode_box: GtkBox,
     tray_box: GtkBox,
 
+    /// Camera-in-use privacy indicator — hidden until an app opens the webcam.
+    camera_box: GtkBox,
+    /// Microphone-in-use privacy indicator — hidden until an app records.
+    mic_box: GtkBox,
+
     ai_box: GtkBox,
     ai_val: Label,
+
+    /// This monitor's volume on-screen display (a separate overlay surface).
+    osd: Rc<osd::Osd>,
 
     mirror: gtk4::DrawingArea,
 
@@ -558,6 +614,28 @@ impl Surface {
         game_glyph.add_css_class("glyph");
         gamemode_box.append(&game_glyph);
         gamemode_box.set_visible(false);
+
+        // Camera-in-use privacy indicator — a lone webcam glyph, hidden until an
+        // application opens `/dev/video*`. The tooltip names the holding app(s).
+        let camera_box = GtkBox::new(Orientation::Horizontal, 0);
+        camera_box.add_css_class("camera");
+        camera_box.set_valign(Align::Center);
+        let camera_glyph = Label::new(Some(G_CAM));
+        camera_glyph.add_css_class("glyph");
+        camera_box.append(&camera_glyph);
+        camera_box.set_visible(false);
+        camera_box.set_has_tooltip(true);
+
+        // Microphone-in-use privacy indicator — same treatment as the camera one,
+        // driven by `pactl` recording streams (see mic.rs).
+        let mic_box = GtkBox::new(Orientation::Horizontal, 0);
+        mic_box.add_css_class("mic");
+        mic_box.set_valign(Align::Center);
+        let mic_glyph = Label::new(Some(G_MIC));
+        mic_glyph.add_css_class("glyph");
+        mic_box.append(&mic_glyph);
+        mic_box.set_visible(false);
+        mic_box.set_has_tooltip(true);
 
         // AI provider usage — hidden until the poll thread reports something
         // worth showing (see ai.rs). Sits beside the tray because that is where
@@ -702,6 +780,8 @@ impl Surface {
                     Mod::Submap => submap_box.clone().upcast(),
                     Mod::NowPlaying => np_box.clone().upcast(),
                     Mod::GameMode => gamemode_box.clone().upcast(),
+                    Mod::Camera => camera_box.clone().upcast(),
+                    Mod::Microphone => mic_box.clone().upcast(),
                     Mod::Ai => ai_box.clone().upcast(),
                     Mod::Tray => tray_box.clone().upcast(),
                     Mod::Cpu => cpu_metric.clone().upcast(),
@@ -749,6 +829,10 @@ impl Surface {
         }
         window.present();
 
+        // This monitor's volume OSD lives in its own overlay-layer surface so it
+        // can float mid-screen independent of the bar strip.
+        let osd = osd::Osd::build(app, monitor, cfg.osd_timeout_ms);
+
         Rc::new(Surface {
             window,
             output,
@@ -788,8 +872,11 @@ impl Surface {
             clock_label,
             gamemode_box,
             tray_box,
+            camera_box,
+            mic_box,
             ai_box,
             ai_val,
+            osd,
             mirror,
             custom: custom_cells,
         })
@@ -967,6 +1054,18 @@ impl Surface {
             self.gamemode_box.set_visible(false);
             self.gamemode_box.remove_css_class("active");
         }
+    }
+
+    /// Show/hide the camera privacy indicator and keep its tooltip current.
+    fn set_camera(&self, c: &camera::CameraUse) {
+        self.camera_box.set_visible(c.active);
+        self.camera_box.set_tooltip_text(Some(&c.tooltip()));
+    }
+
+    /// Show/hide the microphone privacy indicator and keep its tooltip current.
+    fn set_mic(&self, m: &mic::MicUse) {
+        self.mic_box.set_visible(m.active);
+        self.mic_box.set_tooltip_text(Some(&m.tooltip()));
     }
 
     fn set_nowplaying(&self, np: Option<&nowplaying::NowPlaying>) {

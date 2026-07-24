@@ -321,6 +321,85 @@ button.clock:hover {
     padding: 0 4px;
 }
 
+/* ── Camera-in-use privacy indicator ────────────────────────────────────── */
+/* A lone webcam glyph that appears only while an app holds the camera open.
+   Urgent-red with a soft glow so it reads as "you're on camera", not decoration. */
+.camera {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    color: @tz_urgent;
+    padding: 0 8px;
+}
+.camera .glyph {
+    color: @tz_urgent;
+    text-shadow: 0 0 8px alpha(@tz_urgent, 0.55);
+}
+/* Microphone-in-use — same privacy-dot family as the camera, but gold so the
+   two read as distinct at a glance (camera = red, mic = gold). */
+.mic {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    color: @tz_gold;
+    padding: 0 8px;
+}
+.mic .glyph {
+    color: @tz_gold;
+    text-shadow: 0 0 8px alpha(@tz_gold, 0.55);
+}
+
+/* ── Volume OSD (tezca-osd overlay window) ──────────────────────────────── */
+/* Its own layer-shell surface: the window itself is invisible; the .osd box is
+   the glass pill. Fades via an opacity transition toggled by the .show class. */
+window.tezca-osd {
+    background: transparent;
+}
+.osd {
+    background: alpha(@tz_base, 0.82);
+    border: 1px solid alpha(@tz_accent, 0.20);
+    border-radius: 18px;
+    padding: 14px 20px;
+    min-width: 240px;
+    box-shadow: 0 18px 46px alpha(black, 0.55);
+    color: @tz_text;
+    opacity: 0;
+    transition: opacity 220ms ease;
+}
+.osd.show {
+    opacity: 1;
+}
+.osd-glyph {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    font-size: 22px;
+    color: @tz_accent;
+}
+.osd-value {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 13px;
+    color: @tz_text;
+    min-width: 44px;
+}
+.osd-level trough {
+    min-height: 8px;
+    min-width: 150px;
+    border-radius: 6px;
+    background: alpha(@tz_accent, 0.14);
+}
+.osd-level block.filled {
+    border-radius: 6px;
+    background: linear-gradient(90deg, @tz_accent_dim, @tz_accent);
+    box-shadow: 0 0 10px alpha(@tz_accent, 0.45);
+}
+.osd-level block.empty {
+    background: transparent;
+}
+/* Muted → the whole pill goes urgent and the fill drains. */
+.osd.muted .osd-glyph {
+    color: @tz_urgent;
+    text-shadow: 0 0 8px alpha(@tz_urgent, 0.5);
+}
+.osd.muted .osd-level block.filled {
+    background: alpha(@tz_urgent, 0.5);
+    box-shadow: none;
+}
+
 /* ── Power ──────────────────────────────────────────────────────────────── */
 button.power {
     font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;

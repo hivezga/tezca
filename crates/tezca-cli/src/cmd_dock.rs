@@ -35,6 +35,10 @@ pub fn run(args: &[&str]) -> i32 {
         Some("toggle") => cmd_toggle(),
         Some("config") => cmd_config(),
         Some("set") => cmd_set(&args[1..]),
+        Some("-h") | Some("--help") => {
+            print_help();
+            Ok(())
+        }
         Some(other) => Err(format!(
             "unknown dock subcommand: {other}\n  try: status · start · stop · restart · toggle · config · set"
         )),
@@ -263,3 +267,16 @@ fn pkill(args: &[&str]) {
     let _ = Command::new("pkill").args(args).status();
 }
 
+/// `tezca dock --help`.
+fn print_help() {
+    println!("{}", term::header("tezca dock"));
+    println!("{}", term::dim("  control the magnifying dock (tezca-dock)"));
+    println!();
+    println!("  {}                  is the dock running?", term::cyan("status"));
+    println!("  {}  lifecycle", term::cyan("start · stop · restart"));
+    println!("  {}                  pin/unpin it", term::cyan("toggle"));
+    println!("  {}                  print the effective configuration", term::cyan("config"));
+    println!("  {}      edit ~/.config/tezca-dock/dock.toml", term::cyan("set <key> <value>…"));
+    println!();
+    println!("{}", term::dim("  e.g. tezca dock set icon_size 56 magnify 1.6"));
+}

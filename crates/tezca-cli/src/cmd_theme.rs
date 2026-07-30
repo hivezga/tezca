@@ -51,6 +51,10 @@ pub fn run(args: &[&str]) -> i32 {
             None => Err("usage: tezca theme wallpaper <image>".into()),
         },
         Some("reload") => cmd_reload(),
+        Some("-h") | Some("--help") => {
+            print_help();
+            Ok(())
+        }
         Some(other) => Err(format!(
             "unknown theme subcommand: {other}\n  try: list · set <name> · wallpaper <img> · reload"
         )),
@@ -626,4 +630,18 @@ fn strip_ansi(s: &str) -> String {
         }
     }
     out
+}
+
+/// `tezca theme --help`.
+fn print_help() {
+    println!("{}", term::header("tezca theme"));
+    println!("{}", term::dim("  wallpaper-driven theming — one image drives every colour"));
+    println!();
+    println!("  {}             curated themes, marking the active one", term::cyan("list"));
+    println!("  {}            bare names, one per line (for scripts)", term::cyan("names"));
+    println!("  {}       apply a curated palette", term::cyan("set <name>"));
+    println!("  {}  extract a palette from any image (matugen)", term::cyan("wallpaper <img>"));
+    println!("  {}           re-apply the active theme and re-send reload signals", term::cyan("reload"));
+    println!();
+    println!("{}", term::dim("  e.g. tezca theme set obsidian · tezca theme wallpaper ~/Pictures/a.jpg"));
 }

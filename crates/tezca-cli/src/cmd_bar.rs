@@ -56,6 +56,10 @@ pub fn run(args: &[&str]) -> i32 {
         Some("toggle") => cmd_toggle(),
         Some("config") => cmd_config(),
         Some("set") => cmd_set(&args[1..]),
+        Some("-h") | Some("--help") => {
+            print_help();
+            Ok(())
+        }
         Some(other) => Err(format!(
             "unknown bar subcommand: {other}\n  try: status · start · stop · restart · toggle · config · set"
         )),
@@ -277,3 +281,16 @@ fn pkill(args: &[&str]) {
     let _ = Command::new("pkill").args(args).status();
 }
 
+/// `tezca bar --help`.
+fn print_help() {
+    println!("{}", term::header("tezca bar"));
+    println!("{}", term::dim("  control the bespoke top menubar (tezca-bar)"));
+    println!();
+    println!("  {}                  is the bar running?", term::cyan("status"));
+    println!("  {}  lifecycle", term::cyan("start · stop · restart"));
+    println!("  {}                  hide/show it (SIGUSR1 — the ALT+Right-Ctrl bind)", term::cyan("toggle"));
+    println!("  {}                  print the effective configuration", term::cyan("config"));
+    println!("  {}      edit ~/.config/tezca-bar/config.toml", term::cyan("set <key> <value>…"));
+    println!();
+    println!("{}", term::dim("  e.g. tezca bar set height 38 layout_center nowplaying"));
+}

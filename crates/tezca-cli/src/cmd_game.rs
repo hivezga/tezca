@@ -28,6 +28,10 @@ pub fn run(args: &[&str]) -> i32 {
         Some("off") => set_mode(false),
         Some("toggle") => cmd_toggle(),
         Some("run") => cmd_run(&args[1..]),
+        Some("-h") | Some("--help") => {
+            print_help();
+            Ok(())
+        }
         Some(other) => Err(format!(
             "unknown game subcommand: {other}\n  try: on · off · toggle · status · run -- <cmd>"
         )),
@@ -249,3 +253,14 @@ fn notify(summary: &str, body: &str) {
         .status();
 }
 
+/// `tezca game --help`.
+fn print_help() {
+    println!("{}", term::header("tezca game"));
+    println!("{}", term::dim("  gaming profile: lowest latency, no eye-candy"));
+    println!();
+    println!("  {}             is game mode on?", term::cyan("status"));
+    println!("  {}  flip the profile (bound to SUPER+ALT+G)", term::cyan("on · off · toggle"));
+    println!("  {}       launch a game under gamemode + MangoHud", term::cyan("run -- <cmd>"));
+    println!();
+    println!("{}", term::dim("  e.g. tezca game run -- steam"));
+}

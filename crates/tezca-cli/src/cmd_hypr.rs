@@ -6,7 +6,7 @@
 //! value; `reset` drops managed keyword overrides and reloads to restore the
 //! shipped config. Monitor lines (owned by `tezca display`) are left alone.
 
-use crate::{hypr, managed, term};
+use crate::{hypr, managed, term, validate};
 
 pub fn run(args: &[&str]) -> i32 {
     let r = match args.first().copied() {
@@ -46,11 +46,18 @@ fn cmd_get(args: &[&str]) -> Result<(), String> {
 
 /// `tezca hypr set <opt> <val> [<opt> <val>…]` — apply live + persist each pair.
 fn cmd_set(args: &[&str]) -> Result<(), String> {
-    if args.is_empty() || args.len() % 2 != 0 {
+    if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err("usage: tezca hypr set <option> <value> [<option> <value>…]".into());
     }
     if !hypr::in_session() {
         return Err("not in a Hyprland session (nothing to apply)".into());
+    }
+    // Validate every pair before applying any of them: `set` takes multiple
+    // options and applies them one at a time, so a bad value in the third pair
+    // would otherwise leave the first two already live and persisted.
+    for pair in args.chunks(2) {
+        validate::hypr_option(pair[0])?;
+        validate::hypr_value(pair[1])?;
     }
     for pair in args.chunks(2) {
         let (kw, val) = (pair[0], pair[1]);

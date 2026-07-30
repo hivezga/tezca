@@ -1,24 +1,26 @@
 #!/bin/sh
-# Keybinding cheat-sheet (HyDE: SUPER+/). Parses conf.d/keybinds.conf into a
-# read-only Walker list of "COMBO — description" (every bind carries a trailing
-# `# comment`). Selection is discarded; this is a hint viewer.
-conf="$HOME/.config/hypr/conf.d/keybinds.conf"
+# Keybinding cheat-sheet (HyDE: SUPER+/). A read-only Walker list of
+# "COMBO  description"; the selection is discarded, this is a hint viewer.
+#
+# The bind list comes from `tezca keybind list --machine`, not from re-parsing
+# keybinds.conf with awk. That matters for correctness now that rebinds live in an
+# override layer (~/.config/tezca/keybinds.conf): a pass over the shipped map alone
+# would show the *shipped* combo for every key you have rebound. It also leaves
+# exactly one implementation of the bind parser, which DESIGN.md §12 already
+# claimed ("parsed live from the config").
+#
+# Machine format:  B \t line \t mods \t key \t desc \t action \t overridden(0|1)
+tezca="$HOME/.local/bin/tezca"
+[ -x "$tezca" ] || tezca=tezca
 
-awk -F'#' '
-    /^[[:space:]]*binde?l?m?[[:space:]]*=/ {
-        combo = $1
-        sub(/^[^=]*=[[:space:]]*/, "", combo)      # drop "bind ... ="
-        # keep the first two comma fields = "MODS, KEY"
-        n = split(combo, a, ",")
-        c = a[1] "+" a[2]
-        gsub(/\$mod/, "SUPER", c)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", c)
-        gsub(/[[:space:]]+/, "+", c)      # join modifiers with +
-        gsub(/\++/, "+", c)               # collapse duplicates
-        desc = $2
-        gsub(/^[[:space:]]+/, "", desc)
-        gsub(/[[:space:]]+$/, "", desc)
-        if (desc != "")
-            printf "%-26s  %s\n", c, desc
+"$tezca" keybind list --machine 2>/dev/null | awk -F'\t' '
+    $1 == "B" && $5 != "" {
+        combo = $3
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", combo)
+        gsub(/[[:space:]]+/, "+", combo)              # join modifiers with +
+        if (combo == "")      combo = $4              # a bind with no modifier
+        else if ($4 != "")    combo = combo "+" $4
+        # Flag a bind you have rebound, so the sheet and reality agree visibly.
+        printf "%-26s  %s%s\n", combo, $5, ($7 == "1" ? "  *" : "")
     }
-' "$conf" | walker -d -p "Keybindings" -N >/dev/null 2>&1 || true
+' | walker -d -p "Keybindings" -N >/dev/null 2>&1 || true

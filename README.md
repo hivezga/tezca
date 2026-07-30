@@ -88,6 +88,7 @@ The DE's control surface — a single dependency-free Rust binary.
 | Command | Does |
 |---|---|
 | `tezca link` | symlink `config/*` → `~/.config` (backs up existing; `--dry-run` previews) |
+| | *Your* settings stay outside the repo, so `git pull` never conflicts with them: `~/.config/tezca/local.conf` (display + Hyprland tweaks), `~/.config/tezca/keybinds.conf` (rebound keys), `~/.config/tezca-bar/` (bar config + custom modules), `~/.config/tezca-dock/`. |
 | `tezca doctor` | verify NVIDIA env, modeset, monitors, dependencies, config validity |
 | `tezca theme list \| set <name> \| wallpaper <img> \| reload` | wallpaper-driven theming |
 | `tezca dock start \| stop \| restart \| toggle \| config \| set` | control the magnifying dock |
@@ -175,6 +176,9 @@ NVIDIA env lives in uwsm's `env` / `env-hyprland`. Rationale for each choice is 
 
 ```
 config/       → symlinked into ~/.config (hypr, uwsm, waybar, swaync, walker, alacritty, …)
+              → EXCEPT tezca-bar/ and tezca-dock/, which are copied into real
+                directories on first link: they hold settings you and the tools
+                write, so they must not live inside the checkout
 crates/       the Rust core — tezca-cli (`tezca`) + tezca-dock (dock) + tezca-settings (control center)
 themes/       curated palettes — obsidian (dark), smoke (light)
 templates/    matugen templates → ~/.config/tezca/current/colors.*

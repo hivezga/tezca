@@ -1,7 +1,7 @@
 //! `tezca doctor` — verify the machine is set up for a correct, buttery
 //! NVIDIA + dual-165 Hz Hyprland/uwsm session.
 
-use crate::{cmd_theme, repo, term};
+use crate::{cmd_theme, repo, term, util};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -270,6 +270,39 @@ fn config_checks() -> Vec<Check> {
         }
     }
 
+    // The generated override files hyprland.conf `source`s. Hyprland treats a
+    // missing `source` target as a config error, so their absence costs you the
+    // whole session — worth a check of its own rather than only surfacing as a
+    // cryptic parse failure at login.
+    for (rel, what) in [
+        ("tezca/local.conf", "display + Hyprland overrides"),
+        ("tezca/keybinds.conf", "keybind overrides"),
+    ] {
+        if cfg.join(rel).exists() {
+            v.push(Check::pass(rel, what));
+        } else {
+            v.push(Check::fail(rel, "missing — hyprland.conf sources it; run `tezca link`"));
+        }
+    }
+
+    // These two are user-owned state, so they must NOT be symlinks into the repo.
+    // When they were, every `tezca bar set` dirtied the git tree and a `git pull`
+    // conflicted with the user's own settings.
+    for name in ["tezca-bar", "tezca-dock"] {
+        let path = cfg.join(name);
+        if !path.exists() {
+            v.push(Check::fail(name, "missing — run `tezca link`"));
+        } else if path.read_link().is_ok() {
+            v.push(Check::warn(
+                name,
+                "is a symlink into the repo — re-run `tezca link` so your settings \
+                 live outside the checkout",
+            ));
+        } else {
+            v.push(Check::pass(name, "yours (not a symlink into the repo)"));
+        }
+    }
+
     v
 }
 
@@ -284,7 +317,7 @@ fn config_checks() -> Vec<Check> {
 fn config_validity_checks() -> Vec<Check> {
     let mut v = Vec::new();
 
-    if !which("Hyprland") {
+    if !util::has("Hyprland") {
         v.push(Check::warn("hyprland config not verified", "Hyprland binary not found"));
         return v;
     }
@@ -422,7 +455,7 @@ fn dependency_checks() -> Vec<Check> {
     let mut checks: Vec<Check> = deps
         .iter()
         .map(|(bin, required, alts)| {
-            let present = which(bin) || alts.iter().any(|p| Path::new(p).exists());
+            let present = util::has(bin) || alts.iter().any(|p| Path::new(p).exists());
             if present {
                 Check::pass(bin, "installed")
             } else if *required {
@@ -527,7 +560,7 @@ fn theme_checks() -> Vec<Check> {
     }
 
     // matugen powers dynamic mode; curated themes work without it.
-    if which("matugen") {
+    if util::has("matugen") {
         v.push(Check::pass("matugen", "dynamic (wallpaper) theming available"));
     } else {
         v.push(Check::warn(
@@ -556,7 +589,7 @@ fn workflow_checks() -> Vec<Check> {
         ("mangohud", "MangoHud — in-game FPS/latency overlay"),
         ("gamescope", "gamescope — nested compositor for problem titles"),
     ] {
-        if which(bin) {
+        if util::has(bin) {
             v.push(Check::pass(bin, note));
         } else {
             v.push(Check::warn(bin, format!("absent — install for `tezca game run` ({note})")));
@@ -577,14 +610,14 @@ fn workflow_checks() -> Vec<Check> {
 
     // AI launchers: the Claude desktop app (SUPER+C) and Claude Code (SUPER+A /
     // the AI scratchpad). Each degrades independently.
-    let claude_desktop = which("claude-desktop")
+    let claude_desktop = util::has("claude-desktop")
         || dirs_have_desktop("com.anthropic.Claude.desktop");
     if claude_desktop {
         v.push(Check::pass("claude-desktop", "AI chat app (SUPER+C)"));
     } else {
         v.push(Check::warn("claude-desktop", "absent — SUPER+C won't launch the chat app"));
     }
-    if which("claude") {
+    if util::has("claude") {
         v.push(Check::pass("claude", "Claude Code — AI scratchpad (SUPER+A)"));
     } else {
         v.push(Check::warn("claude", "absent — the AI scratchpad terminal is empty"));
@@ -611,11 +644,3 @@ fn dirs_have_desktop(file: &str) -> bool {
         .any(|r| Path::new(r).join("applications").join(file).is_file())
 }
 
-fn which(bin: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}

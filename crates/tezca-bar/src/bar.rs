@@ -1143,19 +1143,6 @@ fn sep() -> GtkBox {
     s
 }
 
-/// Append the configured modules to a region, in order.
-///
-/// `resolve` turns a non-separator module id into the widget built for it (or
-/// `None` for `Sep`). We honour a couple of layout niceties so the built-in
-/// defaults reproduce the old hardcoded look *and* hand-written layouts stay
-/// tidy:
-///   * on a compact monitor the `appname` module is dropped (as the old code
-///     did — the ultrawide keeps it),
-///   * separators are collapsed: leading, trailing, and runs of adjacent
-///     `Sep`s render as at most one hairline (so a dropped module can't leave a
-///     doubled or dangling divider),
-///   * a widget already placed in this region is skipped (a GTK widget can have
-///     only one parent, so a duplicate id would otherwise panic on reparent).
 /// A community/user exec module's widget: an optional static glyph plus a value
 /// label the poll thread fills. Hidden until it first prints something; a
 /// script-supplied `class` is swapped in on each update so CSS/themes can react.
@@ -1208,6 +1195,31 @@ impl CustomCell {
     }
 
     fn set(&self, out: &custom::Output) {
+        // Always clear the previous run's class(es) first, including on the error
+        // and hidden paths — otherwise a module that goes from `class: "cold"` to
+        // failing keeps the stale class forever.
+        if let Some(prev) = self.last_class.borrow_mut().take() {
+            for c in prev.split_whitespace() {
+                self.container.remove_css_class(c);
+            }
+        }
+
+        // A failed poll stays *visible*. Hiding it (which is what an empty text used
+        // to do) is indistinguishable from a module you never configured, so a typo
+        // in a manifest looked like nothing at all. Show a marker and put the reason
+        // in the tooltip.
+        if let Some(err) = &out.error {
+            self.container.set_visible(true);
+            self.value.set_text(if out.text.is_empty() { "!" } else { &out.text });
+            self.container.set_tooltip_text(Some(&match &out.tooltip {
+                Some(t) => format!("{t}\n{err}"),
+                None => err.clone(),
+            }));
+            self.container.add_css_class("error");
+            *self.last_class.borrow_mut() = Some("error".to_string());
+            return;
+        }
+
         let show = !out.text.is_empty();
         self.container.set_visible(show);
         if !show {
@@ -1215,12 +1227,6 @@ impl CustomCell {
         }
         self.value.set_text(&out.text);
         self.container.set_tooltip_text(out.tooltip.as_deref());
-        // Swap the script-provided class(es).
-        if let Some(prev) = self.last_class.borrow_mut().take() {
-            for c in prev.split_whitespace() {
-                self.container.remove_css_class(c);
-            }
-        }
         if let Some(cls) = &out.class {
             for c in cls.split_whitespace() {
                 self.container.add_css_class(c);
@@ -1230,6 +1236,19 @@ impl CustomCell {
     }
 }
 
+/// Append the configured modules to a region, in order.
+///
+/// `resolve` turns a non-separator module id into the widget built for it (or
+/// `None` for `Sep`). We honour a couple of layout niceties so the built-in
+/// defaults reproduce the old hardcoded look *and* hand-written layouts stay
+/// tidy:
+///   * on a compact monitor the `appname` module is dropped (as the old code
+///     did — the ultrawide keeps it),
+///   * separators are collapsed: leading, trailing, and runs of adjacent
+///     `Sep`s render as at most one hairline (so a dropped module can't leave a
+///     doubled or dangling divider),
+///   * a widget already placed in this region is skipped (a GTK widget can have
+///     only one parent, so a duplicate id would otherwise panic on reparent).
 fn place_region(
     container: &GtkBox,
     slots: &[Slot],

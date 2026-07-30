@@ -46,7 +46,7 @@ pub fn getoption(kw: &str) -> Option<String> {
     let s = String::from_utf8_lossy(&out.stdout);
     let first = s.lines().next()?;
     let (_ty, val) = first.split_once(':')?;
-    Some(val.trim().split_whitespace().next()?.to_string())
+    Some(val.split_whitespace().next()?.to_string())
 }
 
 /// `hyprctl reload` — re-source the whole config (best-effort).

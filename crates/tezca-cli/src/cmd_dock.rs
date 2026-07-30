@@ -5,7 +5,7 @@
 //! start/stop/reload it by hand. Live control uses signals: SIGUSR1 pins it open
 //! (also on SUPER+D), SIGUSR2 reloads the palette (sent by `tezca theme`).
 
-use crate::{repo, term};
+use crate::{atomic, repo, term, util};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -127,7 +127,7 @@ fn cmd_config() -> Result<(), String> {
 /// `tezca dock set <key> <value> [<key> <value>…]` — edit dock.toml (preserving
 /// comments) then restart the dock if it's running so the change takes effect.
 fn cmd_set(args: &[&str]) -> Result<(), String> {
-    if args.is_empty() || args.len() % 2 != 0 {
+    if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err("usage: tezca dock set <key> <value> [<key> <value>…]".into());
     }
     let path = dock_toml()?;
@@ -153,7 +153,7 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
 
     let mut body = lines.join("\n");
     body.push('\n');
-    std::fs::write(&path, body).map_err(|e| format!("cannot write dock.toml: {e}"))?;
+    atomic::write(&path, &body)?;
 
     if running() {
         let _ = cmd_restart();
@@ -237,12 +237,12 @@ fn set_line(lines: &mut Vec<String>, key: &str, value: &str) {
 /// detaches the target into its own scope and returns, so tezca-dock outlives
 /// this CLI process either way.
 fn spawn() -> Result<(), String> {
-    if which(BIN).is_none() {
+    if !util::has(BIN) {
         return Err(format!(
             "{BIN} not found on PATH — build + install it (install.sh) first"
         ));
     }
-    let launched = if which("uwsm").is_some() {
+    let launched = if util::has("uwsm") {
         Command::new("uwsm").args(["app", "--", BIN]).spawn()
     } else {
         Command::new(BIN).spawn()
@@ -263,12 +263,3 @@ fn pkill(args: &[&str]) {
     let _ = Command::new("pkill").args(args).status();
 }
 
-fn which(bin: &str) -> Option<()> {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|_| ())
-}

@@ -23,6 +23,9 @@ const SLIDE: f64 = 22.0;
 /// Reserved band above the icons for the hover label.
 const LABEL_ZONE: f64 = 24.0;
 
+/// Called with the index of the dock item the pointer activated.
+type ActivateCb = Box<dyn Fn(usize)>;
+
 mod imp {
     use super::*;
     use gtk4::subclass::prelude::*;
@@ -35,7 +38,7 @@ mod imp {
         pub config: RefCell<Config>,
         pub pointer_x: Cell<Option<f64>>,
         pub reveal: Cell<f64>,
-        pub on_activate: RefCell<Option<Box<dyn Fn(usize)>>>,
+        pub on_activate: RefCell<Option<ActivateCb>>,
         pub on_enter: RefCell<Option<Box<dyn Fn()>>>,
         pub on_leave: RefCell<Option<Box<dyn Fn()>>>,
     }
@@ -325,7 +328,7 @@ impl Magnifier {
         let pill_y = h - pill_h;
         let radius = (pill_h / 2.0).min(20.0) as f32;
         let pill_rect = graphene::Rect::new(pill_x as f32, pill_y as f32, pill_w as f32, pill_h as f32);
-        let rr = gsk::RoundedRect::from_rect(pill_rect.clone(), radius);
+        let rr = gsk::RoundedRect::from_rect(pill_rect, radius);
         snapshot.push_rounded_clip(&rr);
         snapshot.append_color(&theme::with_alpha(pal.base, 0.72), &pill_rect);
         snapshot.pop();
@@ -364,7 +367,7 @@ impl Magnifier {
                     (2.0 * r) as f32,
                     (2.0 * r) as f32,
                 );
-                let dr = gsk::RoundedRect::from_rect(dot.clone(), r as f32);
+                let dr = gsk::RoundedRect::from_rect(dot, r as f32);
                 snapshot.push_rounded_clip(&dr);
                 snapshot.append_color(&pal.accent, &dot);
                 snapshot.pop();
@@ -399,7 +402,7 @@ impl Magnifier {
         let bx = (cx - bw / 2.0).clamp(2.0, (w - bw - 2.0).max(2.0));
         let by = baseline_y - bh;
         let rect = graphene::Rect::new(bx as f32, by as f32, bw as f32, bh as f32);
-        let rr = gsk::RoundedRect::from_rect(rect.clone(), 8.0);
+        let rr = gsk::RoundedRect::from_rect(rect, 8.0);
         snapshot.push_rounded_clip(&rr);
         snapshot.append_color(&theme::with_alpha(pal.base, 0.96), &rect);
         snapshot.pop();

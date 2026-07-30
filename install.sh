@@ -72,11 +72,15 @@ info "aesthetic: ${DIM}${PKGS_AESTHETIC[*]}${RST}"
 info "workflow:  ${DIM}${PKGS_WORKFLOW[*]}${RST}"
 info "aur:       ${DIM}${PKGS_AUR[*]}${RST}"
 echo
+MISSING_AUR=()
 if confirm "Install/verify these packages with paru?"; then
     paru -S --needed "${PKGS_CORE[@]}" "${PKGS_AESTHETIC[@]}" "${PKGS_WORKFLOW[@]}"
     # AUR names occasionally differ across time; don't let one bad name abort.
+    # Collect the misses instead of only warning in passing — a warning 200 lines
+    # of pacman output ago is a warning nobody sees, and a silently absent matugen
+    # means `tezca theme wallpaper` fails much later with no obvious cause.
     for p in "${PKGS_AUR[@]}"; do
-        paru -S --needed "$p" || warn "skipped '$p' (not found / declined) — install manually later"
+        paru -S --needed "$p" || MISSING_AUR+=("$p")
     done
 else
     warn "skipping package install"
@@ -90,6 +94,18 @@ echo
 # below) are slow on first build.
 say "Building the tezca workspace (CLI + dock + bar + settings)"
 ( cd "$REPO_DIR" && CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release )
+
+# Run the test suite before putting anything on PATH. These binaries rewrite the
+# Hyprland config of the session you are about to log into, so "it compiled" is
+# not the bar worth clearing: the tests cover the config rewriting, the keybind
+# override layer, and the symlink/seed logic.
+say "Running the test suite"
+if ( cd "$REPO_DIR" && CARGO_TARGET_DIR="$TARGET_DIR" cargo test --workspace --quiet ); then
+    info "${GREEN}✓${RST} tests pass"
+else
+    warn "tests FAILED — see the output above"
+    confirm "Install anyway?" || die "aborted (nothing was installed or linked)"
+fi
 
 BIN_DIR="${HOME}/.local/bin"
 mkdir -p "$BIN_DIR"
@@ -115,7 +131,8 @@ echo
 
 # --- 3. link config -------------------------------------------------------
 say "Linking config into ~/.config"
-info "${DIM}(existing files are backed up to *.bak.<epoch>)${RST}"
+info "${DIM}(existing files are backed up to *.bak.<epoch>. --force skips the backup${RST}"
+info "${DIM} only for symlinks, which hold no data — real files are always saved.)${RST}"
 echo
 if confirm "Run \`tezca link\` now?"; then
     TEZCA_REPO="$REPO_DIR" "$BIN" link
@@ -125,6 +142,21 @@ fi
 echo
 
 # --- 4. next steps --------------------------------------------------------
+if (( ${#MISSING_AUR[@]} )); then
+    say "Packages that did NOT install"
+    for p in "${MISSING_AUR[@]}"; do
+        case "$p" in
+            matugen-bin) warn "$p — \`tezca theme wallpaper\` (dynamic theming) will not work without it" ;;
+            swww)        warn "$p — no animated wallpaper; \`tezca theme\` will report it as skipped" ;;
+            walker-bin|elephant-all-bin)
+                         warn "$p — the launcher (SUPER+A / SUPER+SPACE) will not open" ;;
+            *)           warn "$p — install it manually when you can" ;;
+        esac
+    done
+    info "${DIM}retry with: paru -S ${MISSING_AUR[*]}${RST}"
+    echo
+fi
+
 say "Done"
 cat <<EOF
   ${GREEN}Next:${RST}
@@ -138,5 +170,11 @@ cat <<EOF
        signature look. (${DIM}tezca link${RST} already seeded obsidian as the default.)
 
   ${DIM}Everything is reversible: your originals are the *.bak.* files next to the
-  new symlinks in ~/.config.${RST}
+  new symlinks in ~/.config.
+
+  Your settings live outside this repo, so \`git pull\` never conflicts with them:
+    ~/.config/tezca/local.conf      display + Hyprland tweaks
+    ~/.config/tezca/keybinds.conf   your rebound keys
+    ~/.config/tezca-bar/            bar config + your custom modules
+    ~/.config/tezca-dock/           dock config${RST}
 EOF

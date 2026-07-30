@@ -46,8 +46,8 @@
 //! published third-party findings but are **unverified on this machine** (no
 //! `~/.codex`, no Gemini CLI); they auto-hide until those tools are installed.
 
-use std::collections::HashMap;
-use std::io::Write;
+use std::collections::{HashMap, HashSet};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -63,6 +63,16 @@ use serde_json::Value;
 /// `const` means the allowlist is auditable in one place and cannot be widened
 /// by config.
 const ALLOWED_HOSTS: &[&str] = &["api.anthropic.com"];
+
+/// True only when `url`'s origin is exactly one of [`ALLOWED_HOSTS`] over https.
+fn allowlisted(url: &str) -> bool {
+    ALLOWED_HOSTS.iter().any(|h| {
+        let origin = format!("https://{h}");
+        // The origin alone, or the origin followed by a path separator — never
+        // `https://api.anthropic.com.evil.test/`.
+        url == origin || url.starts_with(&format!("{origin}/"))
+    })
+}
 
 /// Hard ceiling on how long a single request may take, seconds. The bar must
 /// never appear to hang because a provider is slow.
@@ -110,6 +120,110 @@ fn flush_run(out: &mut String, run: &mut String) {
 }
 
 // ===========================================================================
+// Rate-limit hold, shared across processes
+// ===========================================================================
+
+/// One provider's throttling state.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Hold {
+    /// Unix seconds before which we will not make a live request.
+    until: i64,
+    /// Current backoff length in seconds, doubled on each further 429.
+    backoff: u32,
+    /// When we last actually sent a request.
+    last_attempt: i64,
+}
+
+/// Throttling state for every provider, persisted to disk.
+///
+/// On disk because the state has to be shared between processes, not just across
+/// iterations of the poll loop. The resident bar and a one-shot
+/// `tezca-bar --ai-dump` hit the *same* endpoint, and for Anthropic that endpoint
+/// shares its 429 bucket with Claude Code itself — so a 429 earned by one must hold
+/// the other back too. In-memory state could not do that, which is why `--ai-dump`
+/// used to be able to poll straight through a live backoff.
+#[derive(Debug, Default)]
+struct Holds {
+    map: HashMap<String, Hold>,
+}
+
+impl Holds {
+    /// `~/.cache/tezca/ai-hold`. Cache, not config: it is derived state that is
+    /// safe to lose (losing it only means we retry sooner than we would have).
+    fn path() -> Option<PathBuf> {
+        let base = std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .filter(|p| !p.as_os_str().is_empty())
+            .or_else(|| home().map(|h| h.join(".cache")))?;
+        Some(base.join("tezca").join("ai-hold"))
+    }
+
+    /// `provider \t until \t backoff \t last_attempt` per line. A malformed or
+    /// missing file simply means "no holds".
+    fn load() -> Self {
+        let mut map = HashMap::new();
+        if let Some(text) = Self::path().and_then(|p| std::fs::read_to_string(p).ok()) {
+            for line in text.lines() {
+                let mut f = line.split('\t');
+                let (Some(name), Some(until), Some(backoff), Some(last)) =
+                    (f.next(), f.next(), f.next(), f.next())
+                else {
+                    continue;
+                };
+                let (Ok(until), Ok(backoff), Ok(last)) =
+                    (until.parse(), backoff.parse(), last.parse())
+                else {
+                    continue;
+                };
+                map.insert(name.to_string(), Hold { until, backoff, last_attempt: last });
+            }
+        }
+        Holds { map }
+    }
+
+    fn save(&self) {
+        let Some(p) = Self::path() else { return };
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let body: String = self
+            .map
+            .iter()
+            .map(|(k, h)| format!("{k}\t{}\t{}\t{}\n", h.until, h.backoff, h.last_attempt))
+            .collect();
+        let _ = std::fs::write(&p, body);
+    }
+
+    fn get(&self, provider: &str) -> Hold {
+        self.map.get(provider).copied().unwrap_or_default()
+    }
+
+    /// Note that we are about to send a request.
+    fn record_attempt(&mut self, provider: &str, now: i64) {
+        self.map.entry(provider.to_string()).or_default().last_attempt = now;
+    }
+
+    /// Register a 429 and return the unix time we will retry.
+    ///
+    /// Doubling, deliberately, rather than reading `Retry-After`: it never
+    /// under-waits and cannot be gamed by a bad header.
+    fn back_off(&mut self, provider: &str, now: i64, floor: u32) -> i64 {
+        let h = self.map.entry(provider.to_string()).or_default();
+        h.backoff = if h.backoff == 0 { floor } else { (h.backoff * 2).min(MAX_BACKOFF) };
+        h.until = now + h.backoff as i64;
+        h.until
+    }
+
+    /// A successful request clears the backoff but keeps `last_attempt`, which is
+    /// what enforces the minimum interval.
+    fn succeeded(&mut self, provider: &str) {
+        let h = self.map.entry(provider.to_string()).or_default();
+        h.until = 0;
+        h.backoff = 0;
+    }
+}
+
+// ===========================================================================
 // Public model
 // ===========================================================================
 
@@ -130,6 +244,10 @@ pub enum Status {
     NeedsLogin,
     /// Provider said "slow down". Carries the unix time we'll retry.
     RateLimited { until: i64 },
+    /// *We* are holding off, not the provider: the last live request was less than
+    /// [`MIN_INTERVAL`] ago. Distinct from [`Status::RateLimited`] on purpose — one
+    /// means the endpoint refused us, the other means we declined to ask.
+    Cooldown { until: i64 },
     /// Anything else. Text is already [`redact`]ed.
     Error(String),
 }
@@ -259,6 +377,9 @@ pub struct Snapshot {
     pub providers: Vec<Provider>,
     /// Unix seconds of the last refresh.
     pub updated: i64,
+    /// Whether the network path was enabled for this refresh. Reported so an empty
+    /// dump reads as "switched off" rather than "broken".
+    pub live: bool,
 }
 
 impl Snapshot {
@@ -331,51 +452,28 @@ pub fn spawn(cfg: AiConfig, tx: async_channel::Sender<Snapshot>) {
         .name("tezca-ai".into())
         .spawn(move || {
             let interval = cfg.interval.max(MIN_INTERVAL);
-            // Per-provider backoff: unix seconds before which we won't retry.
-            let mut hold: HashMap<String, i64> = HashMap::new();
-            let mut backoff: HashMap<String, u32> = HashMap::new();
             // The Claude Code version string for the User-Agent; resolved once
             // (it costs a process spawn) and reused for the process lifetime.
             let ua = claude_code_ua();
+            // Incremental state for the local log analytics, so a poll re-reads only
+            // what was appended since the last one.
+            let mut cache = LocalCache::default();
 
             loop {
-                let now = now_unix();
-                let mut snap = Snapshot { providers: Vec::new(), updated: now };
-
+                // Reload each round: a `--ai-dump` in another process may have
+                // recorded an attempt or earned a 429 since we last looked.
+                let mut holds = Holds::load();
+                let mut snap = Snapshot {
+                    providers: Vec::new(),
+                    updated: now_unix(),
+                    live: cfg.live,
+                };
                 for key in &cfg.providers[..] {
-                    // Still backing off from a 429? Keep the previous status
-                    // rather than hammering the endpoint.
-                    if let Some(until) = hold.get(key) {
-                        if now < *until {
-                            let mut p = blank_provider(key);
-                            p.status = Status::RateLimited { until: *until };
-                            // Local numbers don't need the network, so still show them.
-                            if cfg.local && key == "anthropic" {
-                                p.local = anthropic_local().ok();
-                            }
-                            snap.providers.push(p);
-                            continue;
-                        }
-                    }
-
-                    let p = poll_provider(key, &cfg, &ua);
-                    match &p.status {
-                        Status::RateLimited { .. } => {
-                            // Exponential backoff, capped. We deliberately do
-                            // not parse Retry-After: doubling is simpler, never
-                            // under-waits, and can't be gamed by a bad header.
-                            let b = backoff.entry(key.clone()).or_insert(interval);
-                            *b = (*b * 2).min(MAX_BACKOFF);
-                            hold.insert(key.clone(), now + *b as i64);
-                        }
-                        Status::Ok | Status::LocalOnly => {
-                            backoff.remove(key);
-                            hold.remove(key);
-                        }
-                        _ => {}
-                    }
-                    snap.providers.push(p);
+                    snap.providers.push(poll_provider(
+                        key, &cfg, &ua, interval, &mut holds, &mut cache,
+                    ));
                 }
+                holds.save();
 
                 if tx.send_blocking(snap).is_err() {
                     return; // bar gone
@@ -393,10 +491,27 @@ pub fn spawn(cfg: AiConfig, tx: async_channel::Sender<Snapshot>) {
 /// same config — in particular `ai_live = false` keeps it entirely offline.
 pub fn poll_once(cfg: &AiConfig) -> Snapshot {
     let ua = claude_code_ua();
-    Snapshot {
-        providers: cfg.providers.iter().map(|k| poll_provider(k, cfg, &ua)).collect(),
+    // A dump is a debugging tool, so it still reports local numbers when the module
+    // is switched off — but it must not reach the network on behalf of someone who
+    // never opted in. `ai_enabled` gates the network path here exactly as it gates
+    // the resident poll thread.
+    let effective = AiConfig { live: cfg.live && cfg.enabled, ..cfg.clone() };
+    // Honour the same shared hold the resident bar writes. A dump used to bypass it
+    // entirely, so running one in a loop could earn a 429 in the bucket this
+    // module's own rules exist to protect — including Claude Code's share of it.
+    let mut holds = Holds::load();
+    let mut cache = LocalCache::default();
+    let snap = Snapshot {
+        providers: effective
+            .providers
+            .iter()
+            .map(|k| poll_provider(k, &effective, &ua, MIN_INTERVAL, &mut holds, &mut cache))
+            .collect(),
         updated: now_unix(),
-    }
+        live: effective.live,
+    };
+    holds.save();
+    snap
 }
 
 /// Render a snapshot as plain text for `--ai-dump`. Contains no credential
@@ -405,6 +520,12 @@ pub fn dump(snap: &Snapshot) -> String {
     let mut s = String::new();
     if snap.providers.is_empty() {
         return "no providers configured (set ai_enabled + ai_providers)\n".to_string();
+    }
+    if !snap.live {
+        s.push_str(
+            "note: the network path is off (ai_enabled = false or ai_live = false), \
+             so only local numbers are shown.\n\n",
+        );
     }
     for p in &snap.providers {
         let plan = p.plan.as_deref().map(|x| format!(" · {x}")).unwrap_or_default();
@@ -461,9 +582,16 @@ fn blank_provider(key: &str) -> Provider {
     }
 }
 
-fn poll_provider(key: &str, cfg: &AiConfig, ua: &str) -> Provider {
+fn poll_provider(
+    key: &str,
+    cfg: &AiConfig,
+    ua: &str,
+    interval: u32,
+    holds: &mut Holds,
+    cache: &mut LocalCache,
+) -> Provider {
     match key {
-        "anthropic" => anthropic(cfg, ua),
+        "anthropic" => anthropic(cfg, ua, interval, holds, cache),
         "openai" => openai(cfg),
         "google" => google(cfg),
         _ => blank_provider(key),
@@ -478,15 +606,34 @@ const ANTHROPIC_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 /// Required by the endpoint; without it the request 401s.
 const ANTHROPIC_BETA: &str = "oauth-2025-04-20";
 
-fn anthropic(cfg: &AiConfig, ua: &str) -> Provider {
+fn anthropic(
+    cfg: &AiConfig,
+    ua: &str,
+    interval: u32,
+    holds: &mut Holds,
+    cache: &mut LocalCache,
+) -> Provider {
     let mut p = Provider::new("Claude");
 
     if cfg.local {
-        p.local = anthropic_local().ok();
+        p.local = anthropic_local(cache).ok();
     }
 
     if !cfg.live {
         p.status = if p.local.is_some() { Status::LocalOnly } else { Status::Absent };
+        return p;
+    }
+
+    // Two gates before any request, both driven by the on-disk hold so they apply
+    // across processes.
+    let now = now_unix();
+    let hold = holds.get("anthropic");
+    if now < hold.until {
+        p.status = Status::RateLimited { until: hold.until };
+        return p;
+    }
+    if hold.last_attempt > 0 && now - hold.last_attempt < MIN_INTERVAL as i64 {
+        p.status = Status::Cooldown { until: hold.last_attempt + MIN_INTERVAL as i64 };
         return p;
     }
 
@@ -514,8 +661,15 @@ fn anthropic(cfg: &AiConfig, ua: &str) -> Provider {
         format!("Authorization: Bearer {}", creds.token),
         format!("anthropic-beta: {ANTHROPIC_BETA}"),
     ];
+    holds.record_attempt("anthropic", now);
     match curl_get(ANTHROPIC_USAGE_URL, &headers, ua) {
-        Ok((429, _)) => p.status = Status::RateLimited { until: 0 },
+        // Compute the retry time here, where it can be reported. It used to be
+        // filled in by the caller *after* the snapshot was built, so the popover
+        // showed `until: 0` — i.e. "retry now" — on the very round a 429 landed.
+        Ok((429, _)) => {
+            let until = holds.back_off("anthropic", now, interval);
+            p.status = Status::RateLimited { until };
+        }
         // An expiry the file didn't warn us about — same remedy either way, and
         // refreshing it is Claude Code's job: we never write its credential file.
         Ok((401, _)) | Ok((403, _)) => p.status = Status::NeedsLogin,
@@ -524,6 +678,7 @@ fn anthropic(cfg: &AiConfig, ua: &str) -> Provider {
         }
         Ok((_, body)) => match serde_json::from_str::<Value>(&body) {
             Ok(v) => {
+                holds.succeeded("anthropic");
                 p.windows = parse_usage(&v);
                 p.spend = parse_spend(&v);
                 if p.plan.is_none() {
@@ -863,62 +1018,177 @@ fn claude_code_ua() -> String {
                 .filter(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
                 .map(str::to_string)
         })
+        // The version string is interpolated into the curl config file below, where
+        // a quote would break the `user-agent = "…"` line. `split_whitespace`
+        // already rules out a newline (so no directive can be injected), but apply
+        // the same character check the bearer token gets rather than relying on
+        // that. An odd version falls back to the default instead of shipping a
+        // malformed config.
+        .filter(|v| !v.contains('"') && !v.contains('\\'))
         .unwrap_or_else(|| "2.0.0".to_string());
     format!("claude-code/{ver}")
 }
 
 // --- local JSONL analytics -------------------------------------------------
 
+/// How deep to walk under `~/.claude/projects` looking for session logs.
+const MAX_LOG_DEPTH: usize = 8;
+
+/// One assistant message's measured contribution.
+///
+/// Kept per file rather than pre-summed, because dedup is *global*: the same
+/// message can appear in more than one session file (a resumed or forked session),
+/// and a pre-summed per-file total gives no way to subtract the duplicate at merge
+/// time.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Entry {
+    /// `message id : request id` — the dedup key. Empty when the log had neither,
+    /// in which case the entry always counts (it cannot be matched against others).
+    key: String,
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write: u64,
+    cost: f64,
+}
+
+/// What we have already read from one session log.
+#[derive(Clone, Debug, Default)]
+struct FileState {
+    /// Bytes consumed so far. Only ever advanced to just past a newline, so a line
+    /// still being written is re-read whole on the next poll instead of being parsed
+    /// in half.
+    offset: u64,
+    entries: Vec<Entry>,
+}
+
+/// Incremental state for [`anthropic_local`].
+///
+/// Without this, every poll read each of today's session logs in full and JSON-parsed
+/// every line — tens to hundreds of megabytes every interval for a heavy Claude Code
+/// user. Session logs are append-only, so the tail is the only part that can be new.
+#[derive(Debug, Default)]
+pub struct LocalCache {
+    /// The local midnight this cache describes. A day rollover invalidates it.
+    day_start: i64,
+    files: HashMap<PathBuf, FileState>,
+}
+
 /// Sum today's token usage from Claude Code's own session logs. Pure local
 /// filesystem work — no network, no credentials, nothing leaves the machine.
 /// This is the same data `ccusage` reads.
-fn anthropic_local() -> Result<Local, ()> {
+fn anthropic_local(cache: &mut LocalCache) -> Result<Local, ()> {
     let root = home().ok_or(())?.join(".claude").join("projects");
     let start = local_midnight_unix();
 
-    let mut local = Local::default();
-    // Dedup on (message id, request id): a single assistant message can be
-    // written to more than one session file (resumed / forked sessions), and
-    // counting it twice would inflate the day's totals.
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // A new day means yesterday's entries are no longer "today's usage".
+    if cache.day_start != start {
+        cache.files.clear();
+        cache.day_start = start;
+    }
 
-    for file in jsonl_files(&root) {
-        // Only files touched today can contain today's messages.
-        let fresh = std::fs::metadata(&file)
-            .and_then(|m| m.modified())
+    let files = jsonl_files(&root);
+    // Forget logs that have gone away, so the cache can't grow without bound across
+    // a long-running bar process.
+    let live: HashSet<&PathBuf> = files.iter().collect();
+    cache.files.retain(|p, _| live.contains(p));
+
+    for file in &files {
+        let Ok(meta) = std::fs::metadata(file) else { continue };
+        let touched_today = meta
+            .modified()
             .map(|t| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0) >= start)
             .unwrap_or(false);
-        if !fresh {
+        // Only a file touched today can contain today's messages. Anything already
+        // in the cache keeps its entries either way — `retain` above only dropped
+        // files that no longer exist — so skipping here just means "nothing new to
+        // read", not "forget what we read".
+        if !touched_today {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&file) else { continue };
-        for line in text.lines() {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+
+        let len = meta.len();
+        let st = cache.files.entry(file.clone()).or_default();
+        // Shorter than what we read means the file was replaced or rotated, not
+        // appended to — start it over rather than reading from a stale offset.
+        if len < st.offset {
+            *st = FileState::default();
+        }
+        if len == st.offset {
+            continue; // nothing appended since last poll
+        }
+        if let Ok((entries, consumed)) = read_tail(file, st.offset, start) {
+            st.entries.extend(entries);
+            st.offset += consumed;
+        }
+    }
+
+    // Merge every file's entries with a single global dedup pass.
+    let mut local = Local::default();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for st in cache.files.values() {
+        for e in &st.entries {
+            if !e.key.is_empty() && !seen.insert(e.key.as_str()) {
                 continue;
             }
-            let ts = v.get("timestamp").and_then(|t| t.as_str()).and_then(parse_rfc3339);
-            if ts.is_none_or(|t| t < start) {
-                continue;
-            }
-            let Some(msg) = v.get("message") else { continue };
-            let key = format!(
-                "{}:{}",
-                msg.get("id").and_then(|i| i.as_str()).unwrap_or(""),
-                v.get("requestId").and_then(|i| i.as_str()).unwrap_or("")
-            );
-            if key != ":" && !seen.insert(key) {
-                continue;
-            }
-            let Some(u) = msg.get("usage") else { continue };
-            let model = msg.get("model").and_then(|m| m.as_str()).unwrap_or("");
-            accumulate(&mut local, u, model);
+            add(&mut local, e);
         }
     }
     Ok(local)
 }
 
-fn accumulate(local: &mut Local, u: &Value, model: &str) {
+/// Read the part of `path` after `offset`, returning the entries found and how many
+/// bytes were consumed.
+///
+/// Only whole lines are consumed. The writer appends continuously, so the tail
+/// frequently ends mid-line; stopping at the last newline means that line is read
+/// again — complete — on the next poll, rather than being parsed as truncated JSON
+/// and dropped.
+fn read_tail(path: &Path, offset: u64, start: i64) -> std::io::Result<(Vec<Entry>, u64)> {
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(offset))?;
+    let mut raw = Vec::new();
+    f.read_to_end(&mut raw)?;
+
+    let Some(nl) = raw.iter().rposition(|b| *b == b'\n') else {
+        return Ok((Vec::new(), 0)); // no complete line yet
+    };
+    let complete = &raw[..=nl];
+    let text = String::from_utf8_lossy(complete);
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if let Some(e) = parse_entry(line, start) {
+            out.push(e);
+        }
+    }
+    Ok((out, complete.len() as u64))
+}
+
+/// One JSONL line → an [`Entry`], if it is a billable assistant message from today.
+fn parse_entry(line: &str, start: i64) -> Option<Entry> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+        return None;
+    }
+    let ts = v.get("timestamp").and_then(|t| t.as_str()).and_then(parse_rfc3339);
+    if ts.is_none_or(|t| t < start) {
+        return None;
+    }
+    let msg = v.get("message")?;
+    let key = format!(
+        "{}:{}",
+        msg.get("id").and_then(|i| i.as_str()).unwrap_or(""),
+        v.get("requestId").and_then(|i| i.as_str()).unwrap_or("")
+    );
+    let u = msg.get("usage")?;
+    let model = msg.get("model").and_then(|m| m.as_str()).unwrap_or("");
+    // A line carrying neither id keeps an empty key, which always counts: there is
+    // nothing to match it against, so dropping it would under-report instead.
+    Some(usage_entry(if key == ":" { String::new() } else { key }, u, model))
+}
+
+/// Price one `usage` object.
+fn usage_entry(key: String, u: &Value, model: &str) -> Entry {
     let n = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
     let input = n("input_tokens");
     let output = n("output_tokens");
@@ -932,19 +1202,29 @@ fn accumulate(local: &mut Local, u: &Value, model: &str) {
         None => (n("cache_creation_input_tokens"), 0),
     };
 
-    local.input_tokens += input;
-    local.output_tokens += output;
-    local.cache_read_tokens += cache_read;
-    local.cache_write_tokens += w5 + w1h;
-    local.messages += 1;
-
     let p = price_for(model);
     let per_m = |t: u64, rate: f64| (t as f64) * rate / 1_000_000.0;
-    local.cost_usd += per_m(input, p.input)
-        + per_m(output, p.output)
-        + per_m(cache_read, p.input * 0.10)
-        + per_m(w5, p.input * 1.25)
-        + per_m(w1h, p.input * 2.00);
+    Entry {
+        key,
+        input,
+        output,
+        cache_read,
+        cache_write: w5 + w1h,
+        cost: per_m(input, p.input)
+            + per_m(output, p.output)
+            + per_m(cache_read, p.input * 0.10)
+            + per_m(w5, p.input * 1.25)
+            + per_m(w1h, p.input * 2.00),
+    }
+}
+
+fn add(local: &mut Local, e: &Entry) {
+    local.input_tokens += e.input;
+    local.output_tokens += e.output;
+    local.cache_read_tokens += e.cache_read;
+    local.cache_write_tokens += e.cache_write;
+    local.cost_usd += e.cost;
+    local.messages += 1;
 }
 
 /// USD per million tokens.
@@ -953,36 +1233,72 @@ struct Price {
     output: f64,
 }
 
+/// End of Claude Sonnet 5's introductory pricing: 2026-09-01T00:00:00Z.
+///
+/// Sonnet 5 lists at $3/$15 but bills at $2/$10 through 2026-08-31, so pricing it
+/// at list over-reports Sonnet traffic by 50% while the intro rate is live. The
+/// cutoff is computed from the civil date rather than hardcoded as an epoch so it
+/// stays legible.
+fn sonnet5_intro_ends() -> i64 {
+    days_from_civil(2026, 9, 1) * 86_400
+}
+
 /// Published list prices, matched by model-family substring so a new dated
 /// snapshot of a known family still prices correctly. Cache rates are derived:
 /// reads are 0.1x input, 5-minute writes 1.25x, 1-hour writes 2x.
 fn price_for(model: &str) -> Price {
+    price_at(model, now_unix())
+}
+
+/// [`price_for`] with the clock injected, so the introductory window is testable.
+fn price_at(model: &str, now: i64) -> Price {
     let m = model.to_ascii_lowercase();
     if m.contains("fable") || m.contains("mythos") {
         Price { input: 10.0, output: 50.0 }
     } else if m.contains("haiku") {
         Price { input: 1.0, output: 5.0 }
     } else if m.contains("sonnet") {
-        Price { input: 3.0, output: 15.0 }
+        // `sonnet-5`, not `sonnet` + `-5`: `claude-sonnet-4-5` also ends in `-5`
+        // and is not on the introductory rate.
+        if m.contains("sonnet-5") && now < sonnet5_intro_ends() {
+            Price { input: 2.0, output: 10.0 }
+        } else {
+            Price { input: 3.0, output: 15.0 }
+        }
     } else {
         // Opus tier, and the safe default for anything unrecognised.
         Price { input: 5.0, output: 25.0 }
     }
 }
 
+/// Every `*.jsonl` under `root`, walking subdirectories.
+///
+/// The previous version descended exactly one level while the module doc claimed
+/// `projects/**/*.jsonl`, so a nested project directory was silently missed. Depth
+/// is bounded and symlinked directories are skipped, so a loop cannot hang the poll
+/// thread.
 fn jsonl_files(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let Ok(dirs) = std::fs::read_dir(root) else { return out };
-    for d in dirs.flatten() {
-        let Ok(files) = std::fs::read_dir(d.path()) else { continue };
-        for f in files.flatten() {
-            let p = f.path();
-            if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                out.push(p);
-            }
+    walk_logs(root, 0, &mut out);
+    out
+}
+
+fn walk_logs(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    if depth > MAX_LOG_DEPTH {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        // `file_type` on the DirEntry does not follow symlinks, which is what keeps
+        // a symlinked directory from turning this walk into a cycle.
+        let Ok(ft) = entry.file_type() else { continue };
+        let path = entry.path();
+        if ft.is_dir() {
+            walk_logs(&path, depth + 1, out);
+        } else if ft.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            out.push(path);
         }
     }
-    out
 }
 
 // ===========================================================================
@@ -1155,9 +1471,16 @@ fn gemini_chat_files(root: &Path) -> Vec<PathBuf> {
 /// as long as the request lasts. On stdin it never touches argv or disk.
 fn curl_get(url: &str, headers: &[String], ua: &str) -> Result<(u16, String), String> {
     // Allowlist check before anything else — no config value can widen this.
-    let host = url.strip_prefix("https://").and_then(|r| r.split('/').next()).unwrap_or("");
-    if !ALLOWED_HOSTS.contains(&host) {
-        return Err(format!("refusing to contact non-allowlisted host {host}"));
+    //
+    // Matched as an exact `https://<host>` prefix rather than by splitting the
+    // string on '/'. Prefix-matching an allowlist is normally the fragile choice,
+    // but here it is the strict one: it is the *whole* origin that has to match, so
+    // there is no host string left to mis-parse. Splitting compared a substring that
+    // could still carry userinfo or a port (`https://api.anthropic.com@evil/`), and
+    // was case-sensitive. Both were refused in practice — the check fails closed —
+    // but only by accident of the comparison, not by construction.
+    if !allowlisted(url) {
+        return Err("refusing to contact a non-allowlisted host".to_string());
     }
 
     let mut conf = String::new();
@@ -1436,26 +1759,188 @@ mod tests {
 
     #[test]
     fn prices_by_model_family() {
-        assert_eq!(price_for("claude-opus-4-8").input, 5.0);
-        assert_eq!(price_for("claude-sonnet-5").output, 15.0);
-        assert_eq!(price_for("claude-haiku-4-5").input, 1.0);
-        assert_eq!(price_for("claude-fable-5").output, 50.0);
+        let after = sonnet5_intro_ends();
+        assert_eq!(price_at("claude-opus-4-8", after).input, 5.0);
+        assert_eq!(price_at("claude-opus-5", after).output, 25.0);
+        assert_eq!(price_at("claude-haiku-4-5", after).input, 1.0);
+        assert_eq!(price_at("claude-fable-5", after).output, 50.0);
         // Unknown models fall back to Opus tier rather than to zero.
-        assert_eq!(price_for("something-new").input, 5.0);
+        assert_eq!(price_at("something-new", after).input, 5.0);
     }
 
     #[test]
-    fn accumulates_cache_tiers_at_their_own_rates() {
+    fn prices_sonnet_5_at_its_introductory_rate_until_the_cutoff() {
+        let (before, after) = (sonnet5_intro_ends() - 1, sonnet5_intro_ends());
+        // $2/$10 through 2026-08-31, $3/$15 list afterwards. Pricing it at list
+        // during the window over-reported Sonnet traffic by 50%.
+        assert_eq!(price_at("claude-sonnet-5", before).input, 2.0);
+        assert_eq!(price_at("claude-sonnet-5", before).output, 10.0);
+        assert_eq!(price_at("claude-sonnet-5", after).input, 3.0);
+        assert_eq!(price_at("claude-sonnet-5", after).output, 15.0);
+        // Only Sonnet 5. `claude-sonnet-4-5` also ends in "-5" and must not match.
+        assert_eq!(price_at("claude-sonnet-4-5", before).input, 3.0);
+        assert_eq!(price_at("claude-sonnet-4-6", before).input, 3.0);
+    }
+
+    #[test]
+    fn prices_cache_tiers_at_their_own_rates() {
         let u: Value = serde_json::from_str(
             r#"{"input_tokens":1000000,"output_tokens":0,"cache_read_input_tokens":1000000,
                 "cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":1000000}}"#,
         )
         .unwrap();
         let mut l = Local::default();
-        accumulate(&mut l, &u, "claude-opus-4-8");
+        add(&mut l, &usage_entry("m:r".into(), &u, "claude-opus-4-8"));
         // 1M input @ $5 + 1M cache-read @ $0.50 + 1M 1h-write @ $10.
         assert!((l.cost_usd - 15.5).abs() < 1e-9, "{}", l.cost_usd);
         assert_eq!(l.total_tokens(), 3_000_000);
+    }
+
+    #[test]
+    fn a_message_in_two_session_files_is_counted_once() {
+        // A resumed or forked session writes the same assistant message to a second
+        // file. Entries are kept per file precisely so this dedup can happen once,
+        // globally, at merge time.
+        let u: Value = serde_json::from_str(r#"{"input_tokens":10,"output_tokens":5}"#).unwrap();
+        let dup = usage_entry("msg_1:req_1".into(), &u, "claude-opus-5");
+        let other = usage_entry("msg_2:req_2".into(), &u, "claude-opus-5");
+
+        let mut local = Local::default();
+        let mut seen: HashSet<&str> = HashSet::new();
+        for e in [&dup, &dup, &other] {
+            if !e.key.is_empty() && !seen.insert(e.key.as_str()) {
+                continue;
+            }
+            add(&mut local, e);
+        }
+        assert_eq!(local.messages, 2, "the duplicate must not be counted twice");
+        assert_eq!(local.total_tokens(), 30);
+    }
+
+    #[test]
+    fn an_entry_with_no_ids_always_counts_rather_than_colliding() {
+        // Two different messages that both lack ids must not dedup against each
+        // other — an empty key means "unmatchable", not "the same message".
+        let u: Value = serde_json::from_str(r#"{"input_tokens":1,"output_tokens":1}"#).unwrap();
+        let a = usage_entry(String::new(), &u, "claude-opus-5");
+        let b = usage_entry(String::new(), &u, "claude-opus-5");
+        let mut local = Local::default();
+        let mut seen: HashSet<&str> = HashSet::new();
+        for e in [&a, &b] {
+            if !e.key.is_empty() && !seen.insert(e.key.as_str()) {
+                continue;
+            }
+            add(&mut local, e);
+        }
+        assert_eq!(local.messages, 2);
+    }
+
+    #[test]
+    fn parses_only_billable_assistant_lines_from_today() {
+        let start = 1_700_000_000;
+        let line = |extra: &str| {
+            format!(
+                r#"{{"type":"assistant","timestamp":"2026-07-29T12:00:00Z","requestId":"r1",
+                    "message":{{"id":"m1","model":"claude-opus-5","usage":{{"input_tokens":7,"output_tokens":3}}}}{extra}}}"#
+            )
+        };
+        // A well-formed assistant line from after `start` counts.
+        let e = parse_entry(&line(""), start).expect("assistant line");
+        assert_eq!((e.input, e.output), (7, 3));
+        assert_eq!(e.key, "m1:r1");
+
+        // A user line, a line with no usage, and one from before `start` do not.
+        assert!(parse_entry(r#"{"type":"user","timestamp":"2026-07-29T12:00:00Z"}"#, start).is_none());
+        assert!(parse_entry(
+            r#"{"type":"assistant","timestamp":"2026-07-29T12:00:00Z","message":{"id":"m"}}"#,
+            start
+        )
+        .is_none());
+        assert!(parse_entry(&line(""), i64::MAX).is_none(), "an older message is out of scope");
+        assert!(parse_entry("not json at all", start).is_none());
+    }
+
+    #[test]
+    fn reads_only_complete_lines_and_resumes_from_the_byte_offset() {
+        // The append-only read is the load-bearing part of the incremental cache: an
+        // offset that lands mid-line would drop a message permanently, and one that
+        // fails to advance would double-count it.
+        let dir = std::env::temp_dir().join(format!("tezca-ai-tail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+
+        let msg = |id: &str| {
+            format!(
+                r#"{{"type":"assistant","timestamp":"2026-07-29T12:00:00Z","requestId":"r{id}","message":{{"id":"m{id}","model":"claude-opus-5","usage":{{"input_tokens":1,"output_tokens":1}}}}}}"#
+            )
+        };
+
+        // Two whole lines plus a third still being written.
+        let partial = format!("{}\n{}\n{}", msg("1"), msg("2"), &msg("3")[..40]);
+        std::fs::write(&path, &partial).unwrap();
+
+        let (entries, consumed) = read_tail(&path, 0, 0).unwrap();
+        assert_eq!(entries.len(), 2, "the half-written line must not be parsed");
+        assert_eq!(entries[0].key, "m1:r1");
+        let expected = format!("{}\n{}\n", msg("1"), msg("2"));
+        assert_eq!(consumed as usize, expected.len(), "must stop at the last newline");
+
+        // The writer finishes that line and appends another.
+        std::fs::write(&path, format!("{}\n{}\n{}\n", msg("1"), msg("2"), msg("3"))).unwrap();
+        let (more, _) = read_tail(&path, consumed, 0).unwrap();
+        assert_eq!(more.len(), 1, "resuming must yield the completed line exactly once");
+        assert_eq!(more[0].key, "m3:r3");
+
+        // Nothing appended → nothing returned, and no bytes consumed.
+        let end = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(read_tail(&path, end, 0).unwrap(), (Vec::new(), 0));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn finds_logs_nested_more_than_one_level_deep() {
+        // The old walk descended exactly one level while the module doc claimed
+        // `projects/**/*.jsonl`, so a nested project silently reported zero usage.
+        let dir = std::env::temp_dir().join(format!("tezca-ai-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("proj/nested/deeper")).unwrap();
+        std::fs::write(dir.join("proj/a.jsonl"), "").unwrap();
+        std::fs::write(dir.join("proj/nested/deeper/b.jsonl"), "").unwrap();
+        std::fs::write(dir.join("proj/not-a-log.txt"), "").unwrap();
+
+        let mut found: Vec<String> = jsonl_files(&dir)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        found.sort();
+        assert_eq!(found, ["a.jsonl", "b.jsonl"]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_hold_round_trips_and_doubles_without_exceeding_the_cap() {
+        let mut h = Holds::default();
+        assert_eq!(h.get("anthropic"), Hold::default());
+
+        // First 429 waits one interval; each further one doubles, up to MAX_BACKOFF.
+        let until = h.back_off("anthropic", 1_000, 300);
+        assert_eq!(until, 1_300);
+        assert_eq!(h.back_off("anthropic", 1_000, 300), 1_600);
+        for _ in 0..20 {
+            h.back_off("anthropic", 1_000, 300);
+        }
+        assert_eq!(h.get("anthropic").backoff, MAX_BACKOFF);
+
+        // Success clears the backoff but keeps last_attempt, which is what enforces
+        // the minimum interval between live requests.
+        h.record_attempt("anthropic", 2_000);
+        h.succeeded("anthropic");
+        let after = h.get("anthropic");
+        assert_eq!((after.until, after.backoff), (0, 0));
+        assert_eq!(after.last_attempt, 2_000);
     }
 
     #[test]
@@ -1495,6 +1980,22 @@ mod tests {
     fn refuses_hosts_outside_the_allowlist() {
         let r = curl_get("https://evil.example.com/x", &[], "ua");
         assert!(r.unwrap_err().contains("non-allowlisted"));
+    }
+
+    #[test]
+    fn the_allowlist_matches_the_whole_origin_and_nothing_adjacent_to_it() {
+        assert!(allowlisted("https://api.anthropic.com/api/oauth/usage"));
+        assert!(allowlisted("https://api.anthropic.com"));
+
+        // Each of these was refused before too, but by the accident of a string
+        // compare rather than by construction.
+        assert!(!allowlisted("https://api.anthropic.com.evil.test/x"));
+        assert!(!allowlisted("https://api.anthropic.com@evil.test/x"));
+        assert!(!allowlisted("https://api.anthropic.com:8443/x"));
+        assert!(!allowlisted("https://evil.test/api.anthropic.com"));
+        assert!(!allowlisted("http://api.anthropic.com/x"), "plaintext is not allowed");
+        assert!(!allowlisted("https://API.ANTHROPIC.COM/x"), "fails closed on casing");
+        assert!(!allowlisted(""));
     }
 
     #[test]

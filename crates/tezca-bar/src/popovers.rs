@@ -6,6 +6,7 @@
 //!   * clock  → calendar
 //!   * audio  → per-sink/source mixer
 //!   * network → SSID + connection detail
+//!
 //! Plus the Tezca "mirror" system menu.
 
 use crate::ai;
@@ -456,6 +457,11 @@ pub fn ai_detail(anchor: &impl IsA<gtk4::Widget>, state: Rc<RefCell<ai::Snapshot
                     Some(format!("rate limited · retry in {}", ai::until(*until)))
                 }
                 ai::Status::RateLimited { .. } => Some("rate limited".to_string()),
+                // Our own minimum-interval floor, not the endpoint refusing us —
+                // worth wording differently so "rate limited" keeps meaning that.
+                ai::Status::Cooldown { until } => {
+                    Some(format!("polled recently · next check in {}", ai::until(*until)))
+                }
                 ai::Status::NeedsLogin => Some("session expired".to_string()),
                 ai::Status::Error(e) => Some(e.clone()),
                 ai::Status::LocalOnly if p.windows.is_empty() => {

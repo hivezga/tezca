@@ -14,7 +14,7 @@
 //! is cached at ~/.cache/tezca/ddc.map so we skip a slow `ddcutil detect` on
 //! every call.
 
-use crate::{hypr, managed, term};
+use crate::{hypr, managed, term, util, validate};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -220,6 +220,18 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
         }
     }
 
+    // Every field below is formatted verbatim into a `monitor = …` line in the
+    // managed block, so check each one before building the spec. A comma would
+    // shift the fields after it; a newline would append a whole extra directive
+    // that `tezca display reset` could not remove, because the block keys an
+    // entry by its first line only. Typos are caught here too, rather than at the
+    // next relogin.
+    validate::monitor_name(name)?;
+    validate::display_mode(&mode)?;
+    validate::display_pos(&pos)?;
+    validate::display_scale(&scale)?;
+    validate::display_transform(&transform)?;
+
     // monitor = NAME, RES@RATE, POS, SCALE [, transform, N]
     let mut spec = format!("{name},{mode},{pos},{scale}");
     if transform != "0" && !transform.is_empty() {
@@ -234,6 +246,7 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
 
 fn cmd_reset(args: &[&str]) -> Result<(), String> {
     let name = args.first().copied().ok_or("usage: tezca display reset <name>")?;
+    validate::monitor_name(name)?;
     managed::remove(&format!("monitor:{name}"))?;
     if hypr::in_session() {
         hypr::reload()?;
@@ -247,7 +260,7 @@ fn cmd_reset(args: &[&str]) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 fn cmd_brightness(args: &[&str]) -> Result<(), String> {
-    if !which("ddcutil") {
+    if !util::has("ddcutil") {
         return Err("ddcutil not found — install it for external-monitor brightness (`paru -S ddcutil`)".into());
     }
     // `brightness` / `brightness list` → print NAME=VALUE for every DDC monitor.
@@ -261,7 +274,7 @@ fn cmd_brightness(args: &[&str]) -> Result<(), String> {
         return Ok(());
     }
 
-    let refresh = args.iter().any(|a| *a == "--refresh");
+    let refresh = args.contains(&"--refresh");
     let positional: Vec<&str> = args.iter().copied().filter(|a| !a.starts_with('-')).collect();
     let name = positional.first().ok_or("usage: tezca display brightness <name> [0-100]")?;
 
@@ -385,14 +398,6 @@ fn cache_path() -> Result<PathBuf, String> {
     Ok(base.join("tezca").join("ddc.map"))
 }
 
-fn which(bin: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
 
 fn print_help() {
     println!("{}", term::header("tezca display"));

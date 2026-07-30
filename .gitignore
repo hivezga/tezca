@@ -12,5 +12,10 @@ Cargo.lock.orig
 *~
 .DS_Store
 
-# (conf.d/local.conf ships as a tracked empty stub so Hyprland's `source`
-#  never errors on a fresh clone; edit it freely for machine-local tweaks.)
+# Machine-local state is NOT in this repo at all — it lives in ~/.config/tezca/ and
+# in the real (un-symlinked) ~/.config/tezca-bar/ and ~/.config/tezca-dock/
+# directories, so `tezca hypr set` / `keybind rebind` / `bar set` never dirty the
+# tree. See DESIGN.md §4 principle 6 and §8.
+#
+# conf.d/local.conf stays tracked as a hand-editable stub (so Hyprland's `source`
+# never errors on a fresh clone). Nothing writes to it — it is yours.

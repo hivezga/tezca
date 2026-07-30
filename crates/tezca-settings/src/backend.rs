@@ -90,15 +90,26 @@ pub fn game_on() -> bool {
         .unwrap_or(false)
 }
 
-/// `command -v <bin>` succeeds.
+/// True when `bin` is runnable, by walking `$PATH` directly.
+///
+/// Deliberately not `sh -c "command -v $bin"`: that spawns a shell per probe and
+/// interpolates its argument into a shell string. (The `tezca` CLI has the same
+/// helper in its own `util` module — the two crates share no library, and a
+/// six-line function is not worth restructuring the workspace for.)
 pub fn has(bin: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
+    if bin.contains('/') {
+        return is_executable(&PathBuf::from(bin));
+    }
+    let Some(path) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&path)
+        .filter(|d| !d.as_os_str().is_empty())
+        .any(|d| is_executable(&d.join(bin)))
+}
+
+fn is_executable(p: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
 }
 

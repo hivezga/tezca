@@ -13,7 +13,7 @@
 //!   list                         show each monitor's effective wallpaper
 //!   apply                        paint global everywhere, then each override
 
-use crate::{repo, term};
+use crate::{atomic, repo, term, util};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -87,7 +87,7 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
 
 /// `tezca wallpaper clear --monitor <NAME>` / `clear --all`
 fn cmd_clear(args: &[&str]) -> Result<(), String> {
-    let all = args.iter().any(|a| *a == "--all");
+    let all = args.contains(&"--all");
     if all {
         write_overrides(&[])?;
         if let Some(g) = read_global() {
@@ -160,7 +160,7 @@ pub fn apply_overrides() {
 
 /// Paint `path` via awww, optionally restricted to one output.
 fn paint(path: &Path, output: Option<&str>) -> Result<(), String> {
-    if !which("awww") {
+    if !util::has("awww") {
         return Err("awww not found (the wallpaper daemon)".into());
     }
     let mut cmd = Command::new("awww");
@@ -206,7 +206,7 @@ fn write_overrides(overrides: &[(String, String)]) -> Result<(), String> {
         fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
     let body: String = overrides.iter().map(|(n, path)| format!("{n}\t{path}\n")).collect();
-    fs::write(&p, body).map_err(|e| format!("cannot write {}: {e}", p.display()))
+    atomic::write(&p, &body)
 }
 
 fn upsert(overrides: &mut Vec<(String, String)>, name: &str, path: &str) {
@@ -231,14 +231,6 @@ fn monitor_names() -> Vec<String> {
         .collect()
 }
 
-fn which(bin: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
 
 fn print_help() {
     println!("{}", term::header("tezca wallpaper"));

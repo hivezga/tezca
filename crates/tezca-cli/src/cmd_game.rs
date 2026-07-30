@@ -16,7 +16,7 @@
 //! Mode is persisted to `~/.config/tezca/game.state` (outside the theme-owned
 //! `current/` dir) so the Waybar indicator and `tezca doctor` can read it.
 
-use crate::{repo, term};
+use crate::{atomic, repo, term, util};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -96,11 +96,11 @@ fn cmd_run(rest: &[&str]) -> Result<(), String> {
     // applied only if present, so this degrades gracefully on a bare box.
     let mut argv: Vec<String> = Vec::new();
     let mut layers: Vec<&str> = Vec::new();
-    if which("gamemoderun") {
+    if util::has("gamemoderun") {
         argv.push("gamemoderun".into());
         layers.push("gamemode");
     }
-    if which("mangohud") {
+    if util::has("mangohud") {
         argv.push("mangohud".into());
         layers.push("mangohud");
     }
@@ -121,7 +121,7 @@ fn cmd_run(rest: &[&str]) -> Result<(), String> {
     // Prefer `uwsm app --` so the game lands in its own systemd scope (clean
     // accounting + teardown), matching how autostart launches everything else.
     // `spawn()` detaches; the game outlives this CLI process.
-    let launched = if which("uwsm") {
+    let launched = if util::has("uwsm") {
         let mut c = Command::new("uwsm");
         c.arg("app").arg("--");
         c.args(&argv);
@@ -146,9 +146,9 @@ fn cmd_status() -> Result<(), String> {
     }
     println!();
     println!("{}", term::bold("tooling"));
-    tool_line("gamemode", which("gamemoderun"));
-    tool_line("mangohud", which("mangohud"));
-    tool_line("gamescope", which("gamescope"));
+    tool_line("gamemode", util::has("gamemoderun"));
+    tool_line("mangohud", util::has("mangohud"));
+    tool_line("gamescope", util::has("gamescope"));
     println!();
     println!("  {}", term::dim("toggle: `tezca game toggle` (SUPER+G)"));
     println!("  {}", term::dim("launch: `tezca game run -- <cmd>`"));
@@ -228,7 +228,7 @@ fn write_state(on: bool) -> Result<(), String> {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
         }
-        fs::write(&path, "on\n").map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        atomic::write(&path, "on\n")?;
     } else {
         // Absence == off. Ignore "already gone".
         match fs::remove_file(&path) {
@@ -249,11 +249,3 @@ fn notify(summary: &str, body: &str) {
         .status();
 }
 
-fn which(bin: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}

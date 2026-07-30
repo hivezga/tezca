@@ -1,0 +1,71 @@
+# Project:Tezca CI.
+#
+# Two jobs, split by whether they need a GTK toolchain:
+#
+#   * `cli` — the std-only `tezca` control binary (DESIGN.md §8). No system
+#     dependencies at all, so this job is fast and cannot break for reasons
+#     unrelated to the code. It also carries most of the test suite: the config
+#     rewriting, the keybind override layer, the symlink/seed logic, and the input
+#     validation all live here, and those are the paths that can damage a session.
+#   * `gtk` — the three gtk4-rs binaries (bar, dock, settings). Needs GTK4 and
+#     gtk4-layer-shell from the runner image.
+#
+# Deliberately NOT gated on `cargo fmt --check`: this codebase is hand-formatted
+# wider than rustfmt's default in a lot of places, so turning it on would either
+# reformat ~all of it in one unrelated commit or fail every build. Worth doing as
+# its own change (add a `rustfmt.toml` that matches the house style first).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # A warning that reaches main is a warning nobody will ever fix.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  cli:
+    name: tezca CLI (std-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: cargo clippy -p tezca-cli --all-targets -- -D warnings
+      - name: test
+        run: cargo test -p tezca-cli
+      - name: build (release, as install.sh does)
+        run: cargo build -p tezca-cli --release
+
+  gtk:
+    name: bar · dock · settings (gtk4-rs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # gtk4-layer-shell is only packaged on newer Ubuntu images. If this step
+      # fails on the runner in use, either bump `runs-on` or build the library
+      # from source (https://github.com/wmww/gtk4-layer-shell).
+      - name: system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libgtk4-layer-shell-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        # The bar's tests spawn short-lived child processes (the custom-module
+        # runner's timeout and output-cap cases), so they need a real shell but no
+        # display: nothing here opens a GTK window.
+        run: cargo test --workspace

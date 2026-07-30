@@ -65,6 +65,13 @@ content breathe. Every pixel earns its place.
    KDE stays as a fallback session at login.
 5. **Modular config.** Hyprland split into `conf.d/` fragments so a theme or a tweak
    touches one small file.
+6. **Shipped config in the repo; your state outside it.** The repo is *input* — it is
+   symlinked in so `git pull` updates your desktop. Anything the tools or you write
+   is *output* and lives outside the checkout, under `~/.config/tezca/` and in the
+   real (un-symlinked) `~/.config/tezca-bar/` and `~/.config/tezca-dock/`
+   directories. Without that split, tuning a slider edited a tracked file: the tree
+   was permanently dirty, `git pull` conflicted on exactly the files a user is most
+   likely to have touched, and committing published machine-local state. See §8.
 
 ---
 
@@ -169,14 +176,18 @@ are enforced in code rather than trusted to convention:
 | Token never on argv | curl is driven by a config file on **stdin** (`curl -K -`); a `-H` header would be readable via `/proc/<pid>/cmdline` by any local process |
 | Host allowlist | `ALLOWED_HOSTS` const, checked pre-request; `--proto =https`, redirects refused — no config value can widen it |
 | No credential leakage in UI | `redact()` scrubs token-shaped runs from every error string before it can reach a tooltip or popover |
-| Rate-limit safety | 60s poll floor + exponential backoff to 30 min on 429 — the Anthropic endpoint shares its 429 bucket with Claude Code itself |
+| Rate-limit safety | 60s poll floor + exponential backoff to 30 min on 429, both persisted to `~/.cache/tezca/ai-hold` so the resident bar and a one-shot `--ai-dump` respect each other's holds — the Anthropic endpoint shares its 429 bucket with Claude Code itself |
+| Opt-in covers the CLI too | `--ai-dump` reports local numbers with the module off, but never reaches the network unless `ai_enabled` is set |
 | Offline mode | `ai_live = false` disables the network path entirely; local log analytics still work |
 
 Data sources: **Anthropic** — the undocumented `api.anthropic.com/api/oauth/usage`
 endpoint Claude Code itself calls (5h / weekly / per-model windows), plus
 offline token & API-equivalent cost totals parsed from
 `~/.claude/projects/**/*.jsonl` (the data `ccusage` reads, deduped on
-message+request id and priced per model family). **OpenAI** — `codex app-server`
+message+request id and priced per model family). Those logs are append-only, so a
+poll reads only the bytes added since the last one, stopping at the last newline so a
+line still being written is re-read whole rather than parsed in half; entries are kept
+per file precisely so the message-id dedup can still be applied globally. **OpenAI** — `codex app-server`
 JSON-RPC over stdio. **Google** — approximate daily token counts from Gemini CLI
 session files; Google publishes no quota API, so this is presented as a token
 count, never a percentage. The OpenAI and Google adapters are written to
@@ -275,15 +286,33 @@ tezca doctor                   # verify NVIDIA env, explicit sync, monitors, dep
 tezca install | link           # (bootstrap wraps this) symlink configs into place
 ```
 
-**Persistence model:** `hypr`/`display` write live tweaks to a delimited *managed
-block* in `conf.d/local.conf` (keyed per option, so re-setting replaces rather than
-appends), applied instantly via `hyprctl keyword` and surviving reload/relogin;
-`keybind` rewrites the matching line in `keybinds.conf` (with an `--expect` guard,
-conflict detection, and a backup for `restore`). Every write is fully reversible
-(`reset` / `restore`) — a bad mode never bricks the session.
+**Persistence model.** Every write goes *outside* the checkout (principle 6), and
+`hyprland.conf` sources both files last so they win:
+
+| What you change | Where it lands | How it is undone |
+|---|---|---|
+| `hypr set` / `display set` | a delimited *managed block* in `~/.config/tezca/local.conf`, keyed per option so re-setting replaces rather than appends | `hypr reset` / `display reset` |
+| `keybind rebind` / `set-action` | an *override layer* at `~/.config/tezca/keybinds.conf` — `unbind` + `bind` pairs keyed by the shipped file's line number | `keybind restore` (last change) / `keybind reset` (all) |
+| `bar set` / `dock set` | `~/.config/tezca-bar/config.toml`, `~/.config/tezca-dock/dock.toml` — real files in real directories, seeded from the repo on `tezca link` and never overwritten again | edit or delete them |
+
+The shipped `conf.d/keybinds.conf` is **read-only** to the tools. An override layer
+rather than an in-place rewrite means the base map can't be corrupted, upstream
+changes to it keep flowing, and `reset` is "delete the overrides" — an operation
+that cannot fail halfway. Each override records the shipped combo it replaced, so
+if an upstream edit makes that line a *different* bind the override is reported as
+stale instead of silently rebinding the wrong key. Every `unbind` is emitted before
+every `bind`, or moving a combo from one bind to another would have the donor's
+`unbind` cancel the recipient's replacement.
+
+Three properties hold for all of it: writes are **atomic** (temp file → `fsync` →
+`rename`, so an interrupted write can't leave a truncated config that costs you the
+session); values that end up inside a config line are **validated** first (a comma
+or a newline would otherwise inject a directive — see `crates/tezca-cli/src/validate.rs`);
+and a malformed managed block is **refused** rather than rewritten, because there is
+no way to tell where a block with no closing marker was meant to end.
 
 Why a CLI (not just scripts): type-safe config, one dependency-free binary to ship,
-testable, and it is the backend the GUI control-center calls. It orchestrates
+unit-tested, and it is the backend the GUI control-center calls. It orchestrates
 matugen + symlinks + reload signals so theming is atomic and reversible.
 
 **Custom Rust core #2:** `tezca-dock` — the magnifying macOS dock (gtk4-rs).
@@ -382,7 +411,12 @@ their HyDE keys (`A`=app-finder, `C`=editor) are taken by parity; game mode land
 muscle memory) alongside the HyDE `SUPER+A`. Media/brightness on XF86 keys (plus HyDE's
 `F10/F11/F12`). Discoverable + self-documenting: `SUPER+/` pops a Walker cheat-sheet parsed
 live from the config (`scripts/cheatsheet.sh`), and the **Keybinds** tab of `tezca-settings`
-renders the same. Full map in `conf.d/keybinds.conf`; helper scripts in `conf.d/../scripts/`.
+renders the same (both read `tezca keybind list --machine`, so the bind parser has
+exactly one implementation). Full map in `conf.d/keybinds.conf`; helper scripts in
+`conf.d/../scripts/`.
+
+The shipped map is read-only. Rebinding writes an override layer to
+`~/.config/tezca/keybinds.conf` instead of editing it — see §8 for why and how.
 
 ---
 
@@ -411,6 +445,16 @@ renders the same. Full map in `conf.d/keybinds.conf`; helper scripts in `conf.d/
 - **Gaming**: launch a title, confirm tearing/VRR active, blur off, MangoHud overlay,
   frame pacing on 165 Hz.
 - **Reversibility**: `tezca link` backs up originals; uninstall path restores them.
+  `--force` skips the backup only for symlinks, which hold no data — a real file or
+  directory is always saved first, so the promise holds unconditionally.
+- **Unit tests** (`cargo test --workspace`, run by `install.sh` before it puts
+  anything on `PATH`): the pure logic that can damage a session is covered directly —
+  the managed-block upsert, the keybind override layer, `tezca link`'s
+  symlink/seed/backup decisions, the input validators, atomic writes, and in the bar
+  the custom-module timeout/output cap and the incremental log reader's byte offsets.
+- **CI** (`.github/workflows/ci.yml`): `cargo clippy -- -D warnings` and
+  `cargo test`, split into a std-only `tezca-cli` job (no system dependencies, so it
+  cannot break for unrelated reasons) and a GTK job for the three gtk4-rs binaries.
 
 ---
 

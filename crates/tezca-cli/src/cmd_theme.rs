@@ -9,7 +9,7 @@
 //! Either way we then repoint every component's stable import at current/ and
 //! send each its live-reload signal — no restarts. See templates/README.md.
 
-use crate::{repo, term};
+use crate::{atomic, repo, term, util};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -199,7 +199,7 @@ fn apply_curated(name: &str, opts: Opts) -> Result<(), String> {
 
     // Resolve the theme's wallpaper (relative to wallpapers/, or an abs path).
     let wallpaper = meta_get(&meta, "wallpaper").map(|w| resolve_wallpaper(&root, w));
-    finalize(&current, wallpaper.as_deref(), &format!("{name}"), &opts)
+    finalize(&current, wallpaper.as_deref(), name, &opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +207,7 @@ fn apply_curated(name: &str, opts: Opts) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 fn apply_dynamic(img: &str, opts: Opts) -> Result<(), String> {
-    if !which("matugen") {
+    if !util::has("matugen") {
         return Err("matugen not found — install it for dynamic theming (`paru -S matugen`)".into());
     }
     let root = repo::root()?;
@@ -263,17 +263,14 @@ fn finalize(
     if let Ok(text) = fs::read_to_string(&hl) {
         let path_str = wallpaper.map(|p| p.display().to_string()).unwrap_or_default();
         let patched = text.replace(WALLPAPER_TOKEN, &path_str);
-        fs::write(&hl, patched)
-            .map_err(|e| format!("cannot write {}: {e}", hl.display()))?;
+        atomic::write(&hl, &patched)?;
     }
 
     // Record the active wallpaper (autostart reads this) and theme state.
     if let Some(wp) = wallpaper {
-        fs::write(current.join("wallpaper"), format!("{}\n", wp.display()))
-            .map_err(|e| format!("cannot write wallpaper marker: {e}"))?;
+        atomic::write(&current.join("wallpaper"), &format!("{}\n", wp.display()))?;
     }
-    fs::write(current.join("theme.state"), format!("{state}\n"))
-        .map_err(|e| format!("cannot write theme.state: {e}"))?;
+    atomic::write(&current.join("theme.state"), &format!("{state}\n"))?;
 
     if opts.set_wallpaper {
         if let Some(wp) = wallpaper {
@@ -324,7 +321,7 @@ fn reload_components() {
     report("waybar", signal("waybar", "USR2"));
 
     // swaync — reload the CSS via its control client.
-    if which("swaync-client") {
+    if util::has("swaync-client") {
         report("swaync", run_ok("swaync-client", &["--reload-css"]));
     } else {
         report("swaync", Outcome::Skipped("swaync-client not found".into()));
@@ -476,7 +473,7 @@ fn run_ok(prog: &str, args: &[&str]) -> Outcome {
 
 /// Paint the wallpaper with awww (the swww successor). Best-effort.
 fn set_wallpaper(path: &Path) {
-    if !which("awww") {
+    if !util::has("awww") {
         report("wallpaper", Outcome::Skipped("awww not found".into()));
         return;
     }
@@ -520,8 +517,7 @@ fn write_matugen_config(templates: &Path, current: &Path) -> Result<PathBuf, Str
         body.push_str(&format!("input_path = \"{}\"\n", templates.join(f).display()));
         body.push_str(&format!("output_path = \"{}\"\n\n", current.join(f).display()));
     }
-    fs::write(&cfg_path, body)
-        .map_err(|e| format!("cannot write {}: {e}", cfg_path.display()))?;
+    atomic::write(&cfg_path, &body)?;
     Ok(cfg_path)
 }
 
@@ -611,14 +607,6 @@ fn announce_header(sub: &str) {
     println!();
 }
 
-fn which(bin: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
 
 /// Strip ANSI SGR sequences so captured error text prints cleanly.
 fn strip_ansi(s: &str) -> String {

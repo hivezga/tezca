@@ -21,6 +21,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+/// A slot holding a closure that repaints a list, shared with the rows it draws.
+type RenderCell = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
 // ===========================================================================
 // Appearance — theme + global (palette) wallpaper
 // ===========================================================================
@@ -545,8 +548,9 @@ fn module_region(
     let state = Rc::new(RefCell::new(ids));
 
     // A self-referential render closure: each row's buttons call back into it to
-    // repaint the list after mutating `state`.
-    let render: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    // repaint the list after mutating `state`. The cell is what breaks the cycle —
+    // the closure cannot capture itself, so it captures this and fills it in after.
+    let render: RenderCell = Rc::new(RefCell::new(None));
     {
         let list = list.clone();
         let state = state.clone();
@@ -1221,7 +1225,7 @@ fn installed_apps() -> Vec<(String, String)> {
             v.push((name, id));
         }
     }
-    v.sort_by(|x, y| x.0.to_lowercase().cmp(&y.0.to_lowercase()));
+    v.sort_by_key(|x| x.0.to_lowercase());
     v
 }
 

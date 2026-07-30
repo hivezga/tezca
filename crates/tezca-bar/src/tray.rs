@@ -291,10 +291,7 @@ async fn pump(
 
     loop {
         futures_util::select! {
-            msg = streams.next().fuse() => match msg {
-                Some(Ok(m)) => on_signal(&conn, &mut state, &updates, &m).await,
-                _ => {}
-            },
+            msg = streams.next().fuse() => if let Some(Ok(m)) = msg { on_signal(&conn, &mut state, &updates, &m).await },
             cmd = cmds.recv().fuse() => match cmd {
                 Ok(c) => on_cmd(&conn, &state, c).await,
                 Err(_) => return Ok(()), // GTK side gone → shut the tray down.

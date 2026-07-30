@@ -8,6 +8,7 @@
 //!   game    gaming profile toggle + launch wrapper (Phase 6)
 //!   install bootstrap guidance (delegates to install.sh)
 
+mod atomic;
 mod cmd_bar;
 mod cmd_display;
 mod cmd_dock;
@@ -23,6 +24,8 @@ mod hypr;
 mod managed;
 mod repo;
 mod term;
+mod util;
+mod validate;
 
 use std::process::ExitCode;
 

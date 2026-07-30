@@ -6,7 +6,7 @@
 //! Live control uses signals: SIGUSR1 toggles visibility, SIGUSR2 reloads the
 //! palette (sent by `tezca theme`).
 
-use crate::{repo, term};
+use crate::{atomic, repo, term, util};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -160,7 +160,7 @@ fn cmd_config() -> Result<(), String> {
 /// `tezca bar set <key> <value> [<key> <value>…]` — edit config.toml (preserving
 /// comments) then restart the bar if it's running so the change takes effect.
 fn cmd_set(args: &[&str]) -> Result<(), String> {
-    if args.is_empty() || args.len() % 2 != 0 {
+    if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err("usage: tezca bar set <key> <value> [<key> <value>…]".into());
     }
     let path = bar_toml()?;
@@ -178,7 +178,7 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
 
     let mut body = lines.join("\n");
     body.push('\n');
-    std::fs::write(&path, body).map_err(|e| format!("cannot write config.toml: {e}"))?;
+    atomic::write(&path, &body)?;
 
     if running() {
         let _ = cmd_restart();
@@ -239,13 +239,13 @@ fn set_line(lines: &mut Vec<String>, key: &str, value: &str) {
 /// terminal's) process group and dies when that terminal closes. At login via
 /// `exec-once` this is moot, but `tezca bar start` from a shell needs it.
 fn spawn() -> Result<(), String> {
-    if which(BIN).is_none() {
+    if !util::has(BIN) {
         return Err(format!(
             "{BIN} not found on PATH — build + install it (install.sh) first"
         ));
     }
-    let has_setsid = which("setsid").is_some();
-    let has_uwsm = which("uwsm").is_some();
+    let has_setsid = util::has("setsid");
+    let has_uwsm = util::has("uwsm");
     let mut cmd = if has_setsid {
         let mut c = Command::new("setsid");
         if has_uwsm {
@@ -277,12 +277,3 @@ fn pkill(args: &[&str]) {
     let _ = Command::new("pkill").args(args).status();
 }
 
-fn which(bin: &str) -> Option<()> {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|_| ())
-}

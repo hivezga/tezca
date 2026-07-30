@@ -350,7 +350,7 @@ impl Bar {
         }
     }
 
-    /// SIGUSR1 — toggle every bar's visibility (parity with waybar-toggle.sh).
+    /// SIGUSR1 — toggle every bar's visibility (parity with bar-toggle.sh).
     pub fn toggle_visibility(&self) {
         for s in &self.surfaces {
             let vis = s.window.is_visible();

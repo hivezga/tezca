@@ -1403,8 +1403,8 @@ pub fn system() -> Widget {
     lock.connect_clicked(|_| backend::spawn("hyprlock", &[]));
     let reload = action("Reload Hyprland");
     reload.connect_clicked(|_| backend::spawn("hyprctl", &["reload"]));
-    let waybar = action("Toggle Waybar");
-    waybar.connect_clicked(|_| backend::run_script("waybar-toggle.sh", &[]));
+    let bar_toggle = action("Toggle menubar");
+    bar_toggle.connect_clicked(|_| backend::run_script("bar-toggle.sh", &[]));
     let dock = action("Restart dock");
     dock.connect_clicked(|_| backend::tezca(&["dock", "restart"]));
     let diag = action("Diagnostics");
@@ -1414,7 +1414,7 @@ pub fn system() -> Widget {
     });
     let logout = action("Logout menu");
     logout.connect_clicked(|_| backend::spawn("wlogout", &["-b", "4"]));
-    for b in [&lock, &reload, &waybar, &dock, &diag, &logout] {
+    for b in [&lock, &reload, &bar_toggle, &dock, &diag, &logout] {
         actions.append(b);
     }
     page.append(&actions);

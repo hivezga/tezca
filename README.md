@@ -39,6 +39,9 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
 <p align="center">
   <img src="docs/screenshots/launcher.jpg" alt="Walker launcher — obsidian glass, app grid, turquoise selection" width="100%">
 </p>
+<p align="center">
+  <img src="docs/screenshots/menubar.jpg" alt="tezca-bar — Tezca menu and per-output workspaces at left, MPRIS now-playing centred, live CPU/MEM/GPU sparklines, AI usage, volume, clock at right" width="100%">
+</p>
 
 ## Highlights
 

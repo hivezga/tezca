@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/desktop.jpg" alt="Tezca desktop — obsidian wallpaper, translucent top menubar, magnifying dock" width="100%">
+  <img src="docs/screenshots/desktop.jpg" alt="Tezca desktop — translucent tezca-bar across the top, the magnifying tezca-dock at the bottom, palette extracted from the wallpaper" width="100%">
 </p>
 
 ---
@@ -37,11 +37,15 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
 ## Gallery
 
 <p align="center">
-  <img src="docs/screenshots/launcher.jpg" alt="Walker launcher — obsidian glass, app grid, turquoise selection" width="100%">
+  <img src="docs/screenshots/launcher.jpg" alt="Walker launcher — obsidian glass panel over the desktop, app list with the accent extracted from the wallpaper" width="100%">
 </p>
 <p align="center">
   <img src="docs/screenshots/menubar.jpg" alt="tezca-bar — Tezca menu and per-output workspaces at left, MPRIS now-playing centred, live CPU/MEM/GPU sparklines, AI usage, volume, clock at right" width="100%">
 </p>
+
+> Shot on a **dynamic** palette (`tezca theme wallpaper`), so the accent is extracted
+> from the wallpaper rather than the signature turquoise above — which is the point of
+> the theme engine.
 
 ## Highlights
 

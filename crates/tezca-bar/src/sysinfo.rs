@@ -3,7 +3,7 @@
 //! All std/shell-out, matching the repo's idioms (the CLI shells to hyprctl /
 //! wpctl / nmcli; the dock reads /proc): CPU & memory come straight from /proc,
 //! network from nmcli + /proc/net, audio from wpctl, battery/brightness from
-//! sysfs, gamemode from the same state file the Waybar module polled. Anything
+//! sysfs, gamemode from the state file `tezca game` writes. Anything
 //! absent on the target hardware (no battery / no backlight on a desktop) simply
 //! reports `None`, and the bar hides that module.
 
@@ -537,7 +537,7 @@ fn read_trim(p: &Path) -> Option<String> {
     std::fs::read_to_string(p).ok().map(|s| s.trim().to_string())
 }
 
-/// Whether gaming mode is on (same state file the Waybar module polled).
+/// Whether gaming mode is on (the state file `tezca game` writes).
 pub fn gamemode_on() -> bool {
     let Some(home) = std::env::var_os("HOME") else { return false };
     let p = Path::new(&home).join(".config/tezca/game.state");

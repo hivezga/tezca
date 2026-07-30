@@ -51,7 +51,7 @@ PKGS_CORE=(hyprland uwsm hyprpolkitagent
            pipewire wireplumber
            polkit brightnessctl playerctl)
 
-PKGS_AESTHETIC=(waybar swaync
+PKGS_AESTHETIC=(swaync
                 hyprlock hypridle wlogout
                 hyprshot grim slurp swappy hyprpicker
                 gtk4 gtk4-layer-shell ddcutil
@@ -64,7 +64,10 @@ PKGS_WORKFLOW=(gamemode mangohud gamescope libnotify)
 # AUR / possibly-AUR (paru resolves either way).
 # elephant-all-bin is walker's provider backend — without it the launcher opens
 # but returns zero results, so it is not optional despite living here.
-PKGS_AUR=(walker-bin elephant-all-bin swww matugen-bin nwg-dock-hyprland)
+# awww is swww's renamed successor: the binaries are awww / awww-daemon, and
+# there is no swww-daemon, so install it under its real name rather than relying
+# on the Provides alias.
+PKGS_AUR=(walker-bin elephant-all-bin awww matugen-bin)
 
 say "Packages"
 info "core:      ${DIM}${PKGS_CORE[*]}${RST}"
@@ -147,7 +150,7 @@ if (( ${#MISSING_AUR[@]} )); then
     for p in "${MISSING_AUR[@]}"; do
         case "$p" in
             matugen-bin) warn "$p — \`tezca theme wallpaper\` (dynamic theming) will not work without it" ;;
-            swww)        warn "$p — no animated wallpaper; \`tezca theme\` will report it as skipped" ;;
+            awww)        warn "$p — no animated wallpaper; \`tezca theme\` will report it as skipped" ;;
             walker-bin|elephant-all-bin)
                          warn "$p — the launcher (SUPER+A / SUPER+SPACE) will not open" ;;
             *)           warn "$p — install it manually when you can" ;;

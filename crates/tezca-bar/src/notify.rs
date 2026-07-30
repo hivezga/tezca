@@ -1,6 +1,6 @@
 //! Notifications — swaync bell state, polled via `swaync-client`.
 //!
-//! Reaches parity with the Waybar `custom/notification` module: unread count for
+//! The notification module: unread count for
 //! the pulsing badge, DND state, and the same click actions (toggle the control
 //! centre; right-click toggles do-not-disturb). Polled on a slow interval — the
 //! count only drives a small badge, so a couple of seconds' latency is invisible.

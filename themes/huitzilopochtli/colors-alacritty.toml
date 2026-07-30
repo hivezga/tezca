@@ -2,7 +2,7 @@
 # Copied verbatim into ~/.config/tezca/current/colors-alacritty.toml and
 # imported by alacritty.toml. Huitzilopochtli — south · sun · will; the obsidian base with a blue accent.
 # Mirrors templates/colors-alacritty.toml token-for-token, and carries the
-# same hexes as this theme's colors-kitty.conf.
+# the theme's canonical hexes.
 
 [colors.primary]
 foreground = "#D6DBDC"

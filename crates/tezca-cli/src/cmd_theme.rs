@@ -16,9 +16,8 @@ use std::process::{Command, Stdio};
 
 /// The generated files every component imports from ~/.config/tezca/current/.
 const FILES: &[&str] = &[
-    "colors.css",             // GTK: Waybar, swaync, Walker
-    "colors-alacritty.toml",  // Alacritty (the default terminal)
-    "colors-kitty.conf",      // kitty (documented fallback)
+    "colors.css",             // GTK: tezca-bar, swaync, Walker
+    "colors-alacritty.toml",  // Alacritty (the terminal)
     "colors-hypr.conf",       // hypr/conf.d/decoration.conf (borders/shadows)
     "colors-hyprlock.conf",   // hypr/hyprlock.conf (+ wallpaper path)
 ];
@@ -321,9 +320,6 @@ fn reload_components() {
     // restart. Its 9-char comm matches `pkill -x` cleanly.
     report("bar", signal("tezca-bar", "USR2"));
 
-    // Waybar — SIGUSR2 reloads its stylesheet (kept for the documented fallback).
-    report("waybar", signal("waybar", "USR2"));
-
     // swaync — reload the CSS via its control client.
     if util::has("swaync-client") {
         report("swaync", run_ok("swaync-client", &["--reload-css"]));
@@ -343,10 +339,6 @@ fn reload_components() {
             Outcome::Skipped("not running".into())
         },
     );
-
-    // kitty — retained as a documented fallback. SIGUSR1 makes every instance
-    // re-read its config; a no-op when kitty isn't running, which is the norm now.
-    report("kitty", signal("kitty", "USR1"));
 
     // Walker now runs as a resident GApplication service (autostart.conf) so the
     // launcher opens in ~90ms instead of cold-starting per keypress. The tradeoff

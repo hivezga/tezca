@@ -211,7 +211,7 @@ fn lookup(theme: &IconTheme, name: &str) -> gtk4::IconPaintable {
     theme.lookup_icon(name, &[], LOOKUP_SIZE, 1, TextDirection::None, IconLookupFlags::empty())
 }
 
-/// `org.gnome.Nautilus` → `Nautilus`; `kitty` → `Kitty`.
+/// `org.gnome.Nautilus` → `Nautilus`; `alacritty` → `Alacritty`.
 fn pretty(id: &str) -> String {
     let seg = id.rsplit('.').next().unwrap_or(id);
     let mut chars = seg.chars();

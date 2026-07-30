@@ -419,14 +419,14 @@ mod tests {
     fn manifest_parses_fields_and_clamps_interval() {
         let m = parse_manifest(
             "weather",
-            "exec = \"weather.sh\"\ninterval = 0\nicon = \u{f0590}\non-click = kitty\n",
+            "exec = \"weather.sh\"\ninterval = 0\nicon = \u{f0590}\non-click = alacritty\n",
         )
         .unwrap();
         assert_eq!(m.exec, "weather.sh");
         assert_eq!(m.interval, 1); // 0 clamps to the 1s floor
         assert_eq!(m.timeout, DEFAULT_TIMEOUT);
         assert_eq!(m.icon.as_deref(), Some("\u{f0590}"));
-        assert_eq!(m.on_click.as_deref(), Some("kitty"));
+        assert_eq!(m.on_click.as_deref(), Some("alacritty"));
         assert_eq!(m.label, "Weather"); // prettified from the file stem
     }
 

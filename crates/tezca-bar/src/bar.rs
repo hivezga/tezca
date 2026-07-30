@@ -24,8 +24,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-// Nerd Font glyphs — the exact codepoints from config/waybar/config.jsonc, plus
-// the redesign additions (brightness/battery/play-pause). See README §Assets.
+// Nerd Font glyphs — the codepoints carried over from the Waybar layout this
+// bar replaced, plus the redesign additions (brightness/battery/play-pause).
 const G_WIFI: &str = "\u{F05A9}";
 const G_ETH: &str = "\u{F0200}";
 const G_DISC: &str = "\u{F092D}";

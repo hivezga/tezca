@@ -72,7 +72,7 @@ pub fn appearance(window: &Window) -> Widget {
     }
     page.append(&grid);
     page.append(&hint(
-        "Curated palettes. Switching re-skins the bar, kitty, the dock, hyprlock and the launcher live — no restart.",
+        "Curated palettes. Switching re-skins the bar, the terminal, the dock, hyprlock and the launcher live — no restart.",
     ));
 
     page.append(&section_header("Wallpaper"));

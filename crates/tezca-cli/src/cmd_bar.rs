@@ -1,14 +1,14 @@
 //! `tezca bar` — control the bespoke top menubar (crates/tezca-bar).
 //!
 //! The bar is a separate binary (`tezca-bar`) launched at login by
-//! conf.d/autostart.conf, replacing Waybar. This subcommand is a thin lifecycle
+//! conf.d/autostart.conf. This subcommand is a thin lifecycle
 //! wrapper — parallel to `tezca dock` — so you can start/stop/reload it by hand.
 //! Live control uses signals: SIGUSR1 toggles visibility, SIGUSR2 reloads the
 //! palette (sent by `tezca theme`).
 
 use crate::{atomic, repo, term, util};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const BIN: &str = "tezca-bar";
 
@@ -265,7 +265,14 @@ fn spawn() -> Result<(), String> {
     } else {
         Command::new(BIN)
     };
-    cmd.spawn().map_err(|e| format!("failed to launch bar: {e}"))?;
+    // Detach the child's stdio. A long-lived process that inherits our stdout keeps
+    // the write end of any pipe open, so `tezca bar restart | tee log` (or any
+    // caller that captures output) blocks forever waiting for EOF that never comes.
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to launch bar: {e}"))?;
     Ok(())
 }
 

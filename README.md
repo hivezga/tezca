@@ -39,12 +39,6 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
 <p align="center">
   <img src="docs/screenshots/launcher.jpg" alt="Walker launcher — obsidian glass, app grid, turquoise selection" width="100%">
 </p>
-<p align="center">
-  <img src="docs/screenshots/waybar.jpg" alt="The top menubar — per-monitor workspaces, centred clock, system cluster" width="100%">
-</p>
-
-> The bar shot above predates `tezca-bar` (it is the Waybar layout it replaced), so it
-> is missing the sparklines, now-playing widget, and glass popovers. Due a retake.
 
 ## Highlights
 
@@ -219,14 +213,13 @@ keep flowing and `tezca keybind reset` puts everything back.
 control center) · Walker (launcher) · swaync (notifications) · hyprlock + hypridle
 (lock/idle) · wlogout (power) · matugen (theme engine) · awww (wallpaper) · Alacritty
 (terminal) · cliphist · hyprshot + swappy (snip + annotate) · hyprpicker.
-Waybar and kitty stay in the repo as documented fallbacks.
 NVIDIA env lives in uwsm's `env` / `env-hyprland`. Rationale for each choice is in
 [`docs/DESIGN.md §5`](docs/DESIGN.md).
 
 ## Layout
 
 ```
-config/       → symlinked into ~/.config (hypr, uwsm, waybar, swaync, walker, alacritty, …)
+config/       → symlinked into ~/.config (hypr, uwsm, swaync, walker, alacritty, …)
               → except tezca-bar/ and tezca-dock/, which are seeded into real
                 directories: they hold settings you and the tools write, so they
                 must not live inside the checkout

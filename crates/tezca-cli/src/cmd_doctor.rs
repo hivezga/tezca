@@ -423,18 +423,16 @@ fn monitor_checks() -> Vec<Check> {
 fn dependency_checks() -> Vec<Check> {
     // (probe-name, required-for-phase-1?, fallback-paths)
     // Most components are PATH binaries, but some aren't: hyprpolkitagent is a
-    // /usr/lib helper + systemd user service, and swww shipped as `awww` (its
-    // renamed successor) whose daemon binary is `awww-daemon`. Probe fallbacks
-    // so a working install isn't reported as missing.
+    // /usr/lib helper + systemd user service, and the wallpaper daemon is `awww`
+    // (swww's renamed successor) whose daemon binary is `awww-daemon`. Probe
+    // fallbacks so a working install isn't reported as missing.
     let deps: &[(&str, bool, &[&str])] = &[
         ("Hyprland", true, &[]),
         ("uwsm", true, &[]),
         ("hyprctl", true, &[]),
-        ("alacritty", true, &[]), // the default terminal ($mod+T, dropdown, AI, sysmon)
-        ("kitty", false, &[]),    // documented fallback (config/kitty/ still themed)
+        ("alacritty", true, &[]), // the terminal ($mod+T, dropdown, AI, sysmon)
         ("elephant", false, &[]), // walker's provider backend — no results without it
         ("hyprpolkitagent", false, &["/usr/lib/hyprpolkitagent/hyprpolkitagent"]),
-        ("waybar", false, &[]),
         ("swaync", false, &[]),
         ("walker", false, &[]),
         ("awww", false, &["/usr/bin/swww-daemon"]), // wallpaper daemon (swww successor)
@@ -445,7 +443,6 @@ fn dependency_checks() -> Vec<Check> {
         ("tezca-dock", false, &[]),        // Phase 5 bespoke dock (build via install.sh)
         ("tezca-settings", false, &[]),    // Phase 8 control center (build via install.sh)
         ("playerctl", false, &[]),         // Phase 10 bar now-playing (MPRIS)
-        ("nwg-dock-hyprland", false, &[]), // Phase 4 dock (fallback for tezca-dock)
         ("wlogout", false, &[]),           // Phase 4 power menu
         ("hyprpicker", false, &[]),        // color picker (SUPER+SHIFT+P)
         ("dolphin", false, &[]),           // file manager (SUPER+E)
@@ -466,15 +463,12 @@ fn dependency_checks() -> Vec<Check> {
         })
         .collect();
 
-    // Runtime: is a menubar actually up? tezca-bar (layer-shell) is the default;
-    // Waybar is the documented fallback. Not fatal — a fresh install just hasn't
+    // Runtime: is the menubar actually up? Not fatal — a fresh install just hasn't
     // started it yet. A running tezca-bar also confirms layer-shell works.
     checks.push(if proc_running("tezca-bar") {
         Check::pass("menubar", "tezca-bar is running (layer-shell OK)")
-    } else if proc_running("waybar") {
-        Check::warn("menubar", "tezca-bar not running — Waybar fallback is up")
     } else {
-        Check::warn("menubar", "no menubar running — start it with `tezca bar start`")
+        Check::warn("menubar", "not running — start it with `tezca bar start`")
     });
 
     // Runtime: the launcher's two resident halves. Both fail *quietly* — the
@@ -553,7 +547,7 @@ fn theme_checks() -> Vec<Check> {
     }
 
     // The remaining files each component relies on.
-    for f in ["colors-kitty.conf", "colors-hypr.conf", "colors-hyprlock.conf"] {
+    for f in ["colors-alacritty.toml", "colors-hypr.conf", "colors-hyprlock.conf"] {
         if !current.join(f).is_file() {
             v.push(Check::warn(f, "missing from current/ — re-run `tezca theme`"));
         }

@@ -85,16 +85,16 @@ in CachyOS repos; `AUR` installs via `paru`.
 | Compositor | **Hyprland** | repo | Given. Modern, animated, scriptable |
 | Session/env | **uwsm** (`env` + `env-hyprland`) | repo | Correct env handling; where NVIDIA vars belong |
 | Display mgr | **SDDM** (keep) + Tezca session | repo | Already there; add session, theme later. greetd is a fallback path |
-| **Menubar** | **Waybar** (top) | repo | *See §6.* Most stable/performant bar, GTK-CSS = full macOS look |
-| **Dock** | **nwg-dock-hyprland** → custom `tezca-dock` | repo | *See §6.* Real macOS dock (autohide, pins); Rust replacement later |
+| **Menubar** | **`tezca-bar`** (custom Rust, top) | build | *See §6.* Bespoke gtk4-layer-shell bar — sparklines, popovers, tray. Replaced Waybar |
+| **Dock** | **`tezca-dock`** (custom Rust) | build | *See §6.* Real macOS dock — cosine magnification, glass, autohide. Replaced nwg-dock-hyprland |
 | Launcher | **Walker** (Spotlight/Raycast style) | repo | GTK4, plugins (apps/calc/clipboard/emoji/websearch/AI actions). `wofi`/`fuzzel` fallback |
 | Notifications | **swaync** | repo | Notification **center** + quick-settings panel = macOS vibe; CSS-themable |
-| Wallpaper | **swww** (animated) | AUR | GPU transitions on NVIDIA; `hyprpaper` (repo) = static fallback |
+| Wallpaper | **awww** (animated) | AUR | GPU transitions on NVIDIA. swww's renamed successor — the binaries are `awww` / `awww-daemon` |
 | Lockscreen | **hyprlock** | repo | Native, GPU, themable |
 | Idle | **hypridle** | repo | Native idle/dpms/lock orchestration |
 | Logout | **wlogout** | repo | Themable power menu |
 | Theme engine | **matugen** | repo | **Rust** Material-You extraction + templating — the core (see §7) |
-| Terminal | **Alacritty** | repo | GPU-accel, minimal, themable via templates; `live_config_reload` needs no signal. kitty kept in-repo as a fallback |
+| Terminal | **Alacritty** | repo | GPU-accel, minimal, themable via templates; `live_config_reload` needs no signal (kitty needed SIGUSR1) |
 | Polkit agent | **hyprpolkitagent** | repo | Native GUI auth prompts |
 | Clipboard | **cliphist** + wl-clipboard | repo | History, Walker-integrated |
 | Screenshots | **hyprshot** (+ grim/slurp/swappy) | repo | Region/window/annotate |
@@ -155,8 +155,8 @@ ultrawide shows the full cluster, the 1440p secondary drops the per-app label an
 tightens. It also introduces the **four Tezcatlipoca themes** (`obsidian` · `xipe` ·
 `huitzilopochtli` · `quetzalcoatl`) — one obsidian base, one accent per direction.
 Controlled by `tezca bar start|stop|restart|toggle|config|set`; SIGUSR1 toggles
-visibility (the `ALT+Right-Ctrl` bind). Waybar's `config/waybar/` is kept as a
-fallback. Data sources stay shell-out/`/proc` (hyprctl, wpctl, nmcli, playerctl,
+visibility (the `ALT+Right-Ctrl` bind). Waybar has since been removed from the repo
+entirely — see the note at the end of this section. Data sources stay shell-out/`/proc` (hyprctl, wpctl, nmcli, playerctl,
 swaync-client) so the crate carries no deps beyond the dock's.
 
 **Update — AI provider usage module (`ai.rs`).** The right cluster gains a
@@ -165,6 +165,14 @@ spent, with a glass popover breaking it down per provider (windows as meters +
 reset countdowns, plus today's local token/cost totals). It runs on one poll
 thread feeding the same `async-channel`→glib bridge as `hypr::subscribe` and
 `tray::spawn`, so the GTK loop never blocks on a network call.
+
+**Update — the fallbacks are gone.** Waybar, kitty and nwg-dock-hyprland were kept
+in-repo as documented escape hatches while the bespoke components proved themselves.
+They have. Carrying three unused stacks meant three sets of palette files to keep in
+sync, three dependency probes in `tezca doctor`, layerrules for namespaces nothing
+opens, and prose describing software the desktop no longer runs — so they have been
+removed. The reasoning above is kept as the record of *why* each was chosen and then
+replaced; `git log` has the configs if anyone wants them back.
 
 This is the **only module in Tezca that can reach the internet**, so its rules
 are enforced in code rather than trusted to convention:
@@ -239,7 +247,7 @@ feel like *one* designed system instead of a rice.
                   │ renders templates → colors for every app
    ┌──────┬───────┼───────┬────────┬────────┐
    ▼      ▼       ▼        ▼        ▼        ▼
- Hyprland Waybar swaync Alacritty Walker   GTK
+ Hyprland tezca-bar swaync Alacritty Walker GTK
  (borders)(CSS)  (CSS)   (toml)  (CSS)  (gtk.css)
                   │
              `tezca theme` reloads each component live
@@ -258,7 +266,7 @@ feel like *one* designed system instead of a rice.
 - Each app config `@import`s a stable path: `~/.config/tezca/current/colors.css`
   (and per-app equivalents). Components never hardcode colors.
 - Switching a theme = matugen re-renders templates → repoint the `current/` symlink →
-  `tezca` sends each app its reload signal (Waybar SIGUSR2, swaync reload, hyprctl
+  `tezca` sends each app its reload signal (tezca-bar SIGUSR2, swaync reload, hyprctl
   reload, Alacritty live_config_reload, Walker restart). No app restarts visible to
   the user.
 - Templates live in `templates/`; generated output in `~/.config/tezca/current/`.
@@ -363,12 +371,9 @@ Project:Tezca/
 │   │   ├── hyprlock.conf
 │   │   └── hypridle.conf
 │   ├── uwsm/{env,env-hyprland}
-│   ├── waybar/{config.jsonc, style.css}
 │   ├── swaync/{config.json, style.css}
 │   ├── walker/
 │   ├── alacritty/
-│   ├── kitty/                # documented fallback
-│   └── nwg-dock-hyprland/
 ├── themes/                   # obsidian/, smoke/, ... (palette + wallpaper + accent)
 ├── templates/                # matugen templates → current/colors.*
 ├── crates/
@@ -440,7 +445,7 @@ The shipped map is read-only. Rebinding writes an override layer to
 - **Per phase, live**: after Phase 1 we switch you to the Tezca session and validate on
   the real hardware (both monitors, refresh rate, no NVIDIA flicker) via `tezca doctor`
   + visual check. KDE remains selectable at SDDM the entire time.
-- **Theme engine**: switch wallpaper → confirm Waybar/Alacritty/swaync/Hyprland all
+- **Theme engine**: switch wallpaper → confirm tezca-bar/Alacritty/swaync/Hyprland all
   recolor live with no restarts.
 - **Gaming**: launch a title, confirm tearing/VRR active, blur off, MangoHud overlay,
   frame pacing on 165 Hz.
@@ -460,10 +465,10 @@ The shipped map is read-only. Rebinding writes an override layer to
 
 ## 15. Open questions / risks
 
-- **swww vs hyprpaper**: swww (animated, AUR) is the aesthetic pick; hyprpaper (repo,
-  static) is the zero-risk fallback. Default swww, keep hyprpaper as escape hatch.
+- ~~**swww vs hyprpaper**~~ — **resolved.** swww won and was then renamed `awww`
+  upstream; hyprpaper was never adopted. `tezca theme` drives `awww` directly.
 - **GBM_BACKEND=nvidia-drm** occasionally breaks Electron/Firefox HW-accel — validate on
   your Brave/Antigravity/Claude apps; drop if it regresses.
-- **`tezca-dock` scope**: magnification + blur in gtk4-rs is real work; nwg-dock covers
-  us fully until it's ready, so it's never blocking.
+- ~~**`tezca-dock` scope**~~ — **resolved.** Magnification + blur in gtk4-rs shipped
+  (Phase 5) and nwg-dock-hyprland has since been removed.
 - **Repo name**: `tezca` on GitHub (the local `:` path stays as-is).

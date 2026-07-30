@@ -7,7 +7,7 @@
 
 use crate::{atomic, repo, term, util};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const BIN: &str = "tezca-dock";
 
@@ -246,11 +246,17 @@ fn spawn() -> Result<(), String> {
             "{BIN} not found on PATH — build + install it (install.sh) first"
         ));
     }
-    let launched = if util::has("uwsm") {
-        Command::new("uwsm").args(["app", "--", BIN]).spawn()
+    // Detach the child's stdio. A long-lived process that inherits our stdout keeps
+    // the write end of any pipe open, so `tezca dock restart | tee log` (or any
+    // caller that captures output) blocks forever waiting for EOF that never comes.
+    let mut cmd = if util::has("uwsm") {
+        let mut c = Command::new("uwsm");
+        c.args(["app", "--", BIN]);
+        c
     } else {
-        Command::new(BIN).spawn()
+        Command::new(BIN)
     };
+    let launched = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
     launched.map_err(|e| format!("failed to launch dock: {e}"))?;
     Ok(())
 }

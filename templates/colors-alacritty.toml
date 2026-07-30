@@ -4,7 +4,7 @@
 # imported by alacritty.toml. Only the surfaces (bg/fg/cursor/selection) track
 # the wallpaper; the 16 ANSI colors stay a fixed, tasteful obsidian set so
 # terminal semantics survive (git-diff red never becomes teal on a teal
-# wallpaper). Mirrors templates/colors-kitty.conf token-for-token.
+# wallpaper).
 
 [colors.primary]
 foreground = "{{colors.on_surface.default.hex}}"

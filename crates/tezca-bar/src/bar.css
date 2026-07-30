@@ -2,7 +2,7 @@
  *
  * References ONLY the @tz_* tokens defined by the palette provider (the user's
  * ~/.config/tezca/current/colors.css), via alpha()/mix() — never hard hexes —
- * exactly like config/waybar/style.css. The self-drawn bits (mirror glyph,
+ * the same way the other GTK stylesheets do. The self-drawn bits (mirror glyph,
  * sparklines, equalizer) are painted by cairo from the parsed Palette instead.
  *
  * GTK CSS dialect: @define-color names, alpha(), mix(); no var()/color-mix().

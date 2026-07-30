@@ -4,7 +4,7 @@
 //!   * the widget tree — styled by GTK CSS. We load the user's own
 //!     `~/.config/tezca/current/colors.css` (valid GTK `@define-color` tokens)
 //!     as one provider, and our `bar.css` — which references those `@tz_*`
-//!     names via `alpha()`/`mix()`, exactly like `config/waybar/style.css` — as
+//!     names via `alpha()`/`mix()`, the same contract the GTK stylesheets use — as
 //!     a second. On SIGUSR2 both reload, so a theme switch reskins instantly.
 //!   * the self-drawn bits (mirror glyph, sparklines, equalizer) — cairo needs
 //!     concrete RGBA, so we ALSO parse that same file into a [`Palette`], the

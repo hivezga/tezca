@@ -14,7 +14,7 @@
 //! conf.d/gaming.conf — this command layers the *runtime* tweaks on top.
 //!
 //! Mode is persisted to `~/.config/tezca/game.state` (outside the theme-owned
-//! `current/` dir) so the Waybar indicator and `tezca doctor` can read it.
+//! `current/` dir) so the bar's gamemode module and `tezca doctor` can read it.
 
 use crate::{atomic, repo, term, util};
 use std::fs;

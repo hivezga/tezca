@@ -7,8 +7,7 @@
 #     unrelated to the code. It also carries most of the test suite: the config
 #     rewriting, the keybind override layer, the symlink/seed logic, and the input
 #     validation all live here, and those are the paths that can damage a session.
-#   * `gtk` — the three gtk4-rs binaries (bar, dock, settings). Needs GTK4 and
-#     gtk4-layer-shell from the runner image.
+#   * `gtk` — the three gtk4-rs binaries (bar, dock, settings).
 #
 # Deliberately NOT gated on `cargo fmt --check`: this codebase is hand-formatted
 # wider than rustfmt's default in a lot of places, so turning it on would either
@@ -18,8 +17,11 @@
 name: ci
 
 on:
+  # Every branch, not just main: a feature branch is exactly where you want to
+  # find out that clippy or a test broke. Same-repo pull requests therefore run
+  # twice; `pull_request` is kept anyway so contributions from forks are covered.
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
   workflow_dispatch:
 
@@ -31,7 +33,7 @@ env:
 jobs:
   cli:
     name: tezca CLI (std-only)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -47,17 +49,38 @@ jobs:
 
   gtk:
     name: bar · dock · settings (gtk4-rs)
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`. Two reasons: an image bump should be a commit,
+    # not a surprise; and the version matters here, because gtk4-layer-shell is
+    # not packaged for Ubuntu until 25.10 (24.04 has no `libgtk4-layer-shell-dev`
+    # at all). `ubuntu-26.04` does package it, but that image is still preview, so
+    # gating CI on it trades one flavour of surprise for another.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      # gtk4-layer-shell is only packaged on newer Ubuntu images. If this step
-      # fails on the runner in use, either bump `runs-on` or build the library
-      # from source (https://github.com/wmww/gtk4-layer-shell).
+
       - name: system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev libgtk4-layer-shell-dev pkg-config
+            libgtk-4-dev meson ninja-build pkg-config
+
+      # Built from a pinned tag rather than installed from apt, since 24.04 does
+      # not ship it. The version matches what the project builds against locally.
+      # Once `ubuntu-26.04` is GA this whole step becomes
+      # `apt-get install libgtk4-layer-shell-dev`.
+      - name: build gtk4-layer-shell ${{ env.LAYER_SHELL_VERSION }}
+        env:
+          LAYER_SHELL_VERSION: v1.3.0
+        run: |
+          git clone --depth 1 --branch "$LAYER_SHELL_VERSION" \
+            https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
+          cd /tmp/gtk4-layer-shell
+          meson setup build --prefix=/usr -Dexamples=false -Ddocs=false -Dtests=false
+          ninja -C build
+          sudo ninja -C build install
+          sudo ldconfig
+          pkg-config --modversion gtk4-layer-shell
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

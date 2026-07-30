@@ -85,7 +85,11 @@ jobs:
           ninja -C build
           sudo ninja -C build install
           sudo ldconfig
-          pkg-config --modversion gtk4-layer-shell
+          # The pkg-config module carries the ABI suffix (it installs
+          # gtk4-layer-shell-0.pc), which is also the name the -sys crate probes for.
+          # Asserting it here turns "the crate can't find the library" into a failure
+          # in this step, where the log actually explains why.
+          pkg-config --modversion gtk4-layer-shell-0
 
       - uses: dtolnay/rust-toolchain@stable
         with:

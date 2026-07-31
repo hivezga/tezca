@@ -1,7 +1,7 @@
 //! `tezca dock` — control the bespoke magnifying dock (crates/tezca-dock).
 //!
 //! The dock is a separate binary (`tezca-dock`) launched at login by
-//! conf.d/autostart.conf. This subcommand is a thin lifecycle wrapper so you can
+//! conf.d/autostart.lua. This subcommand is a thin lifecycle wrapper so you can
 //! start/stop/reload it by hand. Live control uses signals: SIGUSR1 pins it open
 //! (also on SUPER+D), SIGUSR2 reloads the palette (sent by `tezca theme`).
 

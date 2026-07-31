@@ -63,7 +63,8 @@ content breathe. Every pixel earns its place.
    status bar; do build the things that make Tezca *Tezca*.
 4. **Non-destructive & reversible.** Everything lives in the repo and is symlinked in;
    KDE stays as a fallback session at login.
-5. **Modular config.** Hyprland split into `conf.d/` fragments so a theme or a tweak
+5. **Modular config.** Hyprland split into `conf.d/` fragments (Lua modules,
+   `require`d in order) so a theme or a tweak
    touches one small file.
 6. **Shipped config in the repo; your state outside it.** The repo is *input* — it is
    symlinked in so `git pull` updates your desktop. Anything the tools or you write
@@ -295,15 +296,15 @@ tezca install | link           # (bootstrap wraps this) symlink configs into pla
 ```
 
 **Persistence model.** Every write goes *outside* the checkout (principle 6), and
-`hyprland.conf` sources both files last so they win:
+`hyprland.lua` loads both files last so they win:
 
 | What you change | Where it lands | How it is undone |
 |---|---|---|
-| `hypr set` / `display set` | a delimited *managed block* in `~/.config/tezca/local.conf`, keyed per option so re-setting replaces rather than appends | `hypr reset` / `display reset` |
-| `keybind rebind` / `set-action` | an *override layer* at `~/.config/tezca/keybinds.conf` — `unbind` + `bind` pairs keyed by the shipped file's line number | `keybind restore` (last change) / `keybind reset` (all) |
+| `hypr set` / `display set` | a generated Lua *data table* at `~/.config/tezca/overrides.lua`, keyed per option so re-setting replaces rather than appends | `hypr reset` / `display reset` |
+| `keybind rebind` / `set-action` | an *override layer* at `~/.config/tezca/keybinds.lua` — `hl.unbind` + `hl.bind` pairs keyed by the shipped file's line number | `keybind restore` (last change) / `keybind reset` (all) |
 | `bar set` / `dock set` | `~/.config/tezca-bar/config.toml`, `~/.config/tezca-dock/dock.toml` — real files in real directories, seeded from the repo on `tezca link` and never overwritten again | edit or delete them |
 
-The shipped `conf.d/keybinds.conf` is **read-only** to the tools. An override layer
+The shipped `conf.d/keybinds.lua` is **read-only** to the tools. An override layer
 rather than an in-place rewrite means the base map can't be corrupted, upstream
 changes to it keep flowing, and `reset` is "delete the overrides" — an operation
 that cannot fail halfway. Each override records the shipped combo it replaced, so
@@ -340,12 +341,12 @@ every action, so the GUI and keyboard bindings drive identical code paths.
 `WLR_NO_HARDWARE_CURSORS`/stutter hacks are mostly unneeded — we verify, not cargo-cult.
 `tezca doctor` checks `nvidia_drm.modeset=1` and explicit-sync availability.
 
-**Monitors — `conf.d/monitors.conf`:**
+**Monitors — `conf.d/monitors.lua`:**
 - Ultrawide `3440x1440@165` primary, `2560x1440@165` secondary, arranged L/R.
-- `misc:vrr = 2` (fullscreen-only VRR — safest for mixed desktop/gaming on 165 Hz).
+- `misc.vrr = 2` (fullscreen-only VRR — safest for mixed desktop/gaming on 165 Hz).
 - Per-monitor workspace binding so each screen keeps its own workspaces.
 
-**Gaming path (`tezca game on`):** `general:allow_tearing = true` + per-game
+**Gaming path (`tezca game on`):** `general.allow_tearing = true` + per-game
 `immediate` window rule for lowest latency; blur/animations off for game windows;
 gamemode + MangoHud (both installed via goverlay) wired to the profile; gamescope
 available for problem titles.
@@ -365,9 +366,11 @@ Project:Tezca/
 ├── docs/DESIGN.md            # this document
 ├── config/                   # → symlinked into ~/.config
 │   ├── hypr/
-│   │   ├── hyprland.conf      # sources conf.d/* in order
-│   │   ├── conf.d/            # env, monitors, input, decoration, animations,
+│   │   ├── hyprland.lua       # requires conf.d/* in order (Lua; see §5.1)
+│   │   ├── hyprland.conf      # pre-Lua config, unloaded — kept as a rollback
+│   │   ├── conf.d/            # util, monitors, input, decoration, animations,
 │   │   │                      #   keybinds, windowrules, autostart, nvidia, gaming
+│   │   │                      #   (*.lua live; the matching *.conf are the rollback)
 │   │   ├── hyprlock.conf
 │   │   └── hypridle.conf
 │   ├── uwsm/{env,env-hyprland}
@@ -419,6 +422,38 @@ live from the config (`scripts/cheatsheet.sh`), and the **Keybinds** tab of `tez
 renders the same (both read `tezca keybind list --machine`, so the bind parser has
 exactly one implementation). Full map in `conf.d/keybinds.conf`; helper scripts in
 `conf.d/../scripts/`.
+
+---
+
+## 5.1 Why the config is Lua
+
+Hyprland 0.55 deprecated **hyprlang** (the `.conf` format) in favour of Lua, and
+upstream will drop it a release or two later; new config options already land in
+Lua only. Tezca cut over rather than dual-maintain a frozen format.
+
+What that changed beyond syntax:
+
+* **`hyprctl keyword` no longer exists.** It is implemented only on the legacy
+  parser (`parseKeyword` is not on the shared `IConfigManager` interface) and
+  answers *"keyword can't work with non-legacy parsers. Use eval."* Every live
+  apply — `tezca hypr set`, `tezca display set`, the Settings sliders — now goes
+  through `hyprctl eval 'hl.config{…}'`. `getoption` and `reload` are unaffected;
+  both are on the shared interface.
+* **`hyprctl dispatch` needs Lua syntax.** `dispatch exec foo` is rejected
+  outright, with no compatibility shim; it is `dispatch 'hl.dsp.exec_cmd("foo")'`.
+* **A config error is no longer survivable.** hyprlang logged a bad `source` and
+  carried on; a Lua error drops the session into *emergency mode* — one keybind
+  (SUPER+Q) on a black desktop. So every optional file (theme palette, user
+  rebinds, generated overrides) is loaded through `conf.d/util.lua:load`, which
+  degrades to `nil` instead of propagating, and generated state is **data**
+  (`return { … }`) rather than generated code, validated key-by-key on apply.
+* **The format is chosen once, at startup.** `hyprland.lua` wins if it exists;
+  `hyprctl reload` cannot switch parsers. Rollback is therefore
+  `mv ~/.config/hypr/hyprland.lua{,.off}` and a relogin — which is why the whole
+  `.conf` tree is still in the repo, unloaded.
+
+`tezca doctor` reports the Hyprland version (floor: 0.55) and which parser is
+actually live, so "I edited the config and nothing happened" has an obvious cause.
 
 The shipped map is read-only. Rebinding writes an override layer to
 `~/.config/tezca/keybinds.conf` instead of editing it — see §8 for why and how.

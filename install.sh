@@ -167,7 +167,7 @@ cat <<EOF
     2. Log out, and at SDDM pick the ${BOLD}Hyprland (uwsm-managed)${RST} session.
        (KDE Plasma stays selectable as a fallback.)
     3. After first login, run ${BOLD}hyprctl monitors${RST} and fix connector names
-       in ${DIM}config/hypr/conf.d/monitors.conf${RST} if they differ from DP-1/DP-2.
+       in ${DIM}config/hypr/conf.d/monitors.lua${RST} if they differ from DP-1/DP-2.
     4. Theme it: ${BOLD}tezca theme wallpaper ~/Pictures/some.jpg${RST} re-skins the
        whole desktop from any image, or ${BOLD}tezca theme set obsidian${RST} for the
        signature look. (${DIM}tezca link${RST} already seeded obsidian as the default.)
@@ -176,8 +176,8 @@ cat <<EOF
   new symlinks in ~/.config.
 
   Your settings live outside this repo, so \`git pull\` never conflicts with them:
-    ~/.config/tezca/local.conf      display + Hyprland tweaks
-    ~/.config/tezca/keybinds.conf   your rebound keys
+    ~/.config/tezca/overrides.lua   display + Hyprland tweaks
+    ~/.config/tezca/keybinds.lua    your rebound keys
     ~/.config/tezca-bar/            bar config + your custom modules
     ~/.config/tezca-dock/           dock config${RST}
 EOF

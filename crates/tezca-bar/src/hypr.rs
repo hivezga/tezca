@@ -83,9 +83,14 @@ pub fn active_ws_for(monitors: &[Monitor], output: &str) -> i32 {
 }
 
 /// Switch to workspace `id`.
+///
+/// Spelled as a Lua dispatcher expression, not the legacy `dispatch workspace 3`
+/// form: under the Lua config manager `hyprctl` parses the whole argument string
+/// as Lua, so the bare form dies with `')' expected near '3'` — exit 7 for a
+/// plain dispatch, and a silent exit 0 inside `--batch`.
 pub fn goto_workspace(id: i32) {
     let _ = Command::new("hyprctl")
-        .args(["dispatch", "workspace", &id.to_string()])
+        .args(["dispatch", &format!("hl.dsp.focus({{ workspace = {id} }})")])
         .status();
 }
 
@@ -116,11 +121,19 @@ pub fn clients_by_workspace() -> HashMap<i32, Vec<String>> {
 /// Silently move every window on `from` to `to`, for each `(from, to)` pair, in
 /// one `hyprctl --batch` so the shuffle lands atomically. Addresses come from a
 /// pre-move snapshot (`by_ws`) so simultaneous swaps resolve correctly.
+///
+/// `follow = false` is the old `movetoworkspacesilent`: the window relocates
+/// without dragging the user's view along. The explicit `window` selector is
+/// what makes the batch safe — without it every call would act on whatever
+/// happens to be focused.
 pub fn apply_moves(moves: &[(i32, i32)], by_ws: &HashMap<i32, Vec<String>>) {
     let mut batch = String::new();
     for &(from, to) in moves {
         for addr in by_ws.get(&from).into_iter().flatten() {
-            batch.push_str(&format!("dispatch movetoworkspacesilent {to},address:{addr} ; "));
+            batch.push_str(&format!(
+                "dispatch hl.dsp.window.move({{ window = \"address:{addr}\", \
+                 workspace = {to}, follow = false }}) ; "
+            ));
         }
     }
     let batch = batch.trim_end_matches(" ; ");

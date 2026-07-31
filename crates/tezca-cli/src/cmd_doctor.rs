@@ -39,6 +39,7 @@ pub fn run() -> i32 {
     let mut all = Vec::new();
     section("GPU / NVIDIA", nvidia_checks(), &mut all);
     section("Session & environment", session_checks(), &mut all);
+    section("Hyprland", compositor_checks(), &mut all);
     section("Config linkage", config_checks(), &mut all);
     section("Config validity", config_validity_checks(), &mut all);
     section("Displays", monitor_checks(), &mut all);
@@ -89,6 +90,70 @@ fn section(title: &str, checks: Vec<Check>, sink: &mut Vec<Level>) {
 // ---------------------------------------------------------------------------
 // GPU / NVIDIA
 // ---------------------------------------------------------------------------
+
+/// Hyprland itself: is it new enough to read the Lua config Tezca now ships,
+/// and is the Lua parser the one actually running?
+///
+/// The whole config tree is Lua as of the 0.55 deprecation of hyprlang. On an
+/// older Hyprland there is no `hyprland.lua` support at all: it would fall back
+/// to a hyprland.conf that Tezca no longer maintains, so this is the one version
+/// floor worth stating outright rather than letting it surface as a black screen.
+fn compositor_checks() -> Vec<Check> {
+    let mut v = Vec::new();
+
+    let out = std::process::Command::new("hyprctl").arg("version").output();
+    let Ok(out) = out else {
+        v.push(Check::warn("hyprctl not runnable", "cannot determine the Hyprland version"));
+        return v;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    match parse_hypr_version(&text) {
+        Some((maj, min)) if (maj, min) >= (0, 55) => {
+            v.push(Check::pass("Hyprland version", format!("{maj}.{min} — Lua config supported")))
+        }
+        Some((maj, min)) => v.push(Check::fail(
+            "Hyprland version",
+            format!(
+                "{maj}.{min} is too old — Tezca's config is Lua, which needs 0.55+. \
+                 Upgrade, or roll back to the shipped hyprland.conf"
+            ),
+        )),
+        None => v.push(Check::warn("Hyprland version", "could not parse `hyprctl version`")),
+    }
+
+    // Which parser is live. `eval` exists only on the Lua config manager, and is
+    // what every `tezca hypr set` / `tezca display set` goes through — if the
+    // legacy parser is running, those all fail.
+    if crate::hypr::in_session() {
+        match crate::hypr::eval("hl.get_config(\"decoration.rounding\")") {
+            Ok(()) => v.push(Check::pass("config parser", "Lua (hyprctl eval works)")),
+            // The running session still has the legacy parser. That is the
+            // expected state between installing the Lua tree and the next login
+            // — the format is chosen once at startup and `hyprctl reload` cannot
+            // switch it — so it is a "log out and back in", not a fault.
+            Err(e) if e.contains("only supported with the lua config manager") => {
+                v.push(Check::warn(
+                    "config parser",
+                    "still legacy (hyprlang) — log out and back in to load hyprland.lua; \
+                     until then `tezca hypr set` cannot apply live",
+                ))
+            }
+            Err(e) => v.push(Check::fail(
+                "config parser",
+                format!("`hyprctl eval` failed ({e}) — live settings changes will not apply"),
+            )),
+        }
+    }
+    v
+}
+
+/// "Hyprland 0.56.1 built from branch …" → (0, 56).
+fn parse_hypr_version(s: &str) -> Option<(u32, u32)> {
+    let rest = s.split("Hyprland ").nth(1)?;
+    let ver = rest.split_whitespace().next()?.trim_start_matches('v');
+    let mut it = ver.split('.');
+    Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+}
 
 fn nvidia_checks() -> Vec<Check> {
     let mut v = Vec::new();
@@ -254,7 +319,7 @@ fn config_checks() -> Vec<Check> {
     };
 
     for (name, file) in [
-        ("hypr", "hyprland.conf"),
+        ("hypr", "hyprland.lua"),
         ("uwsm", "env"),
     ] {
         let path = cfg.join(name).join(file);
@@ -270,19 +335,31 @@ fn config_checks() -> Vec<Check> {
         }
     }
 
-    // The generated override files hyprland.conf `source`s. Hyprland treats a
-    // missing `source` target as a config error, so their absence costs you the
-    // whole session — worth a check of its own rather than only surfacing as a
-    // cryptic parse failure at login.
+    // The generated files hyprland.lua loads. These are loaded defensively (see
+    // conf.d/util.lua), so a missing one no longer costs you the session — but it
+    // does silently discard every persisted override, which is worth surfacing
+    // here rather than leaving you to wonder why a setting did not stick.
     for (rel, what) in [
-        ("tezca/local.conf", "display + Hyprland overrides"),
-        ("tezca/keybinds.conf", "keybind overrides"),
+        ("tezca/overrides.lua", "display + Hyprland overrides"),
+        ("tezca/keybinds.lua", "keybind overrides"),
     ] {
         if cfg.join(rel).exists() {
             v.push(Check::pass(rel, what));
         } else {
-            v.push(Check::fail(rel, "missing — hyprland.conf sources it; run `tezca link`"));
+            v.push(Check::warn(rel, "missing — your saved overrides won't apply; run `tezca link`"));
         }
+    }
+
+    // Which config parser Hyprland actually chose. The format is picked ONCE at
+    // startup: hyprland.lua wins if it exists, and `hyprctl reload` cannot switch
+    // between them. A leftover hyprland.conf being live means the Lua tree is not
+    // the thing running, and every `tezca hypr set` would fail against it.
+    if cfg.join("hypr").join("hyprland.conf").exists() {
+        v.push(Check::warn(
+            "hypr/hyprland.conf",
+            "the pre-Lua config is still present — it is ignored while hyprland.lua \
+             exists, and is kept only as a rollback",
+        ));
     }
 
     // These two are user-owned state, so they must NOT be symlinks into the repo.
@@ -547,7 +624,7 @@ fn theme_checks() -> Vec<Check> {
     }
 
     // The remaining files each component relies on.
-    for f in ["colors-alacritty.toml", "colors-hypr.conf", "colors-hyprlock.conf"] {
+    for f in ["colors-alacritty.toml", "colors-hypr.lua", "colors-hyprlock.conf"] {
         if !current.join(f).is_file() {
             v.push(Check::warn(f, "missing from current/ — re-run `tezca theme`"));
         }
@@ -577,7 +654,7 @@ fn workflow_checks() -> Vec<Check> {
     let mut v = Vec::new();
 
     // Gaming: gamemode + MangoHud are the `tezca game run` wrapper; gamescope is
-    // the escape hatch for problem titles (conf.d/gaming.conf).
+    // the escape hatch for problem titles (conf.d/gaming.lua).
     for (bin, note) in [
         ("gamemoderun", "gamemode — CPU governor / scheduler tweaks"),
         ("mangohud", "MangoHud — in-game FPS/latency overlay"),
@@ -638,3 +715,21 @@ fn dirs_have_desktop(file: &str) -> bool {
         .any(|r| Path::new(r).join("applications").join(file).is_file())
 }
 
+#[cfg(test)]
+mod hypr_version_tests {
+    use super::parse_hypr_version;
+
+    #[test]
+    fn reads_the_version_out_of_hyprctl_version() {
+        let out = "Hyprland 0.56.1 built from branch v0.56.1 at commit abc clean\nDate: …";
+        assert_eq!(parse_hypr_version(out), Some((0, 56)));
+        assert_eq!(parse_hypr_version("Hyprland v0.55.0 built"), Some((0, 55)));
+        assert_eq!(parse_hypr_version("nothing useful"), None);
+    }
+
+    #[test]
+    fn the_floor_is_the_release_that_introduced_the_lua_config() {
+        assert!(parse_hypr_version("Hyprland 0.54.3 x").unwrap() < (0, 55));
+        assert!(parse_hypr_version("Hyprland 0.56.1 x").unwrap() >= (0, 55));
+    }
+}

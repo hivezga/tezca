@@ -65,9 +65,17 @@ pub fn cursor_pos() -> Option<(i32, i32)> {
 }
 
 /// Focus (and bring to the active workspace) the window at `address`.
+///
+/// The Lua config manager parses a dispatch argument as Lua, so the legacy
+/// `dispatch focuswindow address:0x…` form is a syntax error rather than a
+/// command. `hl.dsp.focus` warns "window not found" if the address is stale,
+/// which is the right outcome for a dock button whose window just closed.
 pub fn focus(address: &str) {
     let _ = Command::new("hyprctl")
-        .args(["dispatch", "focuswindow", &format!("address:{address}")])
+        .args([
+            "dispatch",
+            &format!("hl.dsp.focus({{ window = \"address:{address}\" }})"),
+        ])
         .status();
 }
 

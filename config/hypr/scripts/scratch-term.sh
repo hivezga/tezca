@@ -1,9 +1,9 @@
 #!/bin/sh
 # Drop-down terminal (HyDE: SUPER+ALT+T). One Alacritty on the special `scratch`
-# workspace, toggled in/out. A windowrule (windowrules.conf) floats + centers
+# workspace, toggled in/out. A windowrule (windowrules.lua) floats + centers
 # the `tezca-scratch` class and assigns it to special:scratch.
 if hyprctl clients -j | grep -q 'tezca-scratch'; then
-    hyprctl dispatch togglespecialworkspace scratch
+    hyprctl dispatch 'hl.dsp.workspace.toggle_special("scratch")'
     exit 0
 fi
 
@@ -16,4 +16,4 @@ while [ "$i" -lt 20 ]; do
     i=$((i + 1))
     sleep 0.1
 done
-hyprctl dispatch togglespecialworkspace scratch
+hyprctl dispatch 'hl.dsp.workspace.toggle_special("scratch")'

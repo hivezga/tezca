@@ -3,8 +3,8 @@
 # "COMBO  description"; the selection is discarded, this is a hint viewer.
 #
 # The bind list comes from `tezca keybind list --machine`, not from re-parsing
-# keybinds.conf with awk. That matters for correctness now that rebinds live in an
-# override layer (~/.config/tezca/keybinds.conf): a pass over the shipped map alone
+# keybinds.lua with awk. That matters for correctness now that rebinds live in an
+# override layer (~/.config/tezca/keybinds.lua): a pass over the shipped map alone
 # would show the *shipped* combo for every key you have rebound. It also leaves
 # exactly one implementation of the bind parser, which DESIGN.md §12 already
 # claimed ("parsed live from the config").

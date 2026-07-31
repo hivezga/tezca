@@ -18,7 +18,10 @@ use std::process::{Command, Stdio};
 const FILES: &[&str] = &[
     "colors.css",             // GTK: tezca-bar, swaync, Walker
     "colors-alacritty.toml",  // Alacritty (the terminal)
-    "colors-hypr.conf",       // hypr/conf.d/decoration.conf (borders/shadows)
+    // Lua data table since the Hyprland config moved off hyprlang; loaded by
+    // hypr/conf.d/decoration.lua (borders/shadows).
+    "colors-hypr.lua",
+    // Still hyprlang: hyprlock keeps the .conf format, so this one does not move.
     "colors-hyprlock.conf",   // hypr/hyprlock.conf (+ wallpaper path)
 ];
 

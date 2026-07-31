@@ -11,12 +11,12 @@
 //!
 //! The static, always-on side of the profile (tearing/immediate present, no-blur
 //! window rules, auto-move to the games workspace) lives in
-//! conf.d/gaming.conf — this command layers the *runtime* tweaks on top.
+//! conf.d/gaming.lua — this command layers the *runtime* tweaks on top.
 //!
 //! Mode is persisted to `~/.config/tezca/game.state` (outside the theme-owned
 //! `current/` dir) so the bar's gamemode module and `tezca doctor` can read it.
 
-use crate::{atomic, repo, term, util};
+use crate::{atomic, hypr, repo, term, util};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -45,12 +45,20 @@ pub fn run(args: &[&str]) -> i32 {
     }
 }
 
-/// Runtime overrides applied by `on`. Restored wholesale by `off` via
-/// `hyprctl reload`, so this list only needs the "turn off" direction.
-const OVERRIDES: &[&str] = &[
-    "keyword decoration:blur:enabled false",
-    "keyword decoration:shadow:enabled false",
-    "keyword animations:enabled false",
+/// Runtime overrides applied by `on`, as `(option, value)` pairs. Restored
+/// wholesale by `off` via `hyprctl reload`, so this list only needs the
+/// "turn off" direction.
+///
+/// These used to be `hyprctl --batch "keyword … ; keyword …"`. Under the Lua
+/// config manager `keyword` is refused outright ("keyword can't work with
+/// non-legacy parsers. Use eval.") — and because that refusal arrives on stdout
+/// with exit 0, wrapped in `--batch` it looked like success while nothing
+/// changed. They go through [`hypr::set_option`] now, which evals
+/// `hl.config{…}` and classifies the exit-0 refusals as errors.
+const OVERRIDES: &[(&str, &str)] = &[
+    ("decoration:blur:enabled", "false"),
+    ("decoration:shadow:enabled", "false"),
+    ("animations:enabled", "false"),
 ];
 
 fn set_mode(on: bool) -> Result<(), String> {
@@ -169,34 +177,32 @@ fn tool_line(name: &str, present: bool) {
 
 // --- compositor state ------------------------------------------------------
 
-/// Apply the low-latency overrides in one batched hyprctl call. Skipped (Ok)
-/// when not inside a live Hyprland session — the state file still flips so the
-/// mode is correct on next reload.
+/// Apply the low-latency overrides. Skipped (Ok) when not inside a live
+/// Hyprland session — the state file still flips so the mode is correct on next
+/// reload.
+///
+/// One `eval` per option rather than one batched call: Hyprland guards `eval`
+/// with a 250 ms watchdog, and a per-option failure names the option that was
+/// refused instead of failing the whole profile anonymously.
 fn apply_overrides() -> Result<(), String> {
     if !in_session() {
         return Ok(());
     }
-    let batch = OVERRIDES.join(" ; ");
-    hyprctl(&["--batch", &batch])
+    for (option, value) in OVERRIDES {
+        hypr::set_option(option, value).map_err(|e| format!("{option}: {e}"))?;
+    }
+    Ok(())
 }
 
 fn restore() -> Result<(), String> {
     if !in_session() {
         return Ok(());
     }
-    hyprctl(&["reload"])
+    hypr::reload()
 }
 
 fn in_session() -> bool {
-    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
-}
-
-fn hyprctl(args: &[&str]) -> Result<(), String> {
-    match Command::new("hyprctl").args(args).output() {
-        Ok(o) if o.status.success() => Ok(()),
-        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-        Err(e) => Err(e.to_string()),
-    }
+    hypr::in_session()
 }
 
 fn report_hypr(r: Result<(), String>) {

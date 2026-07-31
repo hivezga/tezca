@@ -5,8 +5,8 @@
 //!   reset <name>       drop the monitor override and reload
 //!   brightness <name> [0-100]   read / set DDC/CI brightness (external monitors)
 //!
-//! Mode/scale/pos changes apply live via `hyprctl keyword monitor …` and persist
-//! in the managed block of local.conf (survive reload/relogin). A bad mode is
+//! Mode/scale/pos changes apply live via `hyprctl eval 'hl.monitor{…}'` and persist
+//! in ~/.config/tezca/overrides.lua (survive reload/relogin). A bad mode is
 //! always recoverable with `hyprctl reload` or `tezca display reset <name>`.
 //!
 //! Brightness uses `ddcutil` (DDC/CI over the monitor's i2c bus) since desktop
@@ -232,14 +232,20 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
     validate::display_scale(&scale)?;
     validate::display_transform(&transform)?;
 
-    // monitor = NAME, RES@RATE, POS, SCALE [, transform, N]
+    let m = managed::Monitor {
+        output: name.to_string(),
+        mode: mode.clone(),
+        position: pos.clone(),
+        scale: scale.clone(),
+        transform: transform.clone(),
+    };
+
+    hypr::set_monitor(&m).map_err(|e| format!("hyprctl eval monitor: {e}"))?;
+    managed::set_monitor(m)?;
     let mut spec = format!("{name},{mode},{pos},{scale}");
     if transform != "0" && !transform.is_empty() {
         spec.push_str(&format!(",transform,{transform}"));
     }
-
-    hypr::keyword("monitor", &spec).map_err(|e| format!("hyprctl keyword monitor: {e}"))?;
-    managed::set(&format!("monitor:{name}"), &format!("monitor = {spec}"))?;
     println!("  {} {name}  {}", term::green("✓"), term::dim(&spec));
     Ok(())
 }

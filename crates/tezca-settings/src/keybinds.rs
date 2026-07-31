@@ -1,5 +1,5 @@
 //! Keybind data for the Keybinds page — loaded from `tezca keybind list
-//! --machine`, so the CLI owns the single authoritative parse of keybinds.conf
+//! --machine`, so the CLI owns the single authoritative parse of keybinds.lua
 //! (line numbers included, needed for rebinding). Machine format:
 //!   `S\t<title>`                                   a section header
 //!   `B\t<line>\t<mods>\t<key>\t<desc>\t<action>`   one documented bind

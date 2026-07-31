@@ -1,0 +1,16 @@
+-- conf.d/local.lua — machine-local overrides, loaded LAST (wins over all).
+--
+-- This tracked stub exists so the loader always finds something on a fresh
+-- clone. Put anything you don't want in the shared config here: a monitor tweak,
+-- an extra keybind, a debug setting. Example:
+--
+--   hl.monitor({ output = "DP-3", mode = "1920x1080@60", position = "0x-1080", scale = 1 })
+--   hl.bind("SUPER + F12", hl.dsp.exec_cmd("alacritty --title debug"))
+--
+-- This file is CODE, not data — the full `hl` API is available. It is loaded
+-- through util.load, so a mistake in here is reported on stderr and skipped
+-- rather than taking the whole config down, but everything below the error in
+-- this file is skipped with it.
+--
+-- For values you want the GUI to manage, use `tezca hypr set` instead: those
+-- land in ~/.config/tezca/overrides.lua, which is applied after this file.

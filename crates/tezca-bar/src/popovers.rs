@@ -50,7 +50,12 @@ pub fn tezca_menu(anchor: &impl IsA<gtk4::Widget>) -> Popover {
         ("Settings", "uwsm app -- tezca-settings || tezca-settings"),
         ("Lock", "loginctl lock-session || hyprlock"),
         ("Sleep", "systemctl suspend"),
-        ("Log Out", "uwsm stop || hyprctl dispatch exit"),
+        // The fallback needs Lua dispatcher syntax: the Lua config manager
+        // rejects the bare `dispatch exit` form outright rather than accepting
+        // it for compatibility. `uwsm stop` is still tried first — upstream
+        // advises uwsm sessions against `exit`, which pulls Hyprland out from
+        // under its clients instead of shutting the session down in order.
+        ("Log Out", "uwsm stop || hyprctl dispatch 'hl.dsp.exit()'"),
     ];
     for (label, cmd) in items {
         let b = Button::with_label(label);

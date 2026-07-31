@@ -1,9 +1,9 @@
 //! `tezca hypr` — live Hyprland option tuning that persists.
 //!
 //! The tezca-settings "Desktop" page drives this: `set` applies each option via
-//! `hyprctl keyword` (instant, no reload) AND records it in the managed block of
-//! conf.d/local.conf so it survives reloads and relogin. `get` reads the current
-//! value; `reset` drops managed keyword overrides and reloads to restore the
+//! `hyprctl eval` (instant, no reload) AND records it in ~/.config/tezca/overrides.lua
+//! so it survives reloads and relogin. `get` reads the current
+//! value; `reset` drops the generated option overrides and reloads to restore the
 //! shipped config. Monitor lines (owned by `tezca display`) are left alone.
 
 use crate::{hypr, managed, term, validate};
@@ -61,8 +61,8 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
     }
     for pair in args.chunks(2) {
         let (kw, val) = (pair[0], pair[1]);
-        hypr::keyword(kw, val).map_err(|e| format!("hyprctl keyword {kw}: {e}"))?;
-        managed::set(kw, &format!("{kw} = {val}"))?;
+        hypr::set_option(kw, val).map_err(|e| format!("hyprctl eval {kw}: {e}"))?;
+        managed::set(kw, val)?;
     }
     Ok(())
 }

@@ -1,0 +1,27 @@
+-- conf.d/nvidia.lua — Hyprland-side NVIDIA correctness.
+--
+-- The heavy lifting (env vars) is in ~/.config/uwsm/env. This file only holds
+-- the few compositor-level settings that matter on nvidia-open + RTX 4070 Ti.
+
+hl.config({
+    -- Explicit sync is the modern, flicker-free path on nvidia-open. As of
+    -- Hyprland 0.55 it is always-on and driver-negotiated — the old
+    -- `render.explicit_sync` and `explicit_sync_kms` knobs were REMOVED, so we
+    -- no longer set them (setting them errors the config). This is what
+    -- replaces the old stutter hacks.
+    render = {
+        direct_scanout = true, -- let fullscreen games bypass compositing (latency)
+    },
+
+    cursor = {
+        -- HW cursors on this nvidia-open + Hyprland 0.55 combo SEGFAULT the
+        -- compositor the instant it lays out monitors: the crash is in
+        -- CPointerManager::renderHWCursorBuffer via onMonitorLayoutChange
+        -- (std::bad_variant_access — no HW-cursor buffer format is negotiated),
+        -- which produces a black screen / no signal at login. Disabling HW
+        -- cursors is the standard NVIDIA fix and costs nothing perceptible on a
+        -- 165 Hz panel.
+        no_hardware_cursors = true,
+        enable_hyprcursor   = true,
+    },
+})

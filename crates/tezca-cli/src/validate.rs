@@ -1,7 +1,7 @@
 //! Validation for values that end up verbatim inside a Hyprland config line.
 //!
 //! `tezca keybind` and `tezca display` both format caller-supplied strings
-//! straight into `keybinds.conf` / the managed block. Hyprland's config is
+//! straight into `keybinds.lua` / the generated override store. Hyprland's config is
 //! line-oriented and comma-separated, so an unchecked value has two ways to break
 //! out of its field:
 //!
@@ -15,7 +15,7 @@
 //! not the replacement. So every field is checked here before it is formatted in.
 //!
 //! The allowlists are derived from what Hyprland actually accepts and from the
-//! shipped `keybinds.conf` / `monitors.conf`, so nothing already in the repo is
+//! shipped `keybinds.lua` / `monitors.lua`, so nothing already in the repo is
 //! rejected: keysyms are `[A-Za-z0-9_:]` (`Control_R`, `mouse:272`,
 //! `XF86AudioMute`, `comma`, `SPACE`), modifiers are `$mod`/`SUPER`/`ALT`/`CTRL`/
 //! `SHIFT`, and monitor fields are the `WxH@R` / `0x0` / `auto` / `preferred`
@@ -78,9 +78,21 @@ pub fn hypr_option(v: &str) -> Result<(), String> {
     if k.is_empty() {
         return Err("option name cannot be empty".to_string());
     }
-    if let Some(bad) = k.chars().find(|c| !(c.is_ascii_alphanumeric() || *c == '_' || *c == ':')) {
+    // `.` is legal inside a category — Hyprland spells the border gradients
+    // `general:col.active_border`. Both separators end up descending a level
+    // when the option is turned into an `hl.config` table, so both are allowed
+    // here, but nothing else is: every segment is emitted as a bare Lua
+    // identifier into generated code.
+    if let Some(bad) =
+        k.chars().find(|c| !(c.is_ascii_alphanumeric() || *c == '_' || *c == ':' || *c == '.'))
+    {
         return Err(format!(
             "invalid character {bad:?} in option {k:?} — expected a path like decoration:rounding"
+        ));
+    }
+    if k.split([':', '.']).any(|seg| seg.is_empty() || seg.chars().next().is_some_and(|c| c.is_ascii_digit())) {
+        return Err(format!(
+            "malformed option path {k:?} — every segment must be a non-empty name, e.g. decoration:blur:size"
         ));
     }
     Ok(())

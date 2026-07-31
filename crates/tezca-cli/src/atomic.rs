@@ -4,7 +4,7 @@
 //! override layer, the bar/dock config — is `source`d or parsed by a *running*
 //! session. A plain `fs::write` truncates the file before it writes the new
 //! bytes, so an interruption in that window (OOM kill, power loss, a full disk)
-//! leaves a truncated config behind. For `keybinds.conf` that means logging in to
+//! leaves a truncated config behind. For `keybinds.lua` that means logging in to
 //! a session with no keybindings and no way to open a terminal.
 //!
 //! `rename(2)` is atomic within a filesystem, so a concurrent reader observes

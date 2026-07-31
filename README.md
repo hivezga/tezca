@@ -111,13 +111,38 @@ lives outside the checkout, so pulling never conflicts with your own tweaks:
 
 | Path | Written by |
 |---|---|
-| `~/.config/tezca/local.conf` | `tezca hypr set`, `tezca display set`, the Settings sliders |
-| `~/.config/tezca/keybinds.conf` | `tezca keybind` — an override layer; the shipped map is never edited |
+| `~/.config/tezca/overrides.lua` | `tezca hypr set`, `tezca display set`, the Settings sliders |
+| `~/.config/tezca/keybinds.lua` | `tezca keybind` — an override layer; the shipped map is never edited |
 | `~/.config/tezca-bar/` | `tezca bar set`, plus your custom module manifests |
 | `~/.config/tezca-dock/` | `tezca dock set` |
 
 All four are safe to delete: you get the shipped defaults back. `tezca link` seeds
 them and migrates an older install.
+
+### The Hyprland config is Lua
+
+Hyprland 0.55 deprecated the `.conf` format (hyprlang) in favour of Lua and will
+drop it within a release or two, so Tezca's config is `hypr/hyprland.lua` plus
+`conf.d/*.lua`. **Hyprland needs 0.55 or newer**; `tezca doctor` checks this and
+reports which parser is actually live.
+
+Two things changed that you may notice in your own scripts:
+
+* `hyprctl keyword …` is gone — it only ever worked on the legacy parser. Use
+  `hyprctl eval 'hl.config({ decoration = { rounding = 14 } })'`, or just
+  `tezca hypr set decoration:rounding 14`.
+* `hyprctl dispatch exec foo` is rejected; it is now
+  `hyprctl dispatch 'hl.dsp.exec_cmd("foo")'`.
+
+`hyprctl getoption` and `hyprctl reload` are unchanged.
+
+**Rolling back.** The pre-Lua `hyprland.conf` and `conf.d/*.conf` are still in the
+repo, unloaded. Hyprland picks the format once at startup — `hyprland.lua` wins if
+it exists, and `hyprctl reload` cannot switch — so rollback is:
+
+```sh
+mv ~/.config/hypr/hyprland.lua ~/.config/hypr/hyprland.lua.off   # then log out and back in
+```
 
 ## The `tezca` CLI
 
@@ -169,7 +194,7 @@ restarts. See [`templates/README.md`](templates/README.md) for the token contrac
 A **HyDE-style layout** (mirrors [HyDE's map](https://github.com/HyDE-Project/HyDE/blob/master/KEYBINDINGS.md)) so muscle memory transfers, with Tezca's own actions clustered on `SUPER + ALT`. `SUPER` is the modifier (macOS `⌘`). The always-current, self-documenting cheat-sheet is **`SUPER + /`** — or the **Keybinds** tab in `tezca settings`.
 
 Rebinding from Settings (or `tezca keybind rebind`) writes an override layer to
-`~/.config/tezca/keybinds.conf`; the shipped map is never edited, so upstream changes
+`~/.config/tezca/keybinds.lua`; the shipped map is never edited, so upstream changes
 keep flowing and `tezca keybind reset` puts everything back.
 
 **Apps & launchers**

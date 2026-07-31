@@ -832,7 +832,7 @@ pub fn desktop() -> Widget {
         });
     }
     page.append(&reset);
-    page.append(&hint("Changes apply instantly and persist across reload/relogin (conf.d/local.conf). Reset clears them."));
+    page.append(&hint("Changes apply instantly and persist across reload/relogin (~/.config/tezca/overrides.lua). Reset clears them."));
 
     scrolled(&page)
 }
@@ -957,7 +957,7 @@ fn populate_keybinds(list: &Box, window: &Window, filter: &str) {
     }
     let sections = keybinds::load();
     if sections.is_empty() {
-        let l = hint("Could not read keybinds.conf.");
+        let l = hint("Could not read keybinds.lua.");
         list.append(&l);
         return;
     }

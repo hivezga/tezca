@@ -1,7 +1,7 @@
 //! `tezca bar` — control the bespoke top menubar (crates/tezca-bar).
 //!
 //! The bar is a separate binary (`tezca-bar`) launched at login by
-//! conf.d/autostart.conf. This subcommand is a thin lifecycle
+//! conf.d/autostart.lua. This subcommand is a thin lifecycle
 //! wrapper — parallel to `tezca dock` — so you can start/stop/reload it by hand.
 //! Live control uses signals: SIGUSR1 toggles visibility, SIGUSR2 reloads the
 //! palette (sent by `tezca theme`).

@@ -119,19 +119,24 @@ pub fn run(opts: Opts) -> Result<(), String> {
         }
     }
 
-    // Generated files that hyprland.conf `source`s. They must exist or Hyprland
-    // errors on startup, and a pre-split install has state to move out of the repo
-    // first — so migrate before seeding, or the seed would mask the migration.
+    // Generated files that hyprland.lua loads. Unlike hyprlang, which merely
+    // logged a missing `source`, a Lua load error is not survivable — so these
+    // must exist. An older install also has state to move out of the repo (and
+    // off hyprlang) first, so migrate before seeding or the seed masks it.
     if !opts.dry_run {
         managed::ensure_migrated()?;
         if managed::seed()? {
-            println!("  {} {}", term::green("+"), term::dim("tezca/local.conf (machine overrides)"));
+            println!(
+                "  {} {}",
+                term::green("+"),
+                term::dim("tezca/overrides.lua (machine overrides)")
+            );
         }
         if cmd_keybind::seed()? {
             println!(
                 "  {} {}",
                 term::green("+"),
-                term::dim("tezca/keybinds.conf (keybind overrides)")
+                term::dim("tezca/keybinds.lua (keybind overrides)")
             );
         }
     }

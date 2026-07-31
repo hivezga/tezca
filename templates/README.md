@@ -12,7 +12,7 @@ component picks it up.
   ~/.config/tezca/current/
     ├── colors.css            → @imported by Waybar, swaync, Walker (GTK CSS)
     ├── colors-alacritty.toml → imported by alacritty.toml (the default terminal)
-    ├── colors-hypr.conf      → sourced by hypr/conf.d/decoration.conf (borders)
+    ├── colors-hypr.lua       → loaded by hypr/conf.d/decoration.lua (borders)
     ├── colors-hyprlock.conf  → sourced by hypr/hyprlock.conf (+ wallpaper path)
     ├── wallpaper             → one line: the active wallpaper's absolute path
     └── theme.state           → the active theme name / source

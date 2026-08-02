@@ -34,6 +34,14 @@ window.tezca-bar {
     border-radius: 15px;
     color: @tz_text;
     padding: 0 6px;
+    /* The design has `box-shadow: 0 8px 32px` here and this deliberately does
+       not. A shadow draws *outside* the widget, and a layer-shell surface is
+       sized to its content, so it is clipped away — measured, not assumed.
+       Growing the surface to make room would either reserve another 24px of
+       screen (if the exclusive zone follows) or lay a transparent, click-eating
+       strip across the full width (if it does not), and neither is worth a
+       gradient. The compositor already blurs behind the bar, which is the depth
+       cue that actually survives on a real desktop. */
 }
 
 /* Edge shape — full-width, square, a single bottom hairline. */
@@ -88,6 +96,9 @@ button.mirror:hover {
 .sep {
     background: alpha(@tz_muted, 0.16);
     min-width: 1px;
+    /* A hairline the height of a glyph, centred — not one that stretches the
+       full inner height of the bar. */
+    min-height: 16px;
     margin: 0 5px;
 }
 
@@ -99,7 +110,7 @@ button.ws {
     color: @tz_muted;
     background: transparent;
     border-radius: 9px;
-    padding: 0 10px;
+    padding: 0 9px;
     margin: 0 2px;
     min-width: 26px;
     min-height: 26px;
@@ -154,12 +165,15 @@ button.ws.urgent {
 /* ── Right cluster ──────────────────────────────────────────────────────── */
 .metric-label {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
-    font-size: 10px;
+    font-size: 9.5px;
+    letter-spacing: 0.6px;
     color: @tz_muted;
 }
 .metric-val,
 .control-val,
-.ai-val {
+.ai-val,
+.cluster-val {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
     /* Tabular figures: Inter's proportional digits are not all the same width,
        so without this a readout twitches horizontally even when the number of
        digits does not change (11% is narrower than 78%). The reserved width in
@@ -178,7 +192,7 @@ button.ws.urgent {
 .metric-sub,
 .control-sub {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
-    font-size: 10px;
+    font-size: 9.5px;
     color: @tz_faint;
     font-feature-settings: "tnum" 1;
 }
@@ -190,20 +204,32 @@ button.ws.urgent {
     color: @tz_subtext;
 }
 .metric,
-.control {
-    padding: 0 8px;
-    background: transparent;
-    min-height: 0;
-}
-.metric {
+.control,
+.ai,
+.weather,
+.llm,
+.cluster-chip {
     padding: 0 9px;
+    background: transparent;
     border-radius: 9px;
-}
-.metric.clickable:hover {
-    background: alpha(@tz_accent, 0.08);
+    /* The bar is 40px; a module is that less 6px of air above and below, so
+       the hover pill is a consistent height across every module rather than
+       shrink-wrapping whatever text each one happens to hold. */
+    min-height: 28px;
 }
 .control {
     color: @tz_subtext;
+}
+/* Hover lights the whole module, controls included. Previously only the
+   metrics had a background here, so half the cluster answered a hover with a
+   colour change and the other half with a pill. */
+.metric.clickable:hover,
+.control:hover,
+.ai.clickable:hover,
+.weather.clickable:hover,
+.llm.clickable:hover,
+.cluster-chip:hover {
+    background: alpha(@tz_accent, 0.09);
 }
 .control:hover {
     color: @tz_accent;
@@ -232,15 +258,9 @@ button.ws.urgent {
    can open*, not as another module — hence the chevron and the hover
    background, which no plain module has. */
 .cluster-chip {
-    padding: 0 9px;
-    border-radius: 9px;
     color: @tz_subtext;
 }
-.cluster-chip:hover {
-    background: alpha(@tz_accent, 0.08);
-}
 .cluster-val {
-    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
     font-size: 12px;
     color: @tz_subtext;
     font-feature-settings: "tnum" 1;
@@ -299,12 +319,7 @@ button.cluster-collapse:hover {
    critical — the same three-step language the battery and bell use, so a red
    glyph means the same thing everywhere on the bar. */
 .ai {
-    padding: 0 9px;
-    border-radius: 9px;
     color: @tz_subtext;
-}
-.ai.clickable:hover {
-    background: alpha(@tz_accent, 0.08);
 }
 .ai-val {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
@@ -324,24 +339,14 @@ button.cluster-collapse:hover {
    Neutral: unlike the AI module there is no threshold at which weather becomes
    urgent, and colouring a temperature would imply one. */
 .weather {
-    padding: 0 9px;
-    border-radius: 9px;
     color: @tz_subtext;
-}
-.weather.clickable:hover {
-    background: alpha(@tz_accent, 0.08);
 }
 
 /* ── Local AI (Ollama) ─────────────────────────────────────────────────────
    Gold only for a split offload — the one state that explains why generation
    went slow. A fully-resident model is unremarkable and is styled that way. */
 .llm {
-    padding: 0 9px;
-    border-radius: 9px;
     color: @tz_subtext;
-}
-.llm.clickable:hover {
-    background: alpha(@tz_accent, 0.08);
 }
 .llm.warn,
 .llm.warn .control-val,

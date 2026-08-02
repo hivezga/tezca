@@ -1140,7 +1140,7 @@ impl Surface {
         vol_ctl.connect_clicked(move |_| p.popup());
 
         // Brightness (display-only; hidden on desktops with no backlight).
-        let bri_ctl = GtkBox::new(Orientation::Horizontal, 5);
+        let bri_ctl = GtkBox::new(Orientation::Horizontal, 6);
         bri_ctl.add_css_class("control");
         let bri_glyph = Label::new(Some(G_BRIGHT));
         bri_glyph.add_css_class("glyph");
@@ -1151,7 +1151,7 @@ impl Surface {
         bri_ctl.set_visible(false);
 
         // Battery (hidden on desktops with no battery).
-        let bat_ctl = GtkBox::new(Orientation::Horizontal, 5);
+        let bat_ctl = GtkBox::new(Orientation::Horizontal, 6);
         bat_ctl.add_css_class("control");
         let bat_glyph = Label::new(Some(G_BATT));
         bat_glyph.add_css_class("glyph");
@@ -1960,7 +1960,7 @@ fn collapse_button() -> Button {
 fn sep() -> GtkBox {
     let s = GtkBox::new(Orientation::Horizontal, 0);
     s.add_css_class("sep");
-    s.set_size_request(1, 18);
+    s.set_size_request(1, 16);
     s.set_valign(Align::Center);
     s
 }
@@ -2312,7 +2312,7 @@ fn attach_detail(widget: &impl IsA<gtk4::Widget>, pop: gtk4::Popover) {
 fn control_button() -> (Button, Label, Label) {
     let b = Button::new();
     b.add_css_class("control");
-    let inner = GtkBox::new(Orientation::Horizontal, 5);
+    let inner = GtkBox::new(Orientation::Horizontal, 6);
     let glyph = Label::new(None);
     glyph.add_css_class("glyph");
     let val = Label::new(None);

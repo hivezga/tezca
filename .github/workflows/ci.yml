@@ -9,10 +9,10 @@
 #     validation all live here, and those are the paths that can damage a session.
 #   * `gtk` — the three gtk4-rs binaries (bar, dock, settings).
 #
-# Deliberately NOT gated on `cargo fmt --check`: this codebase is hand-formatted
-# wider than rustfmt's default in a lot of places, so turning it on would either
-# reformat ~all of it in one unrelated commit or fail every build. Worth doing as
-# its own change (add a `rustfmt.toml` that matches the house style first).
+# Formatting is gated too, in the `cli` job — it needs no system dependencies, so
+# there is no reason to make anyone wait on the GTK job to hear about it. The
+# style itself lives in `rustfmt.toml` at the repo root, which was fitted to the
+# code rather than the other way round; read its header before changing it.
 
 name: ci
 
@@ -38,8 +38,13 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # First, and for the whole workspace: it is the cheapest check here (no
+      # build at all), and a formatting failure should not be something you find
+      # out about after waiting for clippy.
+      - name: fmt
+        run: cargo fmt --all --check
       - name: clippy
         run: cargo clippy -p tezca-cli --all-targets -- -D warnings
       - name: test
@@ -54,6 +59,11 @@ jobs:
     # not packaged for Ubuntu until 25.10 (24.04 has no `libgtk4-layer-shell-dev`
     # at all). `ubuntu-26.04` does package it, but that image is still preview, so
     # gating CI on it trades one flavour of surprise for another.
+    #
+    # Re-checked 2026-08-01: actions/runner-images still marks both `ubuntu-26.04`
+    # and `ubuntu-26.04-arm` as preview, and `ubuntu-latest` still resolves to
+    # 24.04. So this stays as it is; see the source build below for what changes
+    # when that flips.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5

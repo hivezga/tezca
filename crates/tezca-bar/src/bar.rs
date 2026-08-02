@@ -20,9 +20,11 @@ use crate::{
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Button, CenterBox, Image, Label, Orientation, Overlay, Window};
+use gtk4::{
+    Align, Box as GtkBox, Button, CenterBox, Image, Label, Orientation, Overlay, Popover, Window,
+};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -173,6 +175,7 @@ impl Bar {
         bar.tick_controls();
         bar.tick_bluetooth();
         bar.tick_session();
+        bar.wire_layout_freeze();
         bar.start_timers();
         bar
     }
@@ -306,7 +309,7 @@ impl Bar {
         let pct = (frac * 100.0).round() as u32;
         for s in &self.surfaces {
             s.cpu_spark.push(frac);
-            s.cpu_val.set_text(&format!("{pct}%"));
+            s.cpu_val.set_text(&pct_text(pct));
         }
     }
 
@@ -315,7 +318,7 @@ impl Bar {
         let pct = (m.used_frac * 100.0).round() as u32;
         for s in &self.surfaces {
             s.mem_spark.push(m.used_frac);
-            s.mem_val.set_text(&format!("{pct}%"));
+            s.mem_val.set_text(&pct_text(pct));
         }
     }
 
@@ -325,13 +328,13 @@ impl Bar {
                 let pct = (frac * 100.0).round() as u32;
                 for s in &self.surfaces {
                     s.gpu_spark.push(frac);
-                    s.gpu_val.set_text(&format!("{pct}%"));
-                    s.gpu_metric.set_visible(true);
+                    s.gpu_val.set_text(&pct_text(pct));
+                    s.show(&s.gpu_metric, true);
                 }
             }
             None => {
                 for s in &self.surfaces {
-                    s.gpu_metric.set_visible(false);
+                    s.show(&s.gpu_metric, false);
                 }
             }
         }
@@ -484,10 +487,51 @@ impl Bar {
         self.rebuild_tray();
     }
 
+    /// Hold the bar's layout still for as long as a popover is open.
+    ///
+    /// GTK keeps a popover glued to the widget it is anchored to, so anything
+    /// that re-flows the cluster while one is open slides that anchor sideways
+    /// and takes the popover with it — a privacy dot appearing, a tray icon
+    /// arriving, the GPU group vanishing. Freezing on `show` and thawing on
+    /// `closed` leaves a popover the user is reading exactly where they clicked.
+    ///
+    /// Both handlers hold weak refs: the popovers are owned by the surface, so
+    /// strong ones would be a cycle that never drops.
+    fn wire_layout_freeze(self: &Rc<Self>) {
+        for s in &self.surfaces {
+            for pop in &s.popovers {
+                let sw = Rc::downgrade(s);
+                pop.connect_show(move |_| {
+                    if let Some(s) = sw.upgrade() {
+                        s.freeze();
+                    }
+                });
+                let sw = Rc::downgrade(s);
+                let bw = Rc::downgrade(self);
+                pop.connect_closed(move |_| {
+                    let (Some(s), Some(b)) = (sw.upgrade(), bw.upgrade()) else { return };
+                    // `thaw` reports whether a tray rebuild was skipped; the item
+                    // state is still in `tray_items`, so replaying it is enough.
+                    if s.thaw() {
+                        b.rebuild_tray();
+                    }
+                });
+            }
+        }
+    }
+
     /// Rebuild each surface's tray cluster from the current item + menu state.
     fn rebuild_tray(self: &Rc<Self>) {
         let items = self.tray_items.borrow();
         for s in &self.surfaces {
+            // A rebuild destroys and recreates every icon, so a tray menu open
+            // over one would lose the very widget it is anchored to — the icon
+            // an app refreshes precisely when you are about to click it. Defer;
+            // nothing is lost, because the state lives in `tray_items`.
+            if s.layout_frozen() {
+                s.tray_dirty.set(true);
+                continue;
+            }
             while let Some(c) = s.tray_box.first_child() {
                 s.tray_box.remove(&c);
             }
@@ -650,6 +694,17 @@ struct Surface {
 
     /// Community/user exec modules, keyed by manifest name.
     custom: HashMap<String, CustomCell>,
+
+    /// Every popover anchored to a module of this bar, kept so the layout freeze
+    /// can be wired to all of them once the surface is built.
+    popovers: Vec<Popover>,
+    /// How many of `popovers` are currently open. See [`Surface::show`].
+    open_popovers: Cell<u32>,
+    /// Visibility changes held back while a popover is open — at most one entry
+    /// per widget, the latest.
+    pending_show: RefCell<Vec<(gtk4::Widget, bool)>>,
+    /// A tray rebuild that was skipped because a popover was open.
+    tray_dirty: Cell<bool>,
 }
 
 impl Surface {
@@ -694,7 +749,8 @@ impl Surface {
         mirror_btn.add_css_class("mirror");
         mirror_btn.set_child(Some(&mirror));
         let tezca_pop = popovers::tezca_menu(&mirror_btn);
-        mirror_btn.connect_clicked(move |_| tezca_pop.popup());
+        let p = tezca_pop.clone();
+        mirror_btn.connect_clicked(move |_| p.popup());
 
         let app_label = Label::new(Some("Tezca"));
         app_label.add_css_class("appname");
@@ -851,7 +907,8 @@ impl Surface {
         ai_box.append(&ai_glyph);
         ai_box.append(&ai_val);
         ai_box.set_visible(false);
-        attach_detail(&ai_box, popovers::ai_detail(&ai_box, ai_state));
+        let ai_pop = popovers::ai_detail(&ai_box, ai_state);
+        attach_detail(&ai_box, ai_pop.clone());
 
         // System tray (StatusNotifierItem icons) — filled live by the tray
         // thread; hidden until the first item registers.
@@ -862,32 +919,36 @@ impl Surface {
 
         // Metrics: CPU + MEM sparklines.
         let cpu_spark = draw::sparkline(pal, draw::SparkColor::Accent);
-        let cpu_val = Label::new(Some("0%"));
+        let cpu_val = Label::new(Some(&pct_text(0)));
         cpu_val.add_css_class("metric-val");
         let cpu_metric = metric(G_CPU_LABEL, &cpu_spark.area, &cpu_val);
 
         let mem_spark = draw::sparkline(pal, draw::SparkColor::Gold);
-        let mem_val = Label::new(Some("0%"));
+        let mem_val = Label::new(Some(&pct_text(0)));
         mem_val.add_css_class("metric-val");
         let mem_metric = metric(G_MEM_LABEL, &mem_spark.area, &mem_val);
 
         // GPU — hidden until the first successful read (absent on GPU-less rigs).
         let gpu_spark = draw::sparkline(pal, draw::SparkColor::AccentDim);
-        let gpu_val = Label::new(Some("0%"));
+        let gpu_val = Label::new(Some(&pct_text(0)));
         gpu_val.add_css_class("metric-val");
         let gpu_metric = metric(G_GPU_LABEL, &gpu_spark.area, &gpu_val);
         gpu_metric.set_visible(false);
 
         // Each metric group expands into a glass detail popover on click.
-        attach_detail(&cpu_metric, popovers::cpu_detail(&cpu_metric));
-        attach_detail(&mem_metric, popovers::mem_detail(&mem_metric));
-        attach_detail(&gpu_metric, popovers::gpu_detail(&gpu_metric));
+        let cpu_pop = popovers::cpu_detail(&cpu_metric);
+        let mem_pop = popovers::mem_detail(&mem_metric);
+        let gpu_pop = popovers::gpu_detail(&gpu_metric);
+        attach_detail(&cpu_metric, cpu_pop.clone());
+        attach_detail(&mem_metric, mem_pop.clone());
+        attach_detail(&gpu_metric, gpu_pop.clone());
 
         // Controls: network (button → popover).
         let (net_ctl, net_glyph, net_val) = control_button();
         net_glyph.set_text(G_WIFI);
         let net_pop = popovers::network(&net_ctl, throughput.clone());
-        net_ctl.connect_clicked(move |_| net_pop.popup());
+        let p = net_pop.clone();
+        net_ctl.connect_clicked(move |_| p.popup());
 
         // Bluetooth (button → device popover). Hidden until the first poll says
         // there is an adapter, so a machine without one shows nothing at all.
@@ -895,13 +956,15 @@ impl Surface {
         bt_glyph.set_text(G_BT);
         bt_ctl.set_visible(false);
         let bt_pop = popovers::bluetooth(&bt_ctl);
-        bt_ctl.connect_clicked(move |_| bt_pop.popup());
+        let p = bt_pop.clone();
+        bt_ctl.connect_clicked(move |_| p.popup());
 
         // Volume (button → mixer popover).
         let (vol_ctl, vol_glyph, vol_val) = control_button();
         vol_glyph.set_text(G_VOL[2]);
         let mix_pop = popovers::mixer(&vol_ctl);
-        vol_ctl.connect_clicked(move |_| mix_pop.popup());
+        let p = mix_pop.clone();
+        vol_ctl.connect_clicked(move |_| p.popup());
 
         // Brightness (display-only; hidden on desktops with no backlight).
         let bri_ctl = GtkBox::new(Orientation::Horizontal, 5);
@@ -951,7 +1014,8 @@ impl Surface {
         let clock_label = Label::new(None);
         clock_btn.set_child(Some(&clock_label));
         let cal_pop = popovers::calendar(&clock_btn);
-        clock_btn.connect_clicked(move |_| cal_pop.popup());
+        let p = cal_pop.clone();
+        clock_btn.connect_clicked(move |_| p.popup());
 
         // Power → wlogout.
         let power_btn = Button::new();
@@ -1100,6 +1164,14 @@ impl Surface {
             osd,
             mirror,
             custom: custom_cells,
+            // Every popover on this bar, so `wire_layout_freeze` can hold the
+            // layout still for whichever one the user opens.
+            popovers: vec![
+                tezca_pop, ai_pop, cpu_pop, mem_pop, gpu_pop, net_pop, bt_pop, mix_pop, cal_pop,
+            ],
+            open_popovers: Cell::new(0),
+            pending_show: RefCell::new(Vec::new()),
+            tray_dirty: Cell::new(false),
         })
     }
 
@@ -1177,7 +1249,7 @@ impl Surface {
     fn set_audio(&self, a: &sysinfo::Audio) {
         if a.muted {
             self.vol_glyph.set_text(G_MUTED);
-            self.vol_val.set_text("");
+            set_pct(&self.vol_val, None);
             self.vol_ctl.add_css_class("muted");
         } else {
             let idx = match a.volume {
@@ -1186,7 +1258,7 @@ impl Surface {
                 _ => 2,
             };
             self.vol_glyph.set_text(G_VOL[idx]);
-            self.vol_val.set_text(&format!("{}%", a.volume));
+            set_pct(&self.vol_val, Some(a.volume));
             self.vol_ctl.remove_css_class("muted");
         }
     }
@@ -1196,15 +1268,15 @@ impl Surface {
         match n {
             Net::Wifi { signal, .. } => {
                 self.net_glyph.set_text(G_WIFI);
-                self.net_val.set_text(&format!("{signal}%"));
+                set_pct(&self.net_val, Some(*signal));
             }
             Net::Ethernet { .. } => {
                 self.net_glyph.set_text(G_ETH);
-                self.net_val.set_text("");
+                set_pct(&self.net_val, None);
             }
             Net::Disconnected => {
                 self.net_glyph.set_text(G_DISC);
-                self.net_val.set_text("");
+                set_pct(&self.net_val, None);
                 self.net_ctl.add_css_class("disconnected");
             }
         }
@@ -1214,20 +1286,20 @@ impl Surface {
         match b {
             Some(b) => {
                 self.bat_glyph.set_text(if b.charging { G_BATT_CHG } else { G_BATT });
-                self.bat_val.set_text(&format!("{}%", b.percent));
-                self.bat_ctl.set_visible(true);
+                self.bat_val.set_text(&pct_text(b.percent));
+                self.show(&self.bat_ctl, true);
             }
-            None => self.bat_ctl.set_visible(false),
+            None => self.show(&self.bat_ctl, false),
         }
     }
 
     fn set_brightness(&self, b: Option<u32>) {
         match b {
             Some(p) => {
-                self.bri_val.set_text(&format!("{p}%"));
-                self.bri_ctl.set_visible(true);
+                self.bri_val.set_text(&pct_text(p));
+                self.show(&self.bri_ctl, true);
             }
-            None => self.bri_ctl.set_visible(false),
+            None => self.show(&self.bri_ctl, false),
         }
     }
 
@@ -1248,15 +1320,15 @@ impl Surface {
     /// percentage, so the module shows the glyph alone rather than inventing a
     /// number — the popover still carries the detail.
     fn set_ai(&self, pct: Option<f64>, empty: bool, warn: f64, crit: f64) {
-        self.ai_box.set_visible(!empty);
+        self.show(&self.ai_box, !empty);
         if empty {
             return;
         }
         match pct {
-            Some(p) => self.ai_val.set_text(&format!("{p:.0}%")),
-            None => self.ai_val.set_text(""),
+            Some(p) => set_pct(&self.ai_val, Some(p.round().max(0.0) as u32)),
+            None => set_pct(&self.ai_val, None),
         }
-        self.ai_val.set_visible(pct.is_some());
+        self.show(&self.ai_val, pct.is_some());
         let p = pct.unwrap_or(0.0);
         self.ai_box.remove_css_class("warn");
         self.ai_box.remove_css_class("crit");
@@ -1275,24 +1347,69 @@ impl Surface {
 
     fn set_gamemode(&self, on: bool) {
         if on {
-            self.gamemode_box.set_visible(true);
+            self.show(&self.gamemode_box, true);
             self.gamemode_box.add_css_class("active");
         } else {
-            self.gamemode_box.set_visible(false);
+            self.show(&self.gamemode_box, false);
             self.gamemode_box.remove_css_class("active");
         }
     }
 
     /// Show/hide the camera privacy indicator and keep its tooltip current.
     fn set_camera(&self, c: &camera::CameraUse) {
-        self.camera_box.set_visible(c.active);
+        self.show(&self.camera_box, c.active);
         self.camera_box.set_tooltip_text(Some(&c.tooltip()));
     }
 
     /// Show/hide the microphone privacy indicator and keep its tooltip current.
     fn set_mic(&self, m: &mic::MicUse) {
-        self.mic_box.set_visible(m.active);
+        self.show(&self.mic_box, m.active);
         self.mic_box.set_tooltip_text(Some(&m.tooltip()));
+    }
+
+    /// True while at least one popover anchored to this bar is open.
+    fn layout_frozen(&self) -> bool {
+        self.open_popovers.get() > 0
+    }
+
+    /// Show or hide a module — unless doing so would move an open popover.
+    ///
+    /// A module appearing or disappearing re-flows the whole cluster, and GTK
+    /// keeps a popover glued to the widget it is anchored to, so the popover
+    /// gets dragged sideways with it. Held-back changes are applied by
+    /// [`Surface::thaw`] when the last popover closes; keeping only the latest
+    /// value per widget means a module that flickered while you were reading
+    /// settles on whatever it ended up as, not on a queue of stale toggles.
+    fn show(&self, w: &impl IsA<gtk4::Widget>, visible: bool) {
+        let w = w.as_ref();
+        if w.is_visible() == visible {
+            return; // already right — nothing would move
+        }
+        if !self.layout_frozen() {
+            w.set_visible(visible);
+            return;
+        }
+        let mut pending = self.pending_show.borrow_mut();
+        pending.retain(|(p, _)| p != w);
+        pending.push((w.clone(), visible));
+    }
+
+    fn freeze(&self) {
+        self.open_popovers.set(self.open_popovers.get() + 1);
+    }
+
+    /// Drop one freeze. When it was the last, apply everything held back and
+    /// report whether a tray rebuild was among the things skipped.
+    fn thaw(&self) -> bool {
+        let n = self.open_popovers.get().saturating_sub(1);
+        self.open_popovers.set(n);
+        if n > 0 {
+            return false;
+        }
+        for (w, v) in self.pending_show.borrow_mut().drain(..) {
+            w.set_visible(v);
+        }
+        self.tray_dirty.replace(false)
     }
 
     /// Add or remove a CSS class from a widget in one call.
@@ -1306,14 +1423,14 @@ impl Surface {
 
     /// Keep-awake: shown only while the inhibitor is held.
     fn set_caffeine(&self, on: bool) {
-        self.caffeine_box.set_visible(on);
+        self.show(&self.caffeine_box, on);
         self.caffeine_box.set_tooltip_text(Some("Keeping the session awake — click to release"));
     }
 
     /// Recording: the third privacy dot. Says so when it is not ours, because
     /// clicking cannot stop a recorder this bar did not start.
     fn set_recording(&self, r: &session::RecordState) {
-        self.rec_box.set_visible(r.active);
+        self.show(&self.rec_box, r.active);
         self.rec_box.set_tooltip_text(Some(if r.foreign {
             "Screen recording in progress (started outside Tezca)"
         } else {
@@ -1323,14 +1440,14 @@ impl Surface {
 
     /// Night light: shown only while the filter is actually on.
     fn set_night(&self, n: &session::NightState) {
-        self.night_box.set_visible(n.active);
+        self.show(&self.night_box, n.active);
         self.night_box
             .set_tooltip_text(Some(&format!("Night light on at {} K — click to turn off", n.temp)));
     }
 
     /// Bluetooth: hidden with no adapter, dim when off, accent when connected.
     fn set_bluetooth(&self, b: &bluetooth::BtState) {
-        self.bt_ctl.set_visible(b.present);
+        self.show(&self.bt_ctl, b.present);
         if !b.present {
             return;
         }
@@ -1341,8 +1458,8 @@ impl Surface {
             (true, true) => G_BT_CONN,
         });
         // The battery of a connected headset is the one number worth the space.
-        self.bt_val.set_text(&b.badge().unwrap_or_default());
-        self.bt_val.set_visible(b.badge().is_some());
+        set_pct(&self.bt_val, b.badge_pct());
+        self.show(&self.bt_val, b.badge_pct().is_some());
         Self::toggle_class(&self.bt_ctl, "active", connected);
         Self::toggle_class(&self.bt_ctl, "off", !b.powered);
         self.bt_ctl.set_has_tooltip(true);
@@ -1548,6 +1665,48 @@ fn plan_region(slots: &[Slot], compact: bool) -> Vec<Slot> {
     out
 }
 
+/// Digits a percent readout is padded to — enough for the widest, `100`.
+const PCT_DIGITS: usize = 3;
+
+/// Render a percent so that every value is exactly the same width.
+///
+/// These readouts are the only labels on the bar whose *width* changes on a
+/// tick: `9%` grows to `100%` and shrinks back. The right cluster is
+/// right-aligned, so whenever one of them changes width every module to its left
+/// slides sideways — constantly, since CPU, GPU and Wi-Fi signal all cross the
+/// 10% and 100% boundaries on their own. That is what dragged an open popover
+/// off the module it was anchored to.
+///
+/// The padding is U+2007 FIGURE SPACE, which is *defined* to be exactly as wide
+/// as a digit — so `␣10%` and `100%` occupy identical space in a proportional
+/// font, with no font change and no guessed pixel width. `GtkLabel::width_chars`
+/// is the obvious alternative and does not work here: it reserves N *average*
+/// character widths, and in Inter a digit is wider than the average character,
+/// so `100%` still overflowed a four-character reservation and shifted the bar
+/// by 4px. Measured, not assumed.
+///
+/// Paired with `font-feature-settings: "tnum"` in bar.css, which makes the
+/// digits themselves equal-width; this handles the digit *count*, that handles
+/// the digits.
+fn pct_text(p: u32) -> String {
+    let n = p.to_string();
+    let pad = PCT_DIGITS.saturating_sub(n.chars().count());
+    format!("{}{n}%", "\u{2007}".repeat(pad))
+}
+
+/// Set a percent readout, or clear it entirely.
+///
+/// Some are genuinely absent at times — no signal strength on Ethernet, no level
+/// when the sink is muted — and holding a blank field open next to the glyph
+/// would read as a rendering fault. Those are mode changes rather than per-tick
+/// churn, so they cost one re-flow each, not one every two seconds.
+fn set_pct(l: &Label, v: Option<u32>) {
+    match v {
+        Some(p) => l.set_text(&pct_text(p)),
+        None => l.set_text(""),
+    }
+}
+
 /// `LABEL  <spark>  val%` metric group.
 fn metric(label: &str, spark: &gtk4::DrawingArea, val: &Label) -> GtkBox {
     let b = GtkBox::new(Orientation::Horizontal, 7);
@@ -1660,6 +1819,28 @@ fn pretty(class: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    #[test]
+    fn every_percent_readout_renders_to_the_same_width() {
+        // The bug this exists for: the right cluster is right-aligned, so a
+        // readout gaining a digit shoves every module left of it sideways — and
+        // an open popover is anchored to one of those modules.
+        let widths: Vec<usize> =
+            [0, 5, 9, 10, 42, 99, 100].iter().map(|p| pct_text(*p).chars().count()).collect();
+        assert!(widths.iter().all(|w| *w == widths[0]), "{widths:?}");
+
+        // Padded with U+2007 FIGURE SPACE specifically — it is defined to be one
+        // digit wide, which an ordinary space is not, so this is what makes the
+        // widths equal on screen and not merely equal in character count.
+        assert_eq!(pct_text(7), "\u{2007}\u{2007}7%");
+        assert_eq!(pct_text(42), "\u{2007}42%");
+        assert_eq!(pct_text(100), "100%");
+        assert!(!pct_text(7).contains(' '), "an ASCII space is not digit-width");
+
+        // Above the reserved field it simply grows rather than being truncated:
+        // a wrong number would be worse than a one-off re-flow.
+        assert_eq!(pct_text(1000), "1000%");
+    }
 
     fn m(x: Mod) -> Slot {
         Slot::Mod(x)

@@ -160,6 +160,15 @@ button.ws.urgent {
     color: @tz_muted;
 }
 .metric-val,
+.control-val,
+.ai-val {
+    /* Tabular figures: Inter's proportional digits are not all the same width,
+       so without this a readout twitches horizontally even when the number of
+       digits does not change (11% is narrower than 78%). The reserved width in
+       bar.rs handles the digit *count*; this handles the digits themselves. */
+    font-feature-settings: "tnum" 1;
+}
+.metric-val,
 .control-val {
     font-size: 12px;
     color: @tz_subtext;

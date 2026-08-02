@@ -51,7 +51,13 @@ impl BtState {
     /// What the glyph should show next to it: the battery of the first connected
     /// device that reports one. Headsets are the reason this module exists.
     pub fn badge(&self) -> Option<String> {
-        self.connected.iter().find_map(|d| d.battery).map(|b| format!("{b}%"))
+        self.badge_pct().map(|b| format!("{b}%"))
+    }
+
+    /// The same number unformatted, for the bar — which renders percentages
+    /// through its own padded formatter so their width never changes.
+    pub fn badge_pct(&self) -> Option<u32> {
+        self.connected.iter().find_map(|d| d.battery)
     }
 }
 

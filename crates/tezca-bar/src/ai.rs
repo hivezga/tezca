@@ -386,11 +386,23 @@ impl Snapshot {
     /// Highest window utilisation across every provider — drives the bar label
     /// and its warn/critical colour.
     pub fn peak_pct(&self) -> Option<f64> {
+        self.peak_window().map(|w| w.pct)
+    }
+
+    /// When the window the bar is showing resets — the second half of the
+    /// module's answer. "68%" alone does not tell you whether to slow down;
+    /// "68%, 4h 12m left" does.
+    pub fn peak_resets_at(&self) -> Option<i64> {
+        self.peak_window().and_then(|w| w.resets_at)
+    }
+
+    /// The single window `peak_pct` is reporting.
+    fn peak_window(&self) -> Option<&Window> {
         self.providers
             .iter()
             .filter(|p| p.status.visible())
-            .filter_map(|p| p.peak().map(|w| w.pct))
-            .max_by(|a, b| a.total_cmp(b))
+            .filter_map(|p| p.peak())
+            .max_by(|a, b| a.pct.total_cmp(&b.pct))
     }
 
     /// True when there is nothing worth showing — the module hides itself.

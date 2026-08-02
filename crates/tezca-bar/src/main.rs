@@ -14,6 +14,8 @@ mod config;
 mod custom;
 mod draw;
 mod hypr;
+mod llm;
+mod llmpanel;
 mod mic;
 mod notify;
 mod nowplaying;
@@ -23,6 +25,7 @@ mod session;
 mod sysinfo;
 mod theme;
 mod tray;
+mod weather;
 
 use gtk4::gdk::Display;
 use gtk4::glib;
@@ -68,6 +71,52 @@ fn main() -> glib::ExitCode {
     if std::env::args().any(|a| a == "--ai-dump") {
         let cfg = config::Config::load();
         print!("{}", ai::dump(&ai::poll_once(&cfg.ai)));
+        return glib::ExitCode::SUCCESS;
+    }
+
+    // `--llm-panel`: run only the SUPER+I chat panel, as its own application
+    // instance. Toggling is GApplication uniqueness — a second launch reaches
+    // the first and closes it — so the keybind needs no IPC of its own.
+    if std::env::args().any(|a| a == "--llm-panel") {
+        let cfg = config::Config::load();
+        return llmpanel::run(cfg.llm);
+    }
+
+    // `--llm-dump`: what Ollama is holding right now, without opening a window.
+    if std::env::args().any(|a| a == "--llm-dump") {
+        let cfg = config::Config::load();
+        print!("{}", llm::dump(&llm::poll_once(&cfg.llm)));
+        return glib::ExitCode::SUCCESS;
+    }
+
+    // `--weather-search <query>` / `--weather-locate`: resolve a place to
+    // coordinates and print them, so `tezca bar weather` can offer both without
+    // the CLI needing its own HTTP client or its own allowlist.
+    if let Some(q) = arg_after("--weather-search") {
+        for p in weather::geocode(&q) {
+            println!("{}\t{:.4}\t{:.4}", p.label(), p.lat, p.lon);
+        }
+        return glib::ExitCode::SUCCESS;
+    }
+    if std::env::args().any(|a| a == "--weather-locate") {
+        match weather::locate_by_ip() {
+            Ok(p) => {
+                println!("{}\t{:.4}\t{:.4}", p.label(), p.lat, p.lon);
+                return glib::ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                return glib::ExitCode::FAILURE;
+            }
+        }
+    }
+
+    // `--weather-dump`: fetch the forecast once and print it, without opening a
+    // window — the way to check coordinates and connectivity. Honours the same
+    // config, so it stays silent when the module is not enabled.
+    if std::env::args().any(|a| a == "--weather-dump") {
+        let cfg = config::Config::load();
+        print!("{}", weather::dump(&weather::poll_once(&cfg.weather)));
         return glib::ExitCode::SUCCESS;
     }
 
@@ -122,6 +171,13 @@ fn main() -> glib::ExitCode {
     app.run()
 }
 
+/// The argument following `flag`, if both are present.
+fn arg_after(flag: &str) -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    let i = args.iter().position(|a| a == flag)?;
+    args.get(i + 1).cloned().filter(|v| !v.starts_with("--"))
+}
+
 /// Parse `--osd-demo <volume|brightness>` (defaulting to volume) from argv.
 fn osd_demo_kind() -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
@@ -158,6 +214,8 @@ fn run_osd_demo(kind: String) -> glib::ExitCode {
 fn activate(app: &Application) {
     let cfg = config::Config::load();
     let ai_cfg = cfg.ai.clone();
+    let weather_cfg = cfg.weather.clone();
+    let llm_cfg = cfg.llm.clone();
     let cfg_osd_enabled = cfg.osd_enabled;
     let palette = theme::Palette::load();
     let display = Display::default().expect("no display");
@@ -196,6 +254,34 @@ fn activate(app: &Application) {
         async move {
             while let Ok(snap) = ai_rx.recv().await {
                 bar.apply_ai(snap);
+            }
+        }
+    ));
+
+    // Weather. Like the AI module this is opt-in and owns its network work on a
+    // background thread; `spawn` is a no-op unless coordinates are configured,
+    // so an unconfigured module costs one `if` at startup and nothing after.
+    let (weather_tx, weather_rx) = async_channel::unbounded::<weather::Snapshot>();
+    weather::spawn(weather_cfg, weather_tx);
+    glib::spawn_future_local(glib::clone!(
+        #[strong]
+        bar,
+        async move {
+            while let Ok(snap) = weather_rx.recv().await {
+                bar.apply_weather(snap);
+            }
+        }
+    ));
+
+    // Local AI status. Loopback only, and a no-op unless enabled.
+    let (llm_tx, llm_rx) = async_channel::unbounded::<llm::Status>();
+    llm::spawn(llm_cfg, llm_tx);
+    glib::spawn_future_local(glib::clone!(
+        #[strong]
+        bar,
+        async move {
+            while let Ok(st) = llm_rx.recv().await {
+                bar.apply_llm(st);
             }
         }
     ));

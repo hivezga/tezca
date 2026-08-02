@@ -59,6 +59,18 @@ impl BtState {
     pub fn badge_pct(&self) -> Option<u32> {
         self.connected.iter().find_map(|d| d.battery)
     }
+
+    /// A short name for whichever device the badge belongs to, e.g.
+    /// `MX Master 3S` → `MX`.
+    ///
+    /// Bluetooth names are advertising copy — "WH-1000XM5", "MX Master 3S",
+    /// "Jabra Elite 75t". The first word is what a person actually calls the
+    /// thing, and it is the only part that fits beside a percentage.
+    pub fn badge_name(&self) -> Option<String> {
+        let d = self.connected.iter().find(|d| d.battery.is_some())?;
+        let first = d.name.split_whitespace().next().unwrap_or(&d.name);
+        (!first.is_empty()).then(|| first.chars().take(10).collect())
+    }
 }
 
 pub fn poll() -> BtState {

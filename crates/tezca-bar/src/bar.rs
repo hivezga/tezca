@@ -10,12 +10,13 @@
 //! Data all comes from std/shell-out readers (see `hypr`, `sysinfo`,
 //! `nowplaying`, `notify`); this file is purely the GTK4 widget tree + wiring.
 
-use crate::config::{Config, Mod, Numerals, Shape, Slot};
+use crate::config::{Clutter, Config, Mod, Numerals, Shape, Slot};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
 use crate::{
-    ai, bluetooth, camera, custom, hypr, mic, notify, nowplaying, osd, popovers, session, tray,
+    ai, bluetooth, camera, custom, hypr, llm, mic, notify, nowplaying, osd, popovers, session,
+    tray, weather,
 };
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
@@ -25,7 +26,7 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
 // Nerd Font glyphs — the codepoints carried over from the Waybar layout this
@@ -51,6 +52,8 @@ const G_MIC: &str = "\u{F036C}"; // nf-md-microphone — mic-in-use privacy indi
 const G_REC: &str = "\u{F044B}"; // nf-md-record — screen recording in progress
 const G_CAFFEINE: &str = "\u{F0176}"; // nf-md-coffee — keep-awake held
 const G_NIGHT: &str = "\u{F0594}"; // nf-md-weather_night — night light active
+const G_WEATHER: &str = "\u{F0599}"; // nf-md-weather_partly_cloudy
+const G_LLM: &str = "\u{F035C}"; // nf-md-memory — the local model in memory
 
 // ===========================================================================
 // Manager
@@ -70,6 +73,10 @@ pub struct Bar {
     /// Latest AI usage snapshot, shared with every surface's popover so they
     /// all render the same poll without re-fetching.
     ai: Rc<RefCell<ai::Snapshot>>,
+    /// The weather module's latest reading, shared with its popover so opening
+    /// one never triggers a fetch.
+    weather: Rc<RefCell<weather::Snapshot>>,
+    battery_history: Rc<RefCell<VecDeque<f64>>>,
     /// The moves the last compaction pass dispatched — if the same plan recurs
     /// (a window that wouldn't move), we skip it rather than loop forever.
     last_compaction: RefCell<Vec<(i32, i32)>>,
@@ -111,21 +118,22 @@ impl Bar {
         let shared: SharedPalette = Rc::new(RefCell::new(palette));
         let throughput = Rc::new(RefCell::new(Throughput { down_mbps: 0.0, up_mbps: 0.0 }));
         let ai_state: Rc<RefCell<ai::Snapshot>> = Rc::new(RefCell::new(ai::Snapshot::default()));
+        let weather_state: Rc<RefCell<weather::Snapshot>> =
+            Rc::new(RefCell::new(weather::Snapshot::default()));
+        let battery_history: Rc<RefCell<VecDeque<f64>>> = Rc::new(RefCell::new(VecDeque::new()));
+        let surface_state = Shared {
+            throughput: throughput.clone(),
+            ai: ai_state.clone(),
+            weather: weather_state.clone(),
+            battery_history: battery_history.clone(),
+        };
 
         let mut surfaces = Vec::new();
         let monitors = display.monitors();
         for i in 0..monitors.n_items() {
             let Some(obj) = monitors.item(i) else { continue };
             let Ok(monitor) = obj.downcast::<gdk::Monitor>() else { continue };
-            let s = Surface::build(
-                app,
-                &monitor,
-                &cfg,
-                &shared,
-                throughput.clone(),
-                ai_state.clone(),
-                customs,
-            );
+            let s = Surface::build(app, &monitor, &cfg, &shared, &surface_state, customs);
             surfaces.push(s);
         }
 
@@ -156,6 +164,8 @@ impl Bar {
             tray_items: RefCell::new(Vec::new()),
             tray_menus: RefCell::new(HashMap::new()),
             ai: ai_state,
+            weather: weather_state,
+            battery_history,
             last_compaction: RefCell::new(Vec::new()),
             last_audio: RefCell::new(Some((a0.volume, a0.muted))),
             last_brightness: RefCell::new(b0),
@@ -307,36 +317,65 @@ impl Bar {
     fn tick_cpu(&self) {
         let frac = self.cpu.borrow_mut().sample();
         let pct = (frac * 100.0).round() as u32;
+        // The package temp is one small sysfs read, and it is the number that
+        // explains a load figure — 90% at 55° and 90% at 95° are different
+        // situations. Absent (no sensor) simply hides the sub-label.
+        let temp =
+            sysinfo::cpu_temp().map(|c| format!("{}°", c.round() as i64)).unwrap_or_default();
         for s in &self.surfaces {
             s.cpu_spark.push(frac);
             s.cpu_val.set_text(&pct_text(pct));
+            set_sub(&s.cpu_sub, &temp);
+            s.sys_parts.borrow_mut().0 = format!("{pct}%");
+            s.apply_clusters();
         }
     }
 
     fn tick_mem(&self) {
-        let m = sysinfo::mem();
-        let pct = (m.used_frac * 100.0).round() as u32;
+        // `mem_detail` reads the same /proc/meminfo as `mem` and costs the same,
+        // but keeps the absolute figures — "18.4G of 32" answers "can I open
+        // another one of these" in a way that "57%" does not.
+        let d = sysinfo::mem_detail();
+        let frac = if d.total_kb > 0.0 { (d.used_kb / d.total_kb).clamp(0.0, 1.0) } else { 0.0 };
+        let used = format!("{:.1}G", d.used_kb / 1024.0 / 1024.0);
+        let total = format!("/{:.0}", d.total_kb / 1024.0 / 1024.0);
         for s in &self.surfaces {
-            s.mem_spark.push(m.used_frac);
-            s.mem_val.set_text(&pct_text(pct));
+            s.mem_spark.push(frac);
+            s.mem_val.set_text(&used);
+            set_sub(&s.mem_sub, &total);
+            s.sys_parts.borrow_mut().1 = used.clone();
+            s.apply_clusters();
         }
     }
 
     fn tick_gpu(&self) {
-        match sysinfo::gpu() {
-            Some(frac) => {
-                let pct = (frac * 100.0).round() as u32;
-                for s in &self.surfaces {
-                    s.gpu_spark.push(frac);
-                    s.gpu_val.set_text(&pct_text(pct));
-                    s.show(&s.gpu_metric, true);
-                }
+        // One batched read rather than a utilisation call now and a telemetry
+        // call when the popover opens: on NVIDIA both are `nvidia-smi`, so
+        // asking for every field at once costs exactly what asking for one did.
+        let detail = sysinfo::gpu_detail();
+        let frac = detail
+            .as_ref()
+            .and_then(|d| d.util_pct)
+            .map(|p| (p / 100.0).clamp(0.0, 1.0))
+            .or_else(sysinfo::gpu);
+        let Some(frac) = frac else {
+            for s in &self.surfaces {
+                s.show(&s.gpu_metric, false);
+                s.sys_parts.borrow_mut().2.clear();
+                s.apply_clusters();
             }
-            None => {
-                for s in &self.surfaces {
-                    s.show(&s.gpu_metric, false);
-                }
-            }
+            return;
+        };
+        let pct = (frac * 100.0).round() as u32;
+        let sub = detail.as_ref().map(gpu_sub_text).unwrap_or_default();
+        for s in &self.surfaces {
+            s.gpu_spark.push(frac);
+            s.gpu_val.set_text(&pct_text(pct));
+            set_sub(&s.gpu_sub, &sub);
+            s.show(&s.gpu_metric, true);
+            s.sys_parts.borrow_mut().2 =
+                if sub.is_empty() { format!("{pct}%") } else { format!("{pct}% {sub}") };
+            s.apply_clusters();
         }
     }
 
@@ -355,10 +394,19 @@ impl Bar {
         let microphone = self.has_mic.then(mic::poll).unwrap_or_default();
 
         *self.throughput.borrow_mut() = self.netmeter.borrow_mut().sample(2.0);
+        // One trace point per tick, capped — the popover shows this session
+        // only, which is what it says on the label.
+        if let Some(b) = &battery {
+            let mut h = self.battery_history.borrow_mut();
+            h.push_back(b.percent as f64 / 100.0);
+            while h.len() > BATTERY_POINTS {
+                h.pop_front();
+            }
+        }
 
         for s in &self.surfaces {
             s.set_audio(&audio);
-            s.set_net(&net);
+            s.set_net(&net, &self.throughput.borrow());
             s.set_battery(&battery);
             s.set_brightness(brightness);
             s.set_bell(&bell);
@@ -454,6 +502,24 @@ impl Bar {
         }
     }
 
+    /// Apply a weather reading from the poll thread. The module hides itself
+    /// whenever there is no temperature to show — unconfigured, or a failed
+    /// first fetch — rather than parking a dash on the bar.
+    pub fn apply_weather(&self, snap: weather::Snapshot) {
+        *self.weather.borrow_mut() = snap;
+        let snap = self.weather.borrow();
+        for s in &self.surfaces {
+            s.set_weather(&snap);
+        }
+    }
+
+    /// Apply an Ollama status from the poll thread.
+    pub fn apply_llm(&self, st: llm::Status) {
+        for s in &self.surfaces {
+            s.set_llm(&st);
+        }
+    }
+
     /// Apply an AI usage snapshot from the poll thread. The module shows the
     /// single highest window utilisation across every provider — the number
     /// that actually constrains you — and colours itself at the configured
@@ -461,11 +527,12 @@ impl Bar {
     /// or no provider's tooling is installed.
     pub fn apply_ai(&self, snap: ai::Snapshot) {
         let pct = snap.peak_pct();
+        let resets_at = snap.peak_resets_at();
         let empty = snap.is_empty();
         let (warn, crit) = (self.cfg.ai.warn, self.cfg.ai.critical);
         *self.ai.borrow_mut() = snap;
         for s in &self.surfaces {
-            s.set_ai(pct, empty, warn, crit);
+            s.set_ai(pct, resets_at, empty, warn, crit);
         }
     }
 
@@ -643,15 +710,19 @@ struct Surface {
 
     cpu_spark: Sparkline,
     cpu_val: Label,
+    cpu_sub: Label,
     mem_spark: Sparkline,
     mem_val: Label,
+    mem_sub: Label,
     gpu_spark: Sparkline,
     gpu_val: Label,
+    gpu_sub: Label,
     gpu_metric: GtkBox,
 
     net_ctl: Button,
     net_glyph: Label,
     net_val: Label,
+    net_sub: Label,
     bt_ctl: Button,
     bt_glyph: Label,
     bt_val: Label,
@@ -669,6 +740,7 @@ struct Surface {
     bat_ctl: GtkBox,
     bat_glyph: Label,
     bat_val: Label,
+    bat_sub: Label,
 
     bell_btn: Button,
     bell_glyph: Label,
@@ -686,6 +758,32 @@ struct Surface {
 
     ai_box: GtkBox,
     ai_val: Label,
+    ai_sub: Label,
+
+    weather_box: GtkBox,
+    weather_val: Label,
+    weather_sub: Label,
+
+    llm_box: GtkBox,
+    llm_val: Label,
+    llm_sub: Label,
+
+    /// The two collapsible runs: chip, its summary label, and the box the
+    /// members live in. `grouped_*` is which of the pair is currently showing.
+    priv_chip: GtkBox,
+    priv_chip_val: Label,
+    priv_box: GtkBox,
+    grouped_priv: Cell<bool>,
+    /// Whether each privacy source is live right now, so the chip can say how
+    /// many without asking the three modules what they are displaying.
+    priv_live: Cell<(bool, bool, bool)>,
+    sys_chip: GtkBox,
+    sys_chip_val: Label,
+    sys_box: GtkBox,
+    grouped_sys: Cell<bool>,
+    /// `(cpu, mem, gpu)` as last rendered, for the collapsed summary. Each tick
+    /// owns one field, so the chip is rebuilt from the three most recent.
+    sys_parts: RefCell<(String, String, String)>,
 
     /// This monitor's volume on-screen display (a separate overlay surface).
     osd: Rc<osd::Osd>,
@@ -707,16 +805,33 @@ struct Surface {
     tray_dirty: Cell<bool>,
 }
 
+/// The readings every surface's popovers share with the poll threads.
+///
+/// One handle rather than three parameters: each is an `Rc<RefCell<_>>` the
+/// bar owns and every monitor's popovers borrow, so they travel together and
+/// always will.
+#[derive(Clone)]
+struct Shared {
+    throughput: Rc<RefCell<Throughput>>,
+    ai: Rc<RefCell<ai::Snapshot>>,
+    weather: Rc<RefCell<weather::Snapshot>>,
+    /// Charge fractions recorded since launch, for the battery popover's trace.
+    battery_history: Rc<RefCell<VecDeque<f64>>>,
+}
+
 impl Surface {
     fn build(
         app: &gtk4::Application,
         monitor: &gdk::Monitor,
         cfg: &Config,
         pal: &SharedPalette,
-        throughput: Rc<RefCell<Throughput>>,
-        ai_state: Rc<RefCell<ai::Snapshot>>,
+        shared: &Shared,
         customs: &[custom::CustomModule],
     ) -> Rc<Surface> {
+        let throughput = shared.throughput.clone();
+        let ai_state = shared.ai.clone();
+        let weather_state = shared.weather.clone();
+        let battery_history = shared.battery_history.clone();
         let output = monitor.connector().map(|s| s.to_string()).unwrap_or_default();
         let compact = monitor.geometry().width() < cfg.compact_width;
         let ws_assigned = cfg.ws_assign.get(&output).cloned();
@@ -904,11 +1019,63 @@ impl Surface {
         ai_glyph.add_css_class("glyph");
         let ai_val = Label::new(None);
         ai_val.add_css_class("ai-val");
+        // How long until the window resets. "68%" alone does not tell you
+        // whether to slow down; "68%, 4h 12m to go" does.
+        let ai_sub = Label::new(None);
+        ai_sub.add_css_class("control-sub");
+        ai_sub.set_visible(false);
         ai_box.append(&ai_glyph);
         ai_box.append(&ai_val);
+        ai_box.append(&ai_sub);
         ai_box.set_visible(false);
         let ai_pop = popovers::ai_detail(&ai_box, ai_state);
         attach_detail(&ai_box, ai_pop.clone());
+
+        // Weather — like the AI module, hidden until its poll thread reports
+        // something. Off entirely unless configured; see weather.rs.
+        let weather_box = GtkBox::new(Orientation::Horizontal, 6);
+        weather_box.add_css_class("weather");
+        weather_box.set_valign(Align::Center);
+        let weather_glyph = Label::new(Some(G_WEATHER));
+        weather_glyph.add_css_class("glyph");
+        let weather_val = Label::new(None);
+        weather_val.add_css_class("control-val");
+        let weather_sub = Label::new(None);
+        weather_sub.add_css_class("control-sub");
+        weather_sub.set_visible(false);
+        weather_box.append(&weather_glyph);
+        weather_box.append(&weather_val);
+        weather_box.append(&weather_sub);
+        weather_box.set_visible(false);
+        weather_box.set_has_tooltip(true);
+        let weather_pop = popovers::weather_detail(&weather_box, weather_state);
+        attach_detail(&weather_box, weather_pop.clone());
+
+        // Local AI (Ollama). Clicking opens the lateral panel rather than a
+        // popover: the thing you want from this module is a conversation, and
+        // that does not fit — or survive — inside a popover that closes on the
+        // first click outside it.
+        let llm_box = GtkBox::new(Orientation::Horizontal, 6);
+        llm_box.add_css_class("llm");
+        llm_box.add_css_class("clickable");
+        llm_box.set_valign(Align::Center);
+        let llm_glyph = Label::new(Some(G_LLM));
+        llm_glyph.add_css_class("glyph");
+        let llm_val = Label::new(None);
+        llm_val.add_css_class("control-val");
+        let llm_sub = Label::new(None);
+        llm_sub.add_css_class("control-sub");
+        llm_sub.set_visible(false);
+        llm_box.append(&llm_glyph);
+        llm_box.append(&llm_val);
+        llm_box.append(&llm_sub);
+        llm_box.set_visible(false);
+        llm_box.set_has_tooltip(true);
+        {
+            let click = gtk4::GestureClick::new();
+            click.connect_released(|_, _, _, _| open_llm_panel());
+            llm_box.add_controller(click);
+        }
 
         // System tray (StatusNotifierItem icons) — filled live by the tray
         // thread; hidden until the first item registers.
@@ -921,18 +1088,21 @@ impl Surface {
         let cpu_spark = draw::sparkline(pal, draw::SparkColor::Accent);
         let cpu_val = Label::new(Some(&pct_text(0)));
         cpu_val.add_css_class("metric-val");
-        let cpu_metric = metric(G_CPU_LABEL, &cpu_spark.area, &cpu_val);
+        let cpu_sub = Label::new(None);
+        let cpu_metric = metric(G_CPU_LABEL, &cpu_spark.area, &cpu_val, &cpu_sub);
 
         let mem_spark = draw::sparkline(pal, draw::SparkColor::Gold);
         let mem_val = Label::new(Some(&pct_text(0)));
         mem_val.add_css_class("metric-val");
-        let mem_metric = metric(G_MEM_LABEL, &mem_spark.area, &mem_val);
+        let mem_sub = Label::new(None);
+        let mem_metric = metric(G_MEM_LABEL, &mem_spark.area, &mem_val, &mem_sub);
 
         // GPU — hidden until the first successful read (absent on GPU-less rigs).
         let gpu_spark = draw::sparkline(pal, draw::SparkColor::AccentDim);
         let gpu_val = Label::new(Some(&pct_text(0)));
         gpu_val.add_css_class("metric-val");
-        let gpu_metric = metric(G_GPU_LABEL, &gpu_spark.area, &gpu_val);
+        let gpu_sub = Label::new(None);
+        let gpu_metric = metric(G_GPU_LABEL, &gpu_spark.area, &gpu_val, &gpu_sub);
         gpu_metric.set_visible(false);
 
         // Each metric group expands into a glass detail popover on click.
@@ -943,8 +1113,11 @@ impl Surface {
         attach_detail(&mem_metric, mem_pop.clone());
         attach_detail(&gpu_metric, gpu_pop.clone());
 
-        // Controls: network (button → popover).
-        let (net_ctl, net_glyph, net_val) = control_button();
+        // Controls: network (button → popover). Stacked, because the two facts
+        // worth having — which network, and how fast it is moving — do not fit
+        // side by side without pushing the rest of the cluster off a 2560px
+        // monitor.
+        let (net_ctl, net_glyph, net_val, net_sub) = control_button_stacked();
         net_glyph.set_text(G_WIFI);
         let net_pop = popovers::network(&net_ctl, throughput.clone());
         let p = net_pop.clone();
@@ -984,9 +1157,15 @@ impl Surface {
         bat_glyph.add_css_class("glyph");
         let bat_val = Label::new(None);
         bat_val.add_css_class("control-val");
+        let bat_sub = Label::new(None);
+        bat_sub.add_css_class("control-sub");
+        bat_sub.set_visible(false);
         bat_ctl.append(&bat_glyph);
         bat_ctl.append(&bat_val);
+        bat_ctl.append(&bat_sub);
         bat_ctl.set_visible(false);
+        let bat_pop = popovers::battery_detail(&bat_ctl, battery_history);
+        attach_detail(&bat_ctl, bat_pop.clone());
 
         // Notification bell with an urgent dot badge.
         let bell_overlay = Overlay::new();
@@ -1038,11 +1217,22 @@ impl Surface {
             custom_cells.insert(m.name.clone(), CustomCell::build(m));
         }
 
+        // ── Collapsible clusters ─────────────────────────────────────────
+        // Each is a chip that stands in for a run of modules, plus the box the
+        // run actually lives in. Clicking either swaps which one is showing;
+        // the members keep their own auto-hide logic untouched inside the box.
+        let (priv_chip, priv_chip_val) = cluster_chip("", "priv-chip");
+        let priv_box = GtkBox::new(Orientation::Horizontal, 0);
+        priv_box.add_css_class("cluster");
+        let (sys_chip, sys_chip_val) = cluster_chip(G_SYS_LABEL, "sys-chip");
+        let sys_box = GtkBox::new(Orientation::Horizontal, 0);
+        sys_box.add_css_class("cluster");
+
         // ── Place modules per the configured layout ──────────────────────
         // Resolve a slot to the widget built above. Separators are handled by
         // `place_region`; every built-in maps to exactly one widget, so a
         // duplicate in the layout is ignored (a GTK widget has one parent).
-        let resolve = |slot: &Slot| -> Option<gtk4::Widget> {
+        let resolve_slot = |slot: &Slot| -> Option<gtk4::Widget> {
             use gtk4::prelude::Cast;
             Some(match slot {
                 Slot::Custom(name) => {
@@ -1058,6 +1248,8 @@ impl Surface {
                     Mod::Camera => camera_box.clone().upcast(),
                     Mod::Microphone => mic_box.clone().upcast(),
                     Mod::Ai => ai_box.clone().upcast(),
+                    Mod::Weather => weather_box.clone().upcast(),
+                    Mod::Llm => llm_box.clone().upcast(),
                     Mod::Tray => tray_box.clone().upcast(),
                     Mod::Cpu => cpu_metric.clone().upcast(),
                     Mod::Mem => mem_metric.clone().upcast(),
@@ -1077,9 +1269,49 @@ impl Surface {
                 },
             })
         };
-        place_region(&left, &cfg.layout_left, compact, &resolve);
-        place_region(&center, &cfg.layout_center, compact, &resolve);
-        place_region(&right, &cfg.layout_right, compact, &resolve);
+
+        // Under the hover strategy the modules you read on purpose keep full
+        // weight and the ambient ones fade back until you approach the bar.
+        // Tagged here rather than in each module's constructor so the whole
+        // policy is one list (`Mod::is_ambient`) and one class.
+        let fade_ambient = cfg.clutter == Clutter::Hover;
+        let resolve = |slot: &Slot| -> Option<gtk4::Widget> {
+            let w = resolve_slot(slot)?;
+            if fade_ambient && matches!(slot, Slot::Mod(m) if m.is_ambient()) {
+                w.add_css_class("ambient");
+            }
+            Some(w)
+        };
+        let drop_tier3 = cfg.clutter == Clutter::Tiers;
+        // Only the right cluster is long enough to be worth collapsing, and it
+        // is the only region the design groups.
+        let clusters =
+            ClusterSlots { privacy: (&priv_chip, &priv_box), system: (&sys_chip, &sys_box) };
+        place_region(&left, &cfg.layout_left, compact, drop_tier3, None, &resolve);
+        place_region(&center, &cfg.layout_center, compact, drop_tier3, None, &resolve);
+        place_region(&right, &cfg.layout_right, compact, drop_tier3, Some(&clusters), &resolve);
+
+        // Grouping only exists where a run actually got placed — a layout with
+        // no privacy modules must not grow a chip that stands for nothing.
+        let has_priv = priv_box.first_child().is_some();
+        let has_sys = sys_box.first_child().is_some();
+        let grouped_priv = Cell::new(has_priv && cfg.clutter == Clutter::Grouped);
+        let grouped_sys = Cell::new(has_sys && cfg.clutter == Clutter::Grouped);
+        // The fold control only exists where folding is the chosen strategy.
+        // Under `all` there is nothing to fold back into, so the glyph would be
+        // an unexplained button offering a mode the user did not pick.
+        let collapsible = cfg.clutter == Clutter::Grouped;
+        let priv_collapse = collapse_button();
+        let sys_collapse = collapse_button();
+        if has_priv && collapsible {
+            priv_box.append(&priv_collapse);
+        }
+        if has_sys && collapsible {
+            sys_box.append(&sys_collapse);
+        }
+        if fade_ambient {
+            bar_box.add_css_class("hover-reveal");
+        }
 
         bar_box.set_start_widget(Some(&left));
         bar_box.set_center_widget(Some(&center));
@@ -1112,7 +1344,7 @@ impl Surface {
         // can float mid-screen independent of the bar strip.
         let osd = osd::Osd::build(app, monitor, cfg.osd_timeout_ms);
 
-        Rc::new(Surface {
+        let surface = Rc::new(Surface {
             window,
             output,
             compact,
@@ -1129,14 +1361,18 @@ impl Surface {
             np_artist,
             cpu_spark,
             cpu_val,
+            cpu_sub,
             mem_spark,
             mem_val,
+            mem_sub,
             gpu_spark,
             gpu_val,
+            gpu_sub,
             gpu_metric,
             net_ctl,
             net_glyph,
             net_val,
+            net_sub,
             bt_ctl,
             bt_glyph,
             bt_val,
@@ -1151,6 +1387,7 @@ impl Surface {
             bat_ctl,
             bat_glyph,
             bat_val,
+            bat_sub,
             bell_btn,
             bell_glyph,
             bell_dot,
@@ -1161,21 +1398,108 @@ impl Surface {
             mic_box,
             ai_box,
             ai_val,
+            ai_sub,
+            weather_box,
+            weather_val,
+            weather_sub,
+            llm_box,
+            llm_val,
+            llm_sub,
+            priv_chip,
+            priv_chip_val,
+            priv_box,
+            grouped_priv,
+            priv_live: Cell::new((false, false, false)),
+            sys_chip,
+            sys_chip_val,
+            sys_box,
+            grouped_sys,
+            sys_parts: RefCell::new(Default::default()),
             osd,
             mirror,
             custom: custom_cells,
             // Every popover on this bar, so `wire_layout_freeze` can hold the
             // layout still for whichever one the user opens.
             popovers: vec![
-                tezca_pop, ai_pop, cpu_pop, mem_pop, gpu_pop, net_pop, bt_pop, mix_pop, cal_pop,
+                tezca_pop,
+                ai_pop,
+                weather_pop,
+                bat_pop,
+                cpu_pop,
+                mem_pop,
+                gpu_pop,
+                net_pop,
+                bt_pop,
+                mix_pop,
+                cal_pop,
             ],
             open_popovers: Cell::new(0),
             pending_show: RefCell::new(Vec::new()),
             tray_dirty: Cell::new(false),
-        })
+        });
+
+        // Chip ↔ members. Wired after construction because both directions need
+        // the surface to flip the flag on.
+        for (chip, collapse, grouped) in
+            [(&surface.priv_chip, &priv_collapse, true), (&surface.sys_chip, &sys_collapse, false)]
+        {
+            let click = gtk4::GestureClick::new();
+            let sw = Rc::downgrade(&surface);
+            click.connect_released(move |_, _, _, _| {
+                if let Some(s) = sw.upgrade() {
+                    s.set_grouped(grouped, false);
+                }
+            });
+            chip.add_controller(click);
+
+            let sw = Rc::downgrade(&surface);
+            collapse.connect_clicked(move |_| {
+                if let Some(s) = sw.upgrade() {
+                    s.set_grouped(grouped, true);
+                }
+            });
+        }
+        surface.apply_clusters();
+        surface
     }
 
     // ── updates ─────────────────────────────────────────────────────────
+
+    /// Collapse or expand one cluster.
+    fn set_grouped(&self, privacy: bool, grouped: bool) {
+        if privacy {
+            self.grouped_priv.set(grouped);
+        } else {
+            self.grouped_sys.set(grouped);
+        }
+        self.apply_clusters();
+    }
+
+    /// Show whichever of chip/members each cluster is currently in.
+    ///
+    /// The privacy chip additionally hides itself when nothing is capturing:
+    /// a chip reading "0 capturing" is a permanent reminder of a thing that is
+    /// not happening, and the three modules it stands for are all auto-hiding
+    /// for exactly that reason.
+    fn apply_clusters(&self) {
+        let (cam, mic, rec) = self.priv_live.get();
+        let live = u32::from(cam) + u32::from(mic) + u32::from(rec);
+        let pg = self.grouped_priv.get();
+        self.priv_chip_val.set_text(&format!("{live} capturing"));
+        self.show(&self.priv_chip, pg && live > 0);
+        self.show(&self.priv_box, !pg);
+
+        let sg = self.grouped_sys.get();
+        let p = self.sys_parts.borrow();
+        let summary: Vec<&str> = [p.0.as_str(), p.1.as_str(), p.2.as_str()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        self.sys_chip_val.set_text(&summary.join(" · "));
+        drop(p);
+        self.show(&self.sys_chip, sg);
+        self.show(&self.sys_box, !sg);
+    }
 
     fn set_workspaces(&self, snap: &hypr::Snapshot) {
         while let Some(c) = self.ws_box.first_child() {
@@ -1263,20 +1587,28 @@ impl Surface {
         }
     }
 
-    fn set_net(&self, n: &Net) {
+    /// The network control: which link, and how hard it is working.
+    ///
+    /// The name line is the SSID on Wi-Fi and the plain word on a wired link —
+    /// signal strength moved to the sub-line's company in the popover, because
+    /// "which network am I on" is asked far more often than "how many bars".
+    fn set_net(&self, n: &Net, t: &sysinfo::Throughput) {
         self.net_ctl.remove_css_class("disconnected");
         match n {
-            Net::Wifi { signal, .. } => {
+            Net::Wifi { ssid, .. } => {
                 self.net_glyph.set_text(G_WIFI);
-                set_pct(&self.net_val, Some(*signal));
+                self.net_val.set_text(if ssid.is_empty() { "Wi-Fi" } else { ssid });
+                set_sub(&self.net_sub, &rate_text(t));
             }
             Net::Ethernet { .. } => {
                 self.net_glyph.set_text(G_ETH);
-                set_pct(&self.net_val, None);
+                self.net_val.set_text("Wired");
+                set_sub(&self.net_sub, &rate_text(t));
             }
             Net::Disconnected => {
                 self.net_glyph.set_text(G_DISC);
-                set_pct(&self.net_val, None);
+                self.net_val.set_text("Offline");
+                set_sub(&self.net_sub, "");
                 self.net_ctl.add_css_class("disconnected");
             }
         }
@@ -1287,6 +1619,10 @@ impl Surface {
             Some(b) => {
                 self.bat_glyph.set_text(if b.charging { G_BATT_CHG } else { G_BATT });
                 self.bat_val.set_text(&pct_text(b.percent));
+                // Time is the number you actually plan around; the percentage
+                // only stands in for it. Absent while resting on AC.
+                let left = b.secs_remaining.map(sysinfo::duration_short).unwrap_or_default();
+                set_sub(&self.bat_sub, &left);
                 self.show(&self.bat_ctl, true);
             }
             None => self.show(&self.bat_ctl, false),
@@ -1319,7 +1655,7 @@ impl Surface {
     /// colour class. A provider that reports only local token counts has no
     /// percentage, so the module shows the glyph alone rather than inventing a
     /// number — the popover still carries the detail.
-    fn set_ai(&self, pct: Option<f64>, empty: bool, warn: f64, crit: f64) {
+    fn set_ai(&self, pct: Option<f64>, resets_at: Option<i64>, empty: bool, warn: f64, crit: f64) {
         self.show(&self.ai_box, !empty);
         if empty {
             return;
@@ -1329,6 +1665,13 @@ impl Surface {
             None => set_pct(&self.ai_val, None),
         }
         self.show(&self.ai_val, pct.is_some());
+        // Only meaningful alongside a percentage — a reset time with no usage
+        // figure beside it is a countdown to nothing.
+        let resets = match (pct, resets_at) {
+            (Some(_), Some(t)) => ai::until(t),
+            _ => String::new(),
+        };
+        set_sub(&self.ai_sub, &resets);
         let p = pct.unwrap_or(0.0);
         self.ai_box.remove_css_class("warn");
         self.ai_box.remove_css_class("crit");
@@ -1337,6 +1680,44 @@ impl Surface {
         } else if p >= warn {
             self.ai_box.add_css_class("warn");
         }
+    }
+
+    /// The weather readout: temperature, with today's range beside it.
+    fn set_weather(&self, s: &weather::Snapshot) {
+        self.show(&self.weather_box, !s.is_empty());
+        if s.is_empty() {
+            return;
+        }
+        self.weather_val.set_text(&s.temp_text());
+        set_sub(&self.weather_sub, &s.range_text());
+        self.weather_box.set_tooltip_text(Some(&s.tooltip()));
+    }
+
+    /// The local-AI readout: what is loaded, and where it is running.
+    fn set_llm(&self, st: &llm::Status) {
+        self.show(&self.llm_box, !st.is_empty());
+        if st.is_empty() {
+            return;
+        }
+        match st.primary() {
+            Some(r) => {
+                // Name over size: llama.cpp serves one model and its name is
+                // the useful fact; the size is only interesting next to a
+                // VRAM budget, which only Ollama reports.
+                let size = r.size_text();
+                self.llm_val.set_text(if size.is_empty() { &r.name } else { &size });
+                set_sub(&self.llm_sub, r.accel().unwrap_or(""));
+                // A partial offload is the one state worth colouring: it is why
+                // a model that was fast yesterday is slow today.
+                Self::toggle_class(&self.llm_box, "warn", r.accel() == Some("split"));
+            }
+            None => {
+                self.llm_val.set_text("idle");
+                set_sub(&self.llm_sub, "");
+                self.llm_box.remove_css_class("warn");
+            }
+        }
+        self.llm_box.set_tooltip_text(Some(&st.tooltip()));
     }
 
     fn set_custom(&self, out: &custom::Output) {
@@ -1359,12 +1740,18 @@ impl Surface {
     fn set_camera(&self, c: &camera::CameraUse) {
         self.show(&self.camera_box, c.active);
         self.camera_box.set_tooltip_text(Some(&c.tooltip()));
+        let (_, mic, rec) = self.priv_live.get();
+        self.priv_live.set((c.active, mic, rec));
+        self.apply_clusters();
     }
 
     /// Show/hide the microphone privacy indicator and keep its tooltip current.
     fn set_mic(&self, m: &mic::MicUse) {
         self.show(&self.mic_box, m.active);
         self.mic_box.set_tooltip_text(Some(&m.tooltip()));
+        let (cam, _, rec) = self.priv_live.get();
+        self.priv_live.set((cam, m.active, rec));
+        self.apply_clusters();
     }
 
     /// True while at least one popover anchored to this bar is open.
@@ -1436,6 +1823,9 @@ impl Surface {
         } else {
             "Recording the screen — `tezca record stop` to save"
         }));
+        let (cam, mic, _) = self.priv_live.get();
+        self.priv_live.set((cam, mic, r.active));
+        self.apply_clusters();
     }
 
     /// Night light: shown only while the filter is actually on.
@@ -1457,9 +1847,16 @@ impl Surface {
             (true, false) => G_BT,
             (true, true) => G_BT_CONN,
         });
-        // The battery of a connected headset is the one number worth the space.
-        set_pct(&self.bt_val, b.badge_pct());
-        self.show(&self.bt_val, b.badge_pct().is_some());
+        // The battery of a connected headset is the one number worth the space —
+        // named, because with two devices paired "82%" alone leaves you guessing
+        // which one is about to die.
+        let badge = match (b.badge_name(), b.badge_pct()) {
+            (Some(n), Some(p)) => format!("{n} {p}%"),
+            (None, Some(p)) => format!("{p}%"),
+            _ => String::new(),
+        };
+        self.bt_val.set_text(&badge);
+        self.show(&self.bt_val, !badge.is_empty());
         Self::toggle_class(&self.bt_ctl, "active", connected);
         Self::toggle_class(&self.bt_ctl, "off", !b.powered);
         self.bt_ctl.set_has_tooltip(true);
@@ -1493,6 +1890,71 @@ impl Surface {
 const G_CPU_LABEL: &str = "CPU";
 const G_MEM_LABEL: &str = "MEM";
 const G_GPU_LABEL: &str = "GPU";
+const G_SYS_LABEL: &str = "SYS";
+/// How many charge samples the battery trace keeps. At the 2-second controls
+/// tick that is about two minutes — enough to see a trend start, and small
+/// enough that the strip stays legible at popover width.
+const BATTERY_POINTS: usize = 60;
+/// The chevron on a cluster chip — down to open a collapsed run, and the
+/// collapse control that closes it again.
+const G_EXPAND: &str = "\u{F0140}"; // nf-md-chevron_down
+                                    // Deliberately the mirror of G_EXPAND rather than a dedicated "collapse" icon:
+                                    // the pair reads as one control in two states, and chevron_up is in every Nerd
+                                    // Font build, which arrow_collapse_horizontal is not.
+const G_COLLAPSE: &str = "\u{F0143}"; // nf-md-chevron_up
+
+/// Open (or close) the SUPER+I lateral panel.
+///
+/// Re-runs this binary with `--llm-panel`; GApplication uniqueness makes the
+/// second invocation reach the first and close it, so click and keybind are the
+/// same toggle and cannot disagree.
+fn open_llm_panel() {
+    let exe = std::env::current_exe().unwrap_or_else(|_| "tezca-bar".into());
+    let _ = std::process::Command::new(exe)
+        .arg("--llm-panel")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// A collapsed-cluster chip: an optional fixed label, the live summary, and a
+/// chevron saying it opens. Returns the chip and the label to fill each tick.
+fn cluster_chip(label: &str, class: &str) -> (GtkBox, Label) {
+    let b = GtkBox::new(Orientation::Horizontal, 7);
+    b.add_css_class("cluster-chip");
+    b.add_css_class(class);
+    b.add_css_class("clickable");
+    b.set_valign(Align::Center);
+    if !label.is_empty() {
+        let l = Label::new(Some(label));
+        l.add_css_class("metric-label");
+        b.append(&l);
+    }
+    let val = Label::new(None);
+    val.add_css_class("cluster-val");
+    b.append(&val);
+    let chev = Label::new(Some(G_EXPAND));
+    chev.add_css_class("glyph");
+    chev.add_css_class("cluster-chev");
+    b.append(&chev);
+    b.set_visible(false);
+    (b, val)
+}
+
+/// The control that folds an expanded run back into its chip.
+fn collapse_button() -> Button {
+    let b = Button::new();
+    b.add_css_class("cluster-collapse");
+    b.set_child(Some(&{
+        let l = Label::new(Some(G_COLLAPSE));
+        l.add_css_class("glyph");
+        l
+    }));
+    b.set_valign(Align::Center);
+    b.set_tooltip_text(Some("Group these"));
+    b
+}
 
 /// A 1×18 hairline separator.
 fn sep() -> GtkBox {
@@ -1596,6 +2058,39 @@ impl CustomCell {
     }
 }
 
+/// A run of modules the bar can collapse behind one chip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cluster {
+    /// Camera / microphone / recording — "3 capturing".
+    Privacy,
+    /// CPU / MEM / GPU — "SYS 31% · 18.4G · 44%".
+    System,
+}
+
+/// Which cluster a slot belongs to, if any.
+fn cluster_of(slot: &Slot) -> Option<Cluster> {
+    match slot {
+        Slot::Mod(Mod::Camera | Mod::Microphone | Mod::Recording) => Some(Cluster::Privacy),
+        Slot::Mod(Mod::Cpu | Mod::Mem | Mod::Gpu) => Some(Cluster::System),
+        _ => None,
+    }
+}
+
+/// The chip + members container for each collapsible run.
+struct ClusterSlots<'a> {
+    privacy: (&'a GtkBox, &'a GtkBox),
+    system: (&'a GtkBox, &'a GtkBox),
+}
+
+impl ClusterSlots<'_> {
+    fn get(&self, c: Cluster) -> (&GtkBox, &GtkBox) {
+        match c {
+            Cluster::Privacy => self.privacy,
+            Cluster::System => self.system,
+        }
+    }
+}
+
 /// Append the configured modules to a region, in order.
 ///
 /// `resolve` turns a non-separator module id into the widget built for it (or
@@ -1609,21 +2104,56 @@ impl CustomCell {
 ///     doubled or dangling divider),
 ///   * a widget already placed in this region is skipped (a GTK widget can have
 ///     only one parent, so a duplicate id would otherwise panic on reparent).
+///
+/// `clusters`, where given, additionally folds the collapsible runs into their
+/// chip + members pair — see [`Cluster`].
 fn place_region(
     container: &GtkBox,
     slots: &[Slot],
     compact: bool,
+    drop_tier3: bool,
+    clusters: Option<&ClusterSlots>,
     resolve: &dyn Fn(&Slot) -> Option<gtk4::Widget>,
 ) {
-    for slot in plan_region(slots, compact) {
+    // A cluster is a *contiguous run*. The first run of each kind gets the chip
+    // and the members container; anything from that cluster appearing again
+    // later in the region renders on its own. Collapsing two separated runs
+    // behind one chip would move modules across the layout the user wrote,
+    // which is a bigger surprise than the second run staying expanded.
+    let mut open: Option<Cluster> = None;
+    let mut used: Vec<Cluster> = Vec::new();
+
+    for slot in plan_region(slots, compact, drop_tier3) {
         if slot.is_sep() {
+            open = None;
             // A fresh hairline per occurrence.
             container.append(&sep());
-        } else if let Some(w) = resolve(&slot) {
-            container.append(&w);
+            continue;
         }
         // A custom slot with no matching manifest resolves to None → nothing
         // placed (the module just isn't installed), which is fine.
+        let Some(w) = resolve(&slot) else { continue };
+
+        let want = clusters.and_then(|_| cluster_of(&slot)).filter(|c| {
+            // Either we are already inside this run, or it has not had one yet.
+            open == Some(*c) || !used.contains(c)
+        });
+        match (want, clusters) {
+            (Some(c), Some(cs)) => {
+                let (chip, members) = cs.get(c);
+                if open != Some(c) {
+                    container.append(chip);
+                    container.append(members);
+                    used.push(c);
+                    open = Some(c);
+                }
+                members.append(&w);
+            }
+            _ => {
+                open = None;
+                container.append(&w);
+            }
+        }
     }
 }
 
@@ -1635,7 +2165,7 @@ fn place_region(
 ///     parent, so a duplicate would panic on reparent),
 ///   * separators collapse — leading, trailing, and adjacent `Sep`s reduce to
 ///     at most one, so a dropped module never leaves a doubled or dangling one.
-fn plan_region(slots: &[Slot], compact: bool) -> Vec<Slot> {
+fn plan_region(slots: &[Slot], compact: bool, drop_tier3: bool) -> Vec<Slot> {
     use std::collections::HashSet;
     let mut placed: HashSet<Slot> = HashSet::new();
     let mut out: Vec<Slot> = Vec::new();
@@ -1651,6 +2181,16 @@ fn plan_region(slots: &[Slot], compact: bool) -> Vec<Slot> {
         }
         if slot.is_appname() && compact {
             continue;
+        }
+        // The tiers strategy drops rather than hides: a module that is never
+        // placed cannot be un-hidden by its own auto-show logic two seconds
+        // later, and the separators around it collapse for free below.
+        if drop_tier3 {
+            if let Slot::Mod(m) = slot {
+                if m.is_tier3() {
+                    continue;
+                }
+            }
         }
         if !placed.insert(slot.clone()) {
             continue;
@@ -1708,7 +2248,13 @@ fn set_pct(l: &Label, v: Option<u32>) {
 }
 
 /// `LABEL  <spark>  val%` metric group.
-fn metric(label: &str, spark: &gtk4::DrawingArea, val: &Label) -> GtkBox {
+/// A metric group: `CPU ~~~ 31% 62°`.
+///
+/// `sub` carries the second number the popover already computes — the temp
+/// beside the load, the watts beside the utilisation. It starts hidden and
+/// reveals itself only once a tick has something real to put in it, so a machine
+/// with no temperature sensor shows no empty gap where one would be.
+fn metric(label: &str, spark: &gtk4::DrawingArea, val: &Label, sub: &Label) -> GtkBox {
     let b = GtkBox::new(Orientation::Horizontal, 7);
     b.add_css_class("metric");
     let l = Label::new(Some(label));
@@ -1716,7 +2262,42 @@ fn metric(label: &str, spark: &gtk4::DrawingArea, val: &Label) -> GtkBox {
     b.append(&l);
     b.append(spark);
     b.append(val);
+    sub.add_css_class("metric-sub");
+    sub.set_visible(false);
+    b.append(sub);
     b
+}
+
+/// Set a secondary readout, hiding it when there is nothing to say.
+fn set_sub(l: &Label, text: &str) {
+    l.set_text(text);
+    l.set_visible(!text.is_empty());
+}
+
+/// `↓12.4 ↑1.1 MB/s` — the throughput line under the network name.
+///
+/// Megabytes, not the megabits the meter samples in: MB/s is the unit a
+/// download progress bar quotes, so it is the one that answers "is this as fast
+/// as it should be". Blank while nothing is moving, so an idle link does not
+/// park a row of zeroes on the bar.
+fn rate_text(t: &sysinfo::Throughput) -> String {
+    let (down, up) = (t.down_mbps / 8.0, t.up_mbps / 8.0);
+    if down < 0.05 && up < 0.05 {
+        return String::new();
+    }
+    format!("↓{down:.1} ↑{up:.1} MB/s")
+}
+
+/// `71° 168W` — whichever of the two the driver actually reported.
+fn gpu_sub_text(d: &sysinfo::GpuDetail) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(t) = d.temp_c {
+        parts.push(format!("{}°", t.round() as i64));
+    }
+    if let Some(w) = d.power_w {
+        parts.push(format!("{}W", w.round() as i64));
+    }
+    parts.join(" ")
 }
 
 /// Parent `pop` to `widget` and pop it up on click, marking the group hoverable.
@@ -1742,12 +2323,49 @@ fn control_button() -> (Button, Label, Label) {
     (b, glyph, val)
 }
 
+/// A `.control` button with its value stacked over a smaller second line.
+/// Returns `(button, glyph, name, sub)`.
+fn control_button_stacked() -> (Button, Label, Label, Label) {
+    let b = Button::new();
+    b.add_css_class("control");
+    let inner = GtkBox::new(Orientation::Horizontal, 6);
+    let glyph = Label::new(None);
+    glyph.add_css_class("glyph");
+
+    let col = GtkBox::new(Orientation::Vertical, 0);
+    col.set_valign(Align::Center);
+    let name = Label::new(None);
+    name.add_css_class("control-name");
+    name.set_xalign(0.0);
+    let sub = Label::new(None);
+    sub.add_css_class("control-sub");
+    sub.set_xalign(0.0);
+    sub.set_visible(false);
+    col.append(&name);
+    col.append(&sub);
+
+    inner.append(&glyph);
+    inner.append(&col);
+    b.set_child(Some(&inner));
+    (b, glyph, name, sub)
+}
+
 /// A workspace pill button showing `label`, switching to `id` on click.
-/// `mayan` styles it for Mayan bar-and-dot numerals (covering font + sizing).
+/// `mayan` asks for bar-and-dot numerals, which are drawn rather than typed.
 fn ws_button(id: i32, label: &str, active: bool, occupied: bool, mayan: bool) -> Button {
-    let b = Button::with_label(label);
+    // Mayan numerals are drawn, not typed — see `draw::mayan_numeral`. Anything
+    // outside the bar-and-dot range falls back to the digit, so a workspace 24
+    // still labels itself rather than rendering blank.
+    let drawn = mayan && (1..=draw::MAYAN_MAX).contains(&id);
+    let b = if drawn {
+        let b = Button::new();
+        b.set_child(Some(&draw::mayan_numeral(id)));
+        b
+    } else {
+        Button::with_label(label)
+    };
     b.add_css_class("ws");
-    if mayan {
+    if drawn {
         b.add_css_class("mayan");
     }
     if active {
@@ -1782,24 +2400,13 @@ fn plan_compaction(set: &[i32], visible: i32, occupied: impl Fn(i32) -> bool) ->
     moves
 }
 
-/// A workspace's pill label in the configured numeral system.
-fn ws_label(id: i32, numerals: Numerals) -> String {
-    match numerals {
-        Numerals::Arabic => id.to_string(),
-        Numerals::Mayan => mayan(id),
-    }
-}
-
-/// Mayan numeral for `n` from the Unicode Mayan Numerals block
-/// (U+1D2E0 ZERO … U+1D2F3 NINETEEN — bars-and-dots), digits beyond 19.
-/// Needs a covering font (Noto Sans Mayan Numerals); see `button.ws.mayan`.
-fn mayan(n: i32) -> String {
-    match n {
-        0..=19 => {
-            char::from_u32(0x1D2E0 + n as u32).map(String::from).unwrap_or_else(|| n.to_string())
-        }
-        _ => n.to_string(),
-    }
+/// A workspace's pill *text*.
+///
+/// Always the digit: in Mayan mode `ws_button` draws the bar-and-dot glyph
+/// itself and ignores this, except above [`draw::MAYAN_MAX`] where the digit is
+/// the fallback.
+fn ws_label(id: i32, _numerals: Numerals) -> String {
+    id.to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -1851,7 +2458,7 @@ mod tests {
 
     #[test]
     fn default_left_full_reproduces_the_old_layout() {
-        let plan = plan_region(&Config::default().layout_left, false);
+        let plan = plan_region(&Config::default().layout_left, false, false);
         use Mod::*;
         assert_eq!(plan, slots(&[Mirror, Sep, Appname, Sep, Workspaces, Submap]));
     }
@@ -1859,7 +2466,7 @@ mod tests {
     #[test]
     fn compact_drops_appname_and_collapses_the_freed_separator() {
         // mirror, sep, appname, sep, workspaces, submap  →  mirror | workspaces submap
-        let plan = plan_region(&Config::default().layout_left, true);
+        let plan = plan_region(&Config::default().layout_left, true, false);
         use Mod::*;
         assert_eq!(plan, slots(&[Mirror, Sep, Workspaces, Submap]));
     }
@@ -1868,13 +2475,13 @@ mod tests {
     fn default_right_plan_matches_the_old_hardcoded_order() {
         // The default right layout has no dups/edge seps, so the plan is identical.
         let right = Config::default().layout_right;
-        assert_eq!(plan_region(&right, false), right);
+        assert_eq!(plan_region(&right, false, false), right);
     }
 
     #[test]
     fn leading_trailing_and_doubled_separators_collapse() {
         use Mod::*;
-        let plan = plan_region(&slots(&[Sep, Sep, Cpu, Sep, Sep, Mem, Sep, Sep]), false);
+        let plan = plan_region(&slots(&[Sep, Sep, Cpu, Sep, Sep, Mem, Sep, Sep]), false, false);
         assert_eq!(plan, slots(&[Cpu, Sep, Mem]));
     }
 
@@ -1883,7 +2490,7 @@ mod tests {
         use Mod::*;
         // cpu, sep, cpu → the second cpu is a dup; the sep before it is then
         // trailing and disappears, leaving a single cpu.
-        let plan = plan_region(&slots(&[Cpu, Sep, Cpu]), false);
+        let plan = plan_region(&slots(&[Cpu, Sep, Cpu]), false, false);
         assert_eq!(plan, slots(&[Cpu]));
     }
 
@@ -1893,6 +2500,53 @@ mod tests {
         let weather = Slot::Custom("weather".into());
         let input = vec![m(Cpu), m(Sep), weather.clone(), m(Sep), weather.clone()];
         // second weather is a dup; its leading sep becomes trailing and drops.
-        assert_eq!(plan_region(&input, false), vec![m(Cpu), m(Sep), weather]);
+        assert_eq!(plan_region(&input, false, false), vec![m(Cpu), m(Sep), weather]);
+    }
+
+    #[test]
+    fn tiers_drops_third_tier_modules_and_tidies_their_separators() {
+        use Mod::*;
+        // gpu and tray are tier-3; removing them must not leave the separators
+        // that framed them dangling.
+        let input = slots(&[Cpu, Sep, Gpu, Tray, Sep, Clock]);
+        assert_eq!(plan_region(&input, false, true), slots(&[Cpu, Sep, Clock]));
+        // The same layout keeps everything when the strategy is off.
+        assert_eq!(plan_region(&input, false, false), input);
+    }
+
+    #[test]
+    fn tiers_never_drops_a_custom_module() {
+        // Tiering is a judgement about the built-ins we ship. A module someone
+        // installed deliberately is not ours to rank.
+        let weather = Slot::Custom("weather".into());
+        let input = vec![m(Mod::Gpu), weather.clone()];
+        assert_eq!(plan_region(&input, false, true), vec![weather]);
+    }
+
+    #[test]
+    fn clusters_cover_the_privacy_and_metric_runs_only() {
+        use Mod::*;
+        for id in [Camera, Microphone, Recording] {
+            assert_eq!(cluster_of(&m(id)), Some(Cluster::Privacy), "{id:?}");
+        }
+        for id in [Cpu, Mem, Gpu] {
+            assert_eq!(cluster_of(&m(id)), Some(Cluster::System), "{id:?}");
+        }
+        for id in [Clock, Battery, Tray, Network] {
+            assert_eq!(cluster_of(&m(id)), None, "{id:?}");
+        }
+        assert_eq!(cluster_of(&Slot::Custom("weather".into())), None);
+    }
+
+    #[test]
+    fn every_tier3_module_is_also_ambient_except_the_gpu() {
+        // The two lists are deliberately near-identical; this pins the one
+        // difference so a later edit to either has to be a considered one.
+        use Mod::*;
+        for id in [Caffeine, NightLight, Tray, Brightness] {
+            assert!(id.is_tier3() && id.is_ambient(), "{id:?}");
+        }
+        assert!(Gpu.is_tier3() && !Gpu.is_ambient());
+        assert!(Bluetooth.is_ambient() && !Bluetooth.is_tier3());
     }
 }

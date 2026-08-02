@@ -41,26 +41,6 @@ impl CpuMeter {
     }
 }
 
-/// Memory snapshot from /proc/meminfo.
-pub struct Mem {
-    pub used_frac: f64,
-}
-
-pub fn mem() -> Mem {
-    let text = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
-    let get = |key: &str| -> f64 {
-        text.lines()
-            .find(|l| l.starts_with(key))
-            .and_then(|l| l.split_whitespace().nth(1))
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(0.0) // kB
-    };
-    let total = get("MemTotal:");
-    let avail = get("MemAvailable:");
-    let used = (total - avail).max(0.0);
-    Mem { used_frac: if total > 0.0 { used / total } else { 0.0 } }
-}
-
 /// Audio sink state from wpctl.
 pub struct Audio {
     pub volume: u32, // percent
@@ -244,6 +224,11 @@ fn iface_bytes(iface: &str) -> Option<(u64, u64)> {
 pub struct Battery {
     pub percent: u32,
     pub charging: bool,
+    /// Seconds until empty (discharging) or full (charging), when the driver
+    /// gives us enough to work it out. `None` at rest, or on a battery that
+    /// reports no rate — the bar then shows the percentage alone rather than a
+    /// made-up estimate.
+    pub secs_remaining: Option<u64>,
 }
 
 pub fn battery() -> Option<Battery> {
@@ -257,9 +242,97 @@ pub fn battery() -> Option<Battery> {
         }
         let percent = read_trim(&p.join("capacity")).and_then(|s| s.parse().ok()).unwrap_or(0);
         let status = read_trim(&p.join("status")).unwrap_or_default();
-        return Some(Battery { percent, charging: status == "Charging" || status == "Full" });
+        let charging = status == "Charging" || status == "Full";
+        return Some(Battery { percent, charging, secs_remaining: battery_secs(&p, charging) });
     }
     None
+}
+
+/// The figures the battery popover shows beyond the percentage.
+#[derive(Default)]
+pub struct BatteryDetail {
+    pub model: String,
+    pub status: String,
+    /// Present draw, watts. Positive whether charging or discharging.
+    pub power_w: Option<f64>,
+    /// Full charge now vs. as designed, as a percentage — battery health.
+    pub health_pct: Option<f64>,
+    /// Wh now full / Wh when new.
+    pub capacity_wh: Option<(f64, f64)>,
+    pub cycles: Option<u64>,
+    pub temp_c: Option<f64>,
+}
+
+/// Everything else the first battery reports. `None` on a desktop.
+///
+/// Split from [`battery`] because this is only read while the popover is open:
+/// the bar itself needs two fields, and the other six are a dozen small sysfs
+/// reads that would otherwise happen every two seconds forever.
+pub fn battery_detail() -> Option<BatteryDetail> {
+    let rd = std::fs::read_dir("/sys/class/power_supply").ok()?;
+    for e in rd.flatten() {
+        let p = e.path();
+        if read_trim(&p.join("type")).as_deref() != Some("Battery") {
+            continue;
+        }
+        let num = |f: &str| read_trim(&p.join(f)).and_then(|s| s.parse::<f64>().ok());
+        // µWh → Wh, µW → W. Charge-reporting batteries give µAh instead, which
+        // is not convertible to Wh without a voltage, so those simply have no
+        // capacity figure rather than a wrong one.
+        let full_now = num("energy_full").map(|v| v / 1e6);
+        let full_design = num("energy_full_design").map(|v| v / 1e6);
+        return Some(BatteryDetail {
+            model: read_trim(&p.join("model_name")).unwrap_or_default(),
+            status: read_trim(&p.join("status")).unwrap_or_default(),
+            power_w: num("power_now").map(|v| v / 1e6),
+            health_pct: match (full_now, full_design) {
+                (Some(n), Some(d)) if d > 0.0 => Some(n / d * 100.0),
+                _ => None,
+            },
+            capacity_wh: full_now.zip(full_design),
+            cycles: read_trim(&p.join("cycle_count")).and_then(|s| s.parse().ok()),
+            // Reported in tenths of a degree.
+            temp_c: num("temp").map(|v| v / 10.0),
+        });
+    }
+    None
+}
+
+/// Seconds to empty/full for the battery at `p`.
+///
+/// Drivers disagree about which pair of files they expose: some report energy
+/// (µWh) against power (µW), others charge (µAh) against current (µA). Either
+/// pair divides to hours because the µ- prefixes cancel, so try energy first and
+/// fall back to charge rather than picking one and calling the other broken.
+/// A zero rate means "not moving" — no estimate exists, so we return `None`
+/// instead of dividing by zero into infinity.
+fn battery_secs(p: &Path, charging: bool) -> Option<u64> {
+    let num = |f: &str| read_trim(&p.join(f)).and_then(|s| s.parse::<f64>().ok());
+    let (now, full, rate) = match (num("energy_now"), num("power_now")) {
+        (Some(n), Some(r)) => (n, num("energy_full"), r),
+        _ => (num("charge_now")?, num("charge_full"), num("current_now")?),
+    };
+    if rate <= 0.0 {
+        return None;
+    }
+    // Charging counts up to full; discharging counts down to nothing.
+    let delta = if charging { (full? - now).max(0.0) } else { now };
+    Some((delta / rate * 3600.0) as u64)
+}
+
+/// `13560` → `3h 46m`, `900` → `15m`. Empty for a nonsensical span.
+pub fn duration_short(secs: u64) -> String {
+    let (h, m) = (secs / 3600, (secs % 3600) / 60);
+    // Past a day the estimate is noise — a laptop that claims 40h is telling you
+    // its rate sample is bad, not that it will last two days.
+    if h >= 24 {
+        return String::new();
+    }
+    if h > 0 {
+        format!("{h}h {m:02}m")
+    } else {
+        format!("{m}m")
+    }
 }
 
 /// GPU utilization fraction in [0,1], or None when no source is available.
@@ -413,6 +486,198 @@ pub fn cpu_detail() -> CpuDetail {
         threads: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
         load: loadavg(),
     }
+}
+
+/// Per-core busy fractions, from the `cpuN` lines of /proc/stat.
+///
+/// Separate from [`CpuMeter`] because it keeps one previous sample *per core*
+/// and is only sampled while a popover is open — a 16-core machine would
+/// otherwise pay for 16 deltas a second to render a grid nobody is looking at.
+#[derive(Default)]
+pub struct CoreMeter {
+    last: Vec<(u64, u64)>, // (total, idle) per core
+}
+
+impl CoreMeter {
+    /// Busy fraction per core since the previous call. Empty on the first call
+    /// — there is no delta yet, and showing zeros would read as "idle".
+    pub fn sample(&mut self) -> Vec<f64> {
+        let Ok(stat) = std::fs::read_to_string("/proc/stat") else { return Vec::new() };
+        let now: Vec<(u64, u64)> = stat
+            .lines()
+            .filter(|l| l.starts_with("cpu") && l.as_bytes().get(3).is_some_and(u8::is_ascii_digit))
+            .filter_map(|l| {
+                let n: Vec<u64> =
+                    l.split_whitespace().skip(1).filter_map(|s| s.parse().ok()).collect();
+                (n.len() >= 4).then(|| (n.iter().sum(), n[3] + n.get(4).copied().unwrap_or(0)))
+            })
+            .collect();
+
+        // A core count that changed (hotplug, or the first sample) invalidates
+        // every stored delta at once.
+        let out = if self.last.len() == now.len() {
+            now.iter()
+                .zip(&self.last)
+                .map(|((t, i), (pt, pi))| {
+                    let dt = t.saturating_sub(*pt);
+                    let di = i.saturating_sub(*pi);
+                    if dt == 0 {
+                        0.0
+                    } else {
+                        (1.0 - di as f64 / dt as f64).clamp(0.0, 1.0)
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.last = now;
+        out
+    }
+}
+
+/// One row of the "top processes" list.
+pub struct Proc {
+    pub name: String,
+    pub pid: u32,
+    /// Resident set size, kB.
+    pub rss_kb: u64,
+    /// Total CPU jiffies used, for the caller to delta against a previous read.
+    pub cpu_jiffies: u64,
+}
+
+/// Every process we can read, with its name, RSS and cumulative CPU time.
+///
+/// Deliberately not shelling out to `ps`: this runs while a popover is open,
+/// and a subprocess per open is both slower and one more thing that can be
+/// missing. Unreadable entries (a process that exited mid-scan, or one owned by
+/// another user) are skipped rather than reported as zero.
+pub fn processes() -> Vec<Proc> {
+    let Ok(rd) = std::fs::read_dir("/proc") else { return Vec::new() };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let Some(pid) = name.to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
+        let p = e.path();
+        // `stat`'s comm field is parenthesised and may itself contain spaces or
+        // parentheses, so the fields after it are found from the LAST ')'.
+        let Ok(stat) = std::fs::read_to_string(p.join("stat")) else { continue };
+        let Some(close) = stat.rfind(')') else { continue };
+        let comm = stat[..close].split_once('(').map(|(_, c)| c).unwrap_or("").to_string();
+        let rest: Vec<&str> = stat[close + 1..].split_whitespace().collect();
+        // After the state field: utime is index 11, stime 12 (1-based field 14/15).
+        let num = |i: usize| rest.get(i).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        let rss_pages = num(21);
+        out.push(Proc {
+            name: comm,
+            pid,
+            rss_kb: rss_pages * page_size_kb(),
+            cpu_jiffies: num(11) + num(12),
+        });
+    }
+    out
+}
+
+/// Page size in kB, worked out once by asking the kernel about *us*.
+///
+/// `/proc/<pid>/stat` reports RSS in pages while `/proc/<pid>/status` reports
+/// it in kB, so dividing our own two figures gives the page size with no libc
+/// binding and no `unsafe` — and no hardcoded 4, which would silently scale
+/// every memory figure wrong on a 16K-page kernel. Falls back to 4 only when
+/// one of the two reads is unavailable.
+fn page_size_kb() -> u64 {
+    use std::sync::OnceLock;
+    static SIZE: OnceLock<u64> = OnceLock::new();
+    *SIZE.get_or_init(|| {
+        let pages = std::fs::read_to_string("/proc/self/stat")
+            .ok()
+            .and_then(|s| {
+                let close = s.rfind(')')?;
+                s[close + 1..].split_whitespace().nth(21)?.parse::<u64>().ok()
+            })
+            .filter(|p| *p > 0);
+        let kb = std::fs::read_to_string("/proc/self/status").ok().and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmRSS:"))?
+                .split_whitespace()
+                .nth(1)?
+                .parse::<u64>()
+                .ok()
+        });
+        match (pages, kb) {
+            (Some(p), Some(k)) if k > 0 => snap_page_size(k as f64 / p as f64),
+            _ => 4,
+        }
+    })
+}
+
+/// Snap a measured pages-to-kB ratio onto a real page size.
+///
+/// The two `/proc` files are read a moment apart and this process is allocating
+/// in between, so the raw quotient drifts — on a 4K kernel it measures anywhere
+/// from about 3.5 to 5.5. Page sizes are powers of two by definition, so the
+/// answer is the nearest candidate rather than the rounded quotient. (Rounding
+/// alone silently reported 5 kB here, which would have made every memory figure
+/// in the bar 25% too large.)
+fn snap_page_size(ratio: f64) -> u64 {
+    const CANDIDATES: [u64; 5] = [4, 8, 16, 32, 64];
+    *CANDIDATES
+        .iter()
+        .min_by(|a, b| {
+            let d = |v: u64| (ratio - v as f64).abs();
+            d(**a).total_cmp(&d(**b))
+        })
+        .expect("CANDIDATES is never empty")
+}
+
+/// One application stream in the mixer, from `wpctl status`.
+pub struct Stream {
+    pub name: String,
+    pub volume: u32,
+    pub muted: bool,
+}
+
+/// The per-application playback streams PipeWire currently has.
+///
+/// `wpctl status` is the only interface here that does not need a subscription;
+/// its output is a tree with a "Streams:" section under Audio. Parsed
+/// defensively — a format change should cost the list, not the popover.
+pub fn streams() -> Vec<Stream> {
+    let Some(out) = wpctl(&["status"]) else { return Vec::new() };
+    let mut ids: Vec<(u32, String)> = Vec::new();
+    let mut in_streams = false;
+    for line in out.lines() {
+        let t = line.trim_start_matches(['│', ' ', '\u{2502}']).trim();
+        if t.starts_with("Streams:") {
+            in_streams = true;
+            continue;
+        }
+        // Any other section header ends the streams block.
+        if in_streams && t.ends_with(':') && !t.starts_with("Streams:") {
+            break;
+        }
+        if !in_streams {
+            continue;
+        }
+        // "  53. Firefox" — an id, a dot, then the application name.
+        let Some((id, rest)) = t.split_once('.') else { continue };
+        let Ok(id) = id.trim().parse::<u32>() else { continue };
+        let name = rest.trim();
+        if !name.is_empty() {
+            ids.push((id, name.to_string()));
+        }
+    }
+    ids.into_iter()
+        .filter_map(|(id, name)| {
+            let a = audio_of(&id.to_string())?;
+            Some(Stream { name, volume: a.volume, muted: a.muted })
+        })
+        .collect()
+}
+
+fn wpctl(args: &[&str]) -> Option<String> {
+    let out = Command::new("wpctl").args(args).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).to_string())
 }
 
 /// Expanded memory telemetry (all fields in kB, matching /proc/meminfo).
@@ -580,5 +845,55 @@ mod tests {
         assert_eq!(split_terse("yes:72:Plain"), vec!["yes", "72", "Plain"]);
         assert_eq!(split_terse(r"a\\b:c"), vec![r"a\b", "c"]);
         assert_eq!(split_terse("ethernet:connected"), vec!["ethernet", "connected"]);
+    }
+
+    /// The scanner has to find the process running the test, with a sane RSS —
+    /// which is also the only end-to-end check that `page_size_kb` is right.
+    #[test]
+    fn processes_finds_this_one_with_a_plausible_rss() {
+        let me = std::process::id();
+        let procs = processes();
+        assert!(!procs.is_empty(), "no processes readable from /proc");
+        let mine = procs.iter().find(|p| p.pid == me).expect("did not find the test process");
+        // A Rust test binary is somewhere between a megabyte and a gigabyte.
+        // The point is the order of magnitude: a wrong page size lands this
+        // 4x or 1/4x out, and a pages-vs-kB mixup lands it 1000x out.
+        assert!(
+            (1_000..1_000_000).contains(&mine.rss_kb),
+            "implausible RSS {} kB — page size likely wrong",
+            mine.rss_kb
+        );
+        assert!(!mine.name.is_empty(), "process name should not be blank");
+    }
+
+    #[test]
+    fn page_size_is_a_power_of_two() {
+        let k = page_size_kb();
+        assert!(k > 0 && k.is_power_of_two(), "page size {k} kB is not a power of two");
+        // Every architecture this ships to is 4K, 16K or 64K.
+        assert!((4..=64).contains(&k), "page size {k} kB is outside anything Linux uses");
+    }
+
+    #[test]
+    fn core_meter_reports_one_value_per_cpu_after_a_delta() {
+        let mut m = CoreMeter::default();
+        // First sample has nothing to diff against and must say so with an
+        // empty vec rather than a row of convincing zeroes.
+        assert!(m.sample().is_empty());
+        let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        let second = m.sample();
+        assert_eq!(second.len(), n, "one busy fraction per logical core");
+        assert!(second.iter().all(|f| (0.0..=1.0).contains(f)));
+    }
+
+    #[test]
+    fn page_size_snaps_to_a_real_one_not_the_raw_quotient() {
+        // The measured ratio drifts because RSS moves between the two reads.
+        // Every one of these came from a 4K kernel.
+        for r in [3.5, 3.9, 4.0, 4.4, 5.0, 5.6] {
+            assert_eq!(snap_page_size(r), 4, "ratio {r} should read as a 4 kB page");
+        }
+        assert_eq!(snap_page_size(15.2), 16);
+        assert_eq!(snap_page_size(61.0), 64);
     }
 }

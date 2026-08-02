@@ -32,6 +32,24 @@ const SCALARS: &[(&str, &str)] = &[
     // Volume on-screen display (the glass pill that flashes on a volume change).
     ("osd_enabled", "true"),
     ("osd_timeout_ms", "1400"),
+    // Weather — opt-in, and the only other module that touches the network.
+    ("weather_enabled", "false"),
+    ("weather_lat", ""),
+    ("weather_lon", ""),
+    ("weather_place", ""),
+    ("weather_interval", "900"),
+    ("weather_unit", "celsius"),
+    ("weather_aqi", "false"),
+    // Local AI (Ollama). Loopback only — see crates/tezca-bar/src/llm.rs.
+    ("llm_enabled", "false"),
+    ("llm_backend", "auto"),
+    ("llm_port", "0"),
+    ("llm_interval", "5"),
+    ("llm_model", ""),
+    ("llm_system", ""),
+    // How the right cluster copes with its own length: all / grouped / hover /
+    // tiers. See crates/tezca-bar/src/config.rs::Clutter.
+    ("clutter", "all"),
     // Per-region module layout (ordered, comma-separated ids). Defaults mirror
     // crates/tezca-bar/src/config.rs so `config` reports the real arrangement.
     ("layout_left", "mirror, sep, appname, sep, workspaces, submap"),
@@ -56,12 +74,13 @@ pub fn run(args: &[&str]) -> i32 {
         Some("toggle") => cmd_toggle(),
         Some("config") => cmd_config(),
         Some("set") => cmd_set(&args[1..]),
+        Some("weather") => cmd_weather(&args[1..]),
         Some("-h") | Some("--help") => {
             print_help();
             Ok(())
         }
         Some(other) => Err(format!(
-            "unknown bar subcommand: {other}\n  try: status · start · stop · restart · toggle · config · set"
+            "unknown bar subcommand: {other}\n  try: status · start · stop · restart · toggle · config · set · weather"
         )),
     };
     match r {
@@ -168,6 +187,90 @@ fn cmd_config() -> Result<(), String> {
 
 /// `tezca bar set <key> <value> [<key> <value>…]` — edit config.toml (preserving
 /// comments) then restart the bar if it's running so the change takes effect.
+/// `tezca bar weather <search <place…> | here | set <lat> <lon> [name…]>`
+///
+/// The lookups live in `tezca-bar` (it owns the host allowlist and the only
+/// HTTP code in this project), so this drives them through the binary rather
+/// than opening a second network path from the CLI.
+fn cmd_weather(args: &[&str]) -> Result<(), String> {
+    match args.first().copied() {
+        Some("search") if args.len() > 1 => {
+            let query = args[1..].join(" ");
+            let out = bar_query(&["--weather-search", &query])?;
+            let places = parse_places(&out);
+            if places.is_empty() {
+                return Err(format!("no place matched {query:?}"));
+            }
+            println!("{}", term::header("matches"));
+            println!();
+            for (label, lat, lon) in &places {
+                println!("  {}", term::bold(label));
+                println!(
+                    "    {}",
+                    term::dim(&format!("tezca bar weather set {lat} {lon} {label}"))
+                );
+            }
+            println!();
+            println!("  {}", term::dim("run one of the lines above to save it"));
+            Ok(())
+        }
+        // Deliberately not called `locate`: this is a guess from your IP, and
+        // the name should say that it is asking where you *appear* to be.
+        Some("here") => {
+            let out = bar_query(&["--weather-locate"])?;
+            let places = parse_places(&out);
+            let Some((label, lat, lon)) = places.first() else {
+                return Err("could not work out a location from your IP".into());
+            };
+            println!("{}", term::header("looks like"));
+            println!();
+            println!("  {}  {}", term::bold(label), term::dim(&format!("{lat}, {lon}")));
+            println!();
+            println!(
+                "  {}",
+                term::dim("a VPN will place you somewhere you are not — check it, then run:")
+            );
+            println!("    {}", term::dim(&format!("tezca bar weather set {lat} {lon} {label}")));
+            Ok(())
+        }
+        Some("set") if args.len() >= 3 => {
+            let (lat, lon) = (args[1], args[2]);
+            lat.parse::<f64>().map_err(|_| format!("not a latitude: {lat}"))?;
+            lon.parse::<f64>().map_err(|_| format!("not a longitude: {lon}"))?;
+            let place = args[3..].join(" ");
+            let mut kvs: Vec<&str> =
+                vec!["weather_enabled", "true", "weather_lat", lat, "weather_lon", lon];
+            if !place.is_empty() {
+                kvs.push("weather_place");
+                kvs.push(&place);
+            }
+            cmd_set(&kvs)
+        }
+        _ => Err("usage: tezca bar weather <search PLACE… | here | set LAT LON [NAME…]>".into()),
+    }
+}
+
+/// Run `tezca-bar <args>` and capture stdout.
+fn bar_query(args: &[&str]) -> Result<String, String> {
+    let out =
+        Command::new(BIN).args(args).output().map_err(|e| format!("could not run {BIN}: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if err.is_empty() { "lookup failed".into() } else { err });
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// `label\tlat\tlon` lines into triples.
+fn parse_places(out: &str) -> Vec<(String, String, String)> {
+    out.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            Some((f.next()?.to_string(), f.next()?.to_string(), f.next()?.to_string()))
+        })
+        .collect()
+}
+
 fn cmd_set(args: &[&str]) -> Result<(), String> {
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err("usage: tezca bar set <key> <value> [<key> <value>…]".into());
@@ -304,5 +407,15 @@ fn print_help() {
     println!("  {}                  print the effective configuration", term::cyan("config"));
     println!("  {}      edit ~/.config/tezca-bar/config.toml", term::cyan("set <key> <value>…"));
     println!();
+    println!("{}", term::dim("  weather — find coordinates for the weather module"));
+    println!("  {}   look a town or city up by name", term::cyan("weather search <place…>"));
+    println!(
+        "  {}            guess from your IP {}",
+        term::cyan("weather here"),
+        term::dim("(the one call that tells a third party where you are)")
+    );
+    println!("  {}  save them and switch the module on", term::cyan("weather set <lat> <lon>"));
+    println!();
     println!("{}", term::dim("  e.g. tezca bar set height 38 layout_center nowplaying"));
+    println!("{}", term::dim("       tezca bar weather search Guadalajara"));
 }

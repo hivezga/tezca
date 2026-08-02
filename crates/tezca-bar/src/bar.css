@@ -109,13 +109,11 @@ button.ws:hover {
     color: @tz_text;
     background: alpha(@tz_accent, 0.10);
 }
-/* Mayan bar-and-dot numerals: render from the Mayan Numerals Unicode block,
-   which only Noto Sans Mayan Numerals covers here — name it first so Pango
-   picks it up for those codepoints (else they'd fall back to tofu boxes). */
+/* Bar-and-dot numerals are painted by draw.rs, so this needs no font — only
+   the room the glyph occupies. The pill's `color` is what the numeral strokes
+   with, which is why active/occupied need no rule of their own here. */
 button.ws.mayan {
-    font-family: "Noto Sans Mayan Numerals", "JetBrainsMono Nerd Font", monospace;
-    font-size: 20px;
-    padding: 0 10px;
+    padding: 0 8px;
 }
 button.ws.active {
     color: @tz_on_accent;
@@ -173,6 +171,24 @@ button.ws.urgent {
     font-size: 12px;
     color: @tz_subtext;
 }
+/* The second number in a module — the temp beside the load, the watts beside
+   the utilisation, the time beside the charge. Deliberately quieter than the
+   primary: it is context for the figure next to it, not a reading of its own,
+   and at equal weight the pair reads as two unrelated numbers. */
+.metric-sub,
+.control-sub {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    color: @tz_faint;
+    font-feature-settings: "tnum" 1;
+}
+/* The network name sits over its throughput, so both lines have to be tight
+   enough that the pair is no taller than a single-line module beside it. */
+.control-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: @tz_subtext;
+}
 .metric,
 .control {
     padding: 0 8px;
@@ -209,6 +225,60 @@ button.ws.urgent {
 }
 .glyph {
     font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+}
+
+/* ── Collapsible clusters ───────────────────────────────────────────────────
+   A chip standing in for a run of modules. It has to read as *a summary you
+   can open*, not as another module — hence the chevron and the hover
+   background, which no plain module has. */
+.cluster-chip {
+    padding: 0 9px;
+    border-radius: 9px;
+    color: @tz_subtext;
+}
+.cluster-chip:hover {
+    background: alpha(@tz_accent, 0.08);
+}
+.cluster-val {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 12px;
+    color: @tz_subtext;
+    font-feature-settings: "tnum" 1;
+}
+/* Something is watching or listening: the chip takes the same urgent red the
+   individual indicators do, so grouping never softens the one message on this
+   bar that must not be softened. */
+.priv-chip,
+.priv-chip .cluster-val {
+    color: @tz_urgent;
+}
+.cluster-chev {
+    font-size: 11px;
+    color: @tz_faint;
+}
+/* The control that folds a run back up. Quiet until you are already in the
+   cluster looking at it. */
+button.cluster-collapse {
+    background: transparent;
+    color: @tz_faint;
+    padding: 0 4px;
+    min-width: 0;
+    min-height: 0;
+}
+button.cluster-collapse:hover {
+    color: @tz_accent;
+}
+
+/* ── Hover-reveal strategy ──────────────────────────────────────────────────
+   The ambient modules fade back until the pointer is on the bar. Opacity only:
+   nothing resizes, so approaching the bar never shifts the module you were
+   reaching for out from under the pointer. */
+.bar.hover-reveal .ambient {
+    opacity: 0.34;
+    transition: opacity 160ms ease;
+}
+.bar.hover-reveal:hover .ambient {
+    opacity: 1;
 }
 
 /* ── System tray (StatusNotifierItem icons) ─────────────────────────────── */
@@ -248,6 +318,125 @@ button.ws.urgent {
 .ai.crit,
 .ai.crit .ai-val {
     color: @tz_urgent;
+}
+
+/* ── Weather ───────────────────────────────────────────────────────────────
+   Neutral: unlike the AI module there is no threshold at which weather becomes
+   urgent, and colouring a temperature would imply one. */
+.weather {
+    padding: 0 9px;
+    border-radius: 9px;
+    color: @tz_subtext;
+}
+.weather.clickable:hover {
+    background: alpha(@tz_accent, 0.08);
+}
+
+/* ── Local AI (Ollama) ─────────────────────────────────────────────────────
+   Gold only for a split offload — the one state that explains why generation
+   went slow. A fully-resident model is unremarkable and is styled that way. */
+.llm {
+    padding: 0 9px;
+    border-radius: 9px;
+    color: @tz_subtext;
+}
+.llm.clickable:hover {
+    background: alpha(@tz_accent, 0.08);
+}
+.llm.warn,
+.llm.warn .control-val,
+.llm.warn .control-sub {
+    color: @tz_gold;
+}
+
+/* ── The SUPER+I lateral panel ─────────────────────────────────────────────
+   A docked column, not a floating window: square on the anchored edges, with
+   only the inner corner rounded, so it reads as part of the screen edge. */
+window.tezca-llm {
+    background: transparent;
+}
+.llm-panel {
+    background: alpha(@tz_base, 0.94);
+    border-left: 1px solid alpha(@tz_accent, 0.18);
+    color: @tz_text;
+}
+.llm-head {
+    padding: 11px 12px;
+    border-bottom: 1px solid alpha(@tz_muted, 0.14);
+}
+.llm-dot {
+    min-width: 7px;
+    min-height: 7px;
+    border-radius: 7px;
+    background: @tz_accent;
+}
+.llm-model {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: @tz_text;
+}
+button.llm-icon {
+    background: transparent;
+    color: @tz_muted;
+    padding: 2px 6px;
+    min-width: 0;
+    min-height: 0;
+}
+button.llm-icon:hover {
+    color: @tz_text;
+}
+.llm-messages {
+    padding: 16px 14px;
+}
+.llm-who {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    color: @tz_faint;
+}
+.llm-body {
+    font-size: 12.5px;
+    color: @tz_subtext;
+}
+/* Your own turns get a surface so the transcript is skimmable — you can find
+   what you asked without reading what was answered. */
+.llm-user .llm-body {
+    color: @tz_text;
+    background: alpha(@tz_muted, 0.10);
+    border-radius: 10px;
+    padding: 9px 11px;
+}
+.llm-foot {
+    padding: 10px 12px 11px 12px;
+    border-top: 1px solid alpha(@tz_muted, 0.14);
+}
+.llm-composer {
+    border: 1px solid alpha(@tz_muted, 0.20);
+    border-radius: 11px;
+    padding: 7px 9px;
+    background: alpha(@tz_base, 0.6);
+}
+textview.llm-input,
+textview.llm-input text {
+    background: transparent;
+    color: @tz_text;
+    font-size: 12.5px;
+}
+button.llm-send {
+    background: @tz_accent;
+    color: @tz_on_accent;
+    border-radius: 8px;
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+}
+button.llm-send:disabled {
+    background: alpha(@tz_muted, 0.25);
+    color: @tz_faint;
+}
+.llm-status {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    color: @tz_faint;
 }
 
 /* ── Custom (community / user exec) modules ─────────────────────────────────
@@ -471,6 +660,32 @@ popover.tz-popover > contents {
     background: alpha(@tz_accent, 0.12);
     border-radius: 5px;
     padding: 2px 7px;
+}
+/* The one number a popover is actually about — the temperature in weather, the
+   charge in battery. Everything else on the panel qualifies it. */
+.pop-big {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 30px;
+    font-weight: 400;
+    color: @tz_text;
+    font-feature-settings: "tnum" 1;
+}
+/* Per-core grid and the battery trace: many small vertical bars read as one
+   shape, so they get no gap of their own beyond the box spacing. */
+.core-grid {
+    margin-top: 2px;
+}
+levelbar.core trough {
+    background: alpha(@tz_muted, 0.12);
+    border-radius: 3px;
+    min-width: 5px;
+}
+levelbar.core block.filled {
+    background: @tz_accent;
+    border-radius: 3px;
+}
+levelbar.core block.empty {
+    background: transparent;
 }
 
 /* Calendar (clock popover). */

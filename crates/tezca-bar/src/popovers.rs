@@ -13,9 +13,11 @@
 use crate::ai;
 use crate::sysinfo::{self, Net, Throughput};
 use crate::tray;
+use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Calendar, Label, LevelBar, Orientation, Popover};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::process::Command;
 use std::rc::Rc;
 
@@ -101,6 +103,17 @@ pub fn mixer(anchor: &impl IsA<gtk4::Widget>) -> Popover {
             let a = sysinfo::audio_of(id);
             let (vol, muted) = a.map(|x| (x.volume, x.muted)).unwrap_or((0, true));
             content_c.append(&mix_row(label, vol, muted));
+        }
+        // Per-application streams. Only rendered when something is actually
+        // playing — an empty "Apps" heading over nothing is worse than no
+        // heading, and most of the time nothing is.
+        let streams = sysinfo::streams();
+        if !streams.is_empty() {
+            content_c.append(&sep_row());
+            content_c.append(&caption("apps"));
+            for st in streams {
+                content_c.append(&mix_row(&st.name, st.volume, st.muted));
+            }
         }
     });
     pop
@@ -412,8 +425,11 @@ fn meter_row(label: &str, value: &str, frac: f64) -> GtkBox {
 /// CPU detail: model, temperature, clock, load average, thread count.
 pub fn cpu_detail(anchor: &impl IsA<gtk4::Widget>) -> Popover {
     let (pop, content) = glass(anchor);
-    content.set_width_request(250);
+    content.set_width_request(268);
     let c = content.clone();
+    // Per-core deltas need a previous sample, and this meter only advances
+    // while a popover is open — so the very first open has nothing to diff.
+    let cores = Rc::new(RefCell::new(sysinfo::CoreMeter::default()));
     pop.connect_show(move |_| {
         clear(&c);
         let d = sysinfo::cpu_detail();
@@ -431,9 +447,89 @@ pub fn cpu_detail(anchor: &impl IsA<gtk4::Widget>) -> Popover {
             rows.append(&mono_row("threads", &d.threads.to_string(), false));
         }
         c.append(&rows);
+
+        // Prime the meter, then show the grid a moment later once there is a
+        // real delta. Sampling twice back to back would divide by a zero
+        // interval and paint every core idle.
+        cores.borrow_mut().sample();
+        let (cc, cores_c) = (c.clone(), cores.clone());
+        glib::timeout_add_local_once(SAMPLE_GAP, move || {
+            let vals = cores_c.borrow_mut().sample();
+            if let Some(grid) = core_grid(&vals) {
+                cc.append(&caption("per core"));
+                cc.append(&grid);
+            }
+        });
+
+        append_top_processes(&c, Rank::Cpu);
     });
     pop
 }
+
+/// How long to wait before the second sample of anything that needs a rate.
+///
+/// Long enough that the delta is not dominated by scheduling noise, short
+/// enough that the popover does not visibly fill in twice.
+const SAMPLE_GAP: std::time::Duration = std::time::Duration::from_millis(450);
+
+/// Which figure the process list ranks and reports.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Rank {
+    Cpu,
+    Mem,
+}
+
+/// Append a "top processes" block to `c`.
+///
+/// Memory is instantaneous, so it renders at once. CPU is a rate and needs two
+/// samples [`SAMPLE_GAP`] apart, so that block fills itself in a moment later
+/// rather than showing cumulative time, which would rank whatever has been
+/// running longest instead of whatever is busy now.
+fn append_top_processes(c: &GtkBox, rank: Rank) {
+    c.append(&sep_row());
+    c.append(&caption("top processes"));
+    let holder = GtkBox::new(Orientation::Vertical, 5);
+    c.append(&holder);
+
+    if rank == Rank::Mem {
+        let mut procs = sysinfo::processes();
+        procs.sort_unstable_by_key(|p| std::cmp::Reverse(p.rss_kb));
+        let rows: Vec<_> = procs
+            .iter()
+            .take(TOP_N)
+            .map(|p| (p.name.clone(), p.pid, format!("{:.1}G", p.rss_kb as f64 / 1024.0 / 1024.0)))
+            .collect();
+        holder.append(&proc_rows(&rows));
+        return;
+    }
+
+    let before: HashMap<u32, u64> =
+        sysinfo::processes().into_iter().map(|p| (p.pid, p.cpu_jiffies)).collect();
+    glib::timeout_add_local_once(SAMPLE_GAP, move || {
+        let mut deltas: Vec<(String, u32, u64)> = sysinfo::processes()
+            .into_iter()
+            .filter_map(|p| {
+                let prev = before.get(&p.pid)?;
+                Some((p.name, p.pid, p.cpu_jiffies.saturating_sub(*prev)))
+            })
+            .filter(|(_, _, d)| *d > 0)
+            .collect();
+        deltas.sort_unstable_by_key(|d| std::cmp::Reverse(d.2));
+        // USER_HZ is 100 on Linux, so a jiffy is 10ms; over the sample window
+        // that converts a delta straight to a percentage of one core.
+        let window_ms = SAMPLE_GAP.as_millis() as f64;
+        let rows: Vec<_> = deltas
+            .into_iter()
+            .take(TOP_N)
+            .map(|(n, pid, d)| (n, pid, format!("{:.0}%", d as f64 * 10.0 / window_ms * 100.0)))
+            .collect();
+        holder.append(&proc_rows(&rows));
+    });
+}
+
+/// How many processes the list shows. Four fits without scrolling and is about
+/// as many as anyone reads before deciding what to kill.
+const TOP_N: usize = 4;
 
 /// Memory detail: used / cached / buffers / swap breakdown + DIMM temp.
 pub fn mem_detail(anchor: &impl IsA<gtk4::Widget>) -> Popover {
@@ -466,6 +562,7 @@ pub fn mem_detail(anchor: &impl IsA<gtk4::Widget>) -> Popover {
             rows.append(&mono_row("dimm temp", &format!("{t:.0} \u{00B0}C"), false));
         }
         c.append(&rows);
+        append_top_processes(&c, Rank::Mem);
     });
     pop
 }
@@ -676,6 +773,253 @@ fn window_row(w: &ai::Window) -> GtkBox {
 }
 
 /// Muted sub-line under a meter, explaining what it measures.
+/// Weather detail: the conditions, the next few hours, and the numbers that
+/// only matter once you have decided to go outside.
+///
+/// Reads a shared snapshot rather than fetching: the poll thread owns the
+/// network, and opening a popover must never be able to start a request.
+pub fn weather_detail(
+    anchor: &impl IsA<gtk4::Widget>,
+    state: Rc<RefCell<crate::weather::Snapshot>>,
+) -> Popover {
+    let (pop, content) = glass(anchor);
+    content.set_width_request(268);
+    let c = content.clone();
+    pop.connect_show(move |_| {
+        clear(&c);
+        let s = state.borrow();
+        c.append(&pop_title(if s.place.is_empty() { "Weather" } else { &s.place }));
+
+        if let Some(e) = &s.error {
+            c.append(&caption(e));
+            return;
+        }
+
+        // The headline: temperature large, everything qualifying it small
+        // beside it, because the number is what you came for.
+        let head = GtkBox::new(Orientation::Horizontal, 12);
+        head.set_valign(Align::End);
+        let big = Label::new(Some(&s.temp_text()));
+        big.add_css_class("pop-big");
+        head.append(&big);
+        let col = GtkBox::new(Orientation::Vertical, 2);
+        col.set_valign(Align::End);
+        if let Some(code) = s.code {
+            let l = Label::new(Some(crate::weather::condition(code, s.is_day)));
+            l.add_css_class("pop-sub");
+            l.set_halign(Align::Start);
+            col.append(&l);
+        }
+        let mut qual = Vec::new();
+        if let Some(f) = s.feels_c {
+            qual.push(format!("feels {}", s.degrees(f)));
+        }
+        let range = s.range_text();
+        if !range.is_empty() {
+            qual.push(range);
+        }
+        if !qual.is_empty() {
+            let l = Label::new(Some(&qual.join(" · ")));
+            l.add_css_class("pop-mono");
+            l.set_halign(Align::Start);
+            col.append(&l);
+        }
+        head.append(&col);
+        c.append(&head);
+
+        if !s.hourly.is_empty() {
+            c.append(&sep_row());
+            let strip = GtkBox::new(Orientation::Horizontal, 0);
+            strip.set_homogeneous(true);
+            for h in &s.hourly {
+                let cell = GtkBox::new(Orientation::Vertical, 5);
+                for (text, class) in
+                    [(h.label.clone(), "pop-mono"), (s.degrees(h.temp_c), "pop-mono-val")]
+                {
+                    let l = Label::new(Some(&text));
+                    l.add_css_class(class);
+                    cell.append(&l);
+                }
+                strip.append(&cell);
+            }
+            c.append(&strip);
+        }
+
+        c.append(&sep_row());
+        let rows = GtkBox::new(Orientation::Vertical, 7);
+        if let Some(h) = s.humidity {
+            rows.append(&mono_row("humidity", &format!("{h:.0}%"), false));
+        }
+        if let Some(w) = s.wind_kmh {
+            let dir = s.wind_dir_deg.map(crate::weather::bearing).unwrap_or("");
+            rows.append(&mono_row("wind", format!("{w:.0} km/h {dir}").trim_end(), false));
+        }
+        if let Some(u) = s.uv {
+            rows.append(&mono_row("uv index", &format!("{u:.0}"), false));
+        }
+        if let Some(a) = s.aqi {
+            rows.append(&mono_row(
+                "aqi",
+                &format!("{a:.0} · {}", crate::weather::aqi_band(a)),
+                false,
+            ));
+        }
+        if let Some(t) = &s.sunset {
+            rows.append(&mono_row("sunset", t, false));
+        }
+        if s.updated > 0 {
+            rows.append(&mono_row("updated", &ai::ago(s.updated), false));
+        }
+        c.append(&rows);
+    });
+    pop
+}
+
+/// Battery detail: charge, what it is doing, and how well the cell is holding
+/// up. `history` is the charge trace the bar has recorded since it started.
+///
+/// There is no "biggest consumers" list: per-process power attribution needs
+/// powertop's kernel accounting, and a plausible-looking guess assembled from
+/// CPU time would be a number that reads as measured and is not.
+pub fn battery_detail(
+    anchor: &impl IsA<gtk4::Widget>,
+    history: Rc<RefCell<std::collections::VecDeque<f64>>>,
+) -> Popover {
+    let (pop, content) = glass(anchor);
+    content.set_width_request(250);
+    let c = content.clone();
+    pop.connect_show(move |_| {
+        clear(&c);
+        let Some(b) = sysinfo::battery() else {
+            c.append(&pop_title("Battery"));
+            c.append(&caption("no battery on this machine"));
+            return;
+        };
+        let d = sysinfo::battery_detail().unwrap_or_default();
+        c.append(&pop_title(if d.model.is_empty() { "Battery" } else { &d.model }));
+
+        let head = GtkBox::new(Orientation::Horizontal, 12);
+        head.set_valign(Align::End);
+        let big = Label::new(Some(&format!("{}%", b.percent)));
+        big.add_css_class("pop-big");
+        head.append(&big);
+        let sub = match b.secs_remaining.map(sysinfo::duration_short) {
+            Some(t) if !t.is_empty() => {
+                format!("{t} {}", if b.charging { "to full" } else { "remaining" })
+            }
+            _ => d.status.to_lowercase(),
+        };
+        let l = Label::new(Some(&sub));
+        l.add_css_class("pop-mono");
+        l.set_valign(Align::End);
+        head.append(&l);
+        c.append(&head);
+
+        // The trace only covers this session — the bar keeps no state across
+        // restarts — so it is labelled for what it is rather than "24h".
+        let hist = history.borrow();
+        if hist.len() >= 2 {
+            c.append(&caption("since the bar started"));
+            let strip = GtkBox::new(Orientation::Horizontal, 1);
+            strip.set_homogeneous(true);
+            for v in hist.iter() {
+                let bar = LevelBar::builder()
+                    .mode(gtk4::LevelBarMode::Continuous)
+                    .min_value(0.0)
+                    .max_value(1.0)
+                    .value(*v)
+                    .orientation(Orientation::Vertical)
+                    .inverted(true)
+                    .hexpand(true)
+                    .build();
+                bar.add_css_class("core");
+                bar.set_size_request(-1, 30);
+                strip.append(&bar);
+            }
+            c.append(&strip);
+        }
+        drop(hist);
+
+        c.append(&sep_row());
+        let rows = GtkBox::new(Orientation::Vertical, 7);
+        if let Some(w) = d.power_w {
+            rows.append(&mono_row("draw", &format!("{w:.1} W"), false));
+        }
+        if let Some(h) = d.health_pct {
+            rows.append(&mono_row("health", &format!("{h:.0}%"), false));
+        }
+        if let Some((now, design)) = d.capacity_wh {
+            rows.append(&mono_row("capacity", &format!("{now:.1} / {design:.1} Wh"), false));
+        }
+        if let Some(cy) = d.cycles {
+            rows.append(&mono_row("cycles", &cy.to_string(), false));
+        }
+        if let Some(t) = d.temp_c {
+            rows.append(&mono_row("temperature", &format!("{t:.0} \u{00B0}C"), false));
+        }
+        c.append(&rows);
+    });
+    pop
+}
+
+/// A grid of one cell per logical core, each filled to its busy fraction.
+///
+/// Eight per row, which is the widest that stays legible at popover width and
+/// happens to halve a 16-thread desktop neatly. Returns `None` on the first
+/// sample, when there is no delta yet and a grid of zeroes would read as an
+/// idle machine rather than as "no reading".
+fn core_grid(cores: &[f64]) -> Option<GtkBox> {
+    if cores.is_empty() {
+        return None;
+    }
+    let col = GtkBox::new(Orientation::Vertical, 3);
+    col.add_css_class("core-grid");
+    for chunk in cores.chunks(8) {
+        let row = GtkBox::new(Orientation::Horizontal, 3);
+        row.set_homogeneous(true);
+        for f in chunk {
+            let bar = LevelBar::builder()
+                .mode(gtk4::LevelBarMode::Continuous)
+                .min_value(0.0)
+                .max_value(1.0)
+                .value(*f)
+                .orientation(Orientation::Vertical)
+                .inverted(true)
+                .hexpand(true)
+                .build();
+            bar.add_css_class("core");
+            bar.set_size_request(-1, 26);
+            row.append(&bar);
+        }
+        col.append(&row);
+    }
+    Some(col)
+}
+
+/// The `top processes` block: name, pid, and one figure per row.
+fn proc_rows(rows: &[(String, u32, String)]) -> GtkBox {
+    let b = GtkBox::new(Orientation::Vertical, 5);
+    for (name, pid, val) in rows {
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        let n = Label::new(Some(name));
+        n.add_css_class("pop-mono-val");
+        n.set_halign(Align::Start);
+        n.set_hexpand(true);
+        n.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        n.set_max_width_chars(18);
+        let p = Label::new(Some(&pid.to_string()));
+        p.add_css_class("pop-mono");
+        let v = Label::new(Some(val));
+        v.add_css_class("pop-mono-val");
+        v.set_halign(Align::End);
+        row.append(&n);
+        row.append(&p);
+        row.append(&v);
+        b.append(&row);
+    }
+    b
+}
+
 fn caption(text: &str) -> Label {
     let l = Label::new(Some(text));
     l.add_css_class("pop-sub");

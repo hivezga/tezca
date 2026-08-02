@@ -33,8 +33,8 @@ clock_format = %a %d %b   %H:%M
 # The [󰚩 41%] module: how much of your AI subscription's rate-limit window
 # you've burned. Click it for the per-provider breakdown.
 #
-# This is the ONLY module that can make a network request, so it is opt-in and
-# deliberately conservative. What it will and won't do:
+# This and `weather` below are the only two modules that can make a network
+# request, so both are opt-in and deliberately conservative. What it will and won't do:
 #   * It never stores a credential. There is no Tezca keyring entry and no
 #     token in this file. It reads the credential file the provider's own CLI
 #     already wrote (e.g. ~/.claude/.credentials.json, mode 0600) for one
@@ -75,6 +75,97 @@ ai_local = true
 ai_warn = 60
 ai_critical = 85
 
+# --- Weather ---------------------------------------------------------------
+# The second (and last) module that touches the network, and the only one that
+# discloses something about *you* rather than about an account you already have:
+# it sends coordinates to a third party. So it is off until you turn it on, and
+# there is no geolocation lookup — the bar never tries to work out where you are.
+# You write the coordinates, or there is no weather.
+#
+# The source is Open-Meteo, chosen because it needs no key and no account: there
+# is no credential to store, leak, or tie the request back to you. The host
+# allowlist is in the source (crates/tezca-bar/src/weather.rs), HTTPS is pinned
+# and redirects are refused, exactly as for the AI module. No telemetry, ever.
+weather_enabled = false
+
+# Decimal degrees. BOTH are required — the module stays off with only one, and
+# a value outside the globe is treated as a typo and discarded.
+#
+# You do not have to find these yourself. Either of these fills them in:
+#   tezca bar weather search Guadalajara   look a town or city up by name
+#   tezca bar weather here                 guess from your public IP
+# Both print the coordinates and the exact `tezca bar weather set …` line that
+# saves them, so nothing is written until you run it.
+#
+# `here` is the ONE call in Tezca that tells a third party where you are without
+# being told: your IP goes to ipapi.co (or ipwho.is if that refuses) and a city
+# comes back. It is never called automatically — not on a poll, not at startup —
+# only when you type it. It is also only a guess: on a VPN it will place you in
+# another country, which is why it shows the answer for you to check rather than
+# saving it. The result is stored as plain coordinates below, so the lookup
+# never has to happen again.
+#   e.g. Mexico City: 19.4326 / -99.1332
+weather_lat =
+weather_lon =
+
+# What to call it on screen. Purely a label; it is never sent anywhere, so put
+# whatever you actually call the place.
+weather_place =
+
+# Seconds between polls (clamped to a 300s floor). Weather moves on the scale of
+# tens of minutes; a tighter loop is free load on a service that charges nothing.
+weather_interval = 900
+
+# "celsius" (default) or "fahrenheit". The API is asked for Celsius either way
+# and the conversion happens locally, so your display preference never varies
+# the request.
+weather_unit = celsius
+
+# Also fetch the air-quality index. This lives on a SECOND endpoint, so turning
+# it on means a second request to a second host per poll — hence its own switch.
+weather_aqi = false
+
+# --- Local AI (Ollama) -----------------------------------------------------
+# The [󰍛 18.9G GPU] module and the SUPER+I chat panel.
+#
+# Unlike `ai` and `weather`, this one touches NO remote host. It talks to
+# 127.0.0.1 and nothing else — the address is a constant in the source, not a
+# key here, so it cannot be repointed at a remote server by editing this file.
+# The models are on your disk and your prompts never leave loopback. If you want
+# a remote Ollama, that is a different feature with a different privacy
+# conversation, and this is deliberately not it.
+#
+# Off by default only because most machines have no local model server; there is
+# nothing to disclose by turning it on.
+llm_enabled = false
+
+# Which server: "auto" (default) probes for whichever is running, "llamacpp" for
+# llama.cpp's `llama serve`, "ollama" for Ollama. Set it explicitly when you have
+# both installed and want the bar pinned to one.
+#
+# The two differ in what they can tell you. Ollama reports the GPU/CPU offload
+# split, so the module can say "split · 81% on GPU" — the thing that explains why
+# a model that was fast yesterday is slow today. llama.cpp publishes no such
+# figure, so nothing is shown for it rather than a guess dressed up as a reading;
+# in exchange it reports its own measured tok/s on every chunk, so the panel's
+# rate is llama.cpp's number rather than us timing a pipe.
+llm_backend = auto
+
+# Where it listens. 0 means "the resolved backend's default" — 11434 for Ollama,
+# 8080 for llama.cpp — so the common case needs no port line at all. The port is
+# settable; the host is not, and is pinned to 127.0.0.1 in the source.
+llm_port = 0
+
+# Seconds between status polls — a loopback GET the daemon answers from memory.
+llm_interval = 5
+
+# Which model the panel opens with. Empty means "whatever is already resident",
+# so the first message never loads a second copy of a model already in VRAM.
+llm_model =
+
+# Prepended to every conversation in the panel. Empty for none.
+llm_system =
+
 # --- Per-monitor adaptive --------------------------------------------------
 # Monitors narrower than this (px) render the COMPACT layout — no per-app menu
 # label, tighter padding. The 3440×1440 ultrawide primary stays full; the
@@ -83,8 +174,10 @@ compact_width = 3000
 
 # --- Workspaces ------------------------------------------------------------
 # Pill labels: "arabic" (1 2 3 …) or "mayan" — the Mesoamerican bar-and-dot
-# numerals (a dot = 1, a bar = 5), from the Unicode Mayan Numerals block.
-# Needs the Noto Sans Mayan Numerals font (Noto extra fonts).
+# numerals (a dot = 1, a bar = 5). The bar draws these itself rather than using
+# the Unicode Mayan Numerals block, so no extra font is needed. Workspaces above
+# 19 fall back to the digit: past there a vigesimal numeral is a stack of
+# positional rows, which is unreadable at pill size.
 workspace_numerals = mayan
 
 # Show only workspaces that are in use — occupied by a window, or focused —
@@ -121,6 +214,22 @@ osd_enabled = true
 # 10000). Each new change resets the timer, so holding volume-up keeps it up.
 osd_timeout_ms = 1400
 
+# --- Right cluster ---------------------------------------------------------
+# Twenty-odd modules is a lot of bar. There is no single right answer to that —
+# it depends on how wide your monitor is and how much of the cluster you
+# actually read — so pick one:
+#   all      every module, all the time (the original behaviour)
+#   grouped  the camera/mic/recording indicators collapse into one "N capturing"
+#            chip, and cpu/mem/gpu into one "SYS" chip. Click a chip to open it,
+#            click the fold control inside to close it again. Nothing is hidden:
+#            the privacy chip goes red the moment anything is capturing.
+#   hover    everything stays put, but the ambient modules (keep-awake, night
+#            light, tray, bluetooth, brightness) fade back until you move the
+#            pointer onto the bar. Opacity only, so nothing ever resizes.
+#   tiers    the third-tier modules (keep-awake, night light, tray, gpu,
+#            brightness) are dropped from the layout entirely.
+clutter = all
+
 # --- Modules / layout ------------------------------------------------------
 # Which modules each region of the bar shows, and in what order. Edit these by
 # hand or from Settings ▸ Bar ▸ Modules (which writes the same keys). A module
@@ -143,6 +252,8 @@ osd_timeout_ms = 1400
 #   caffeine    keep-awake; click to hold/release the idle inhibitor
 #   night       night light; shown only while the filter is on, click to toggle
 #   ai          AI provider usage (auto-hides; see the AI section above)
+#   weather     current conditions (auto-hides; see the Weather section above)
+#   llm         local Ollama status; click for the SUPER+I panel (auto-hides)
 #   tray        system tray / StatusNotifierItem icons (auto-hides)
 #   cpu mem gpu hardware metric sparklines (gpu auto-hides without a source)
 #   network     wifi/ethernet glyph → detail + radio toggle popover

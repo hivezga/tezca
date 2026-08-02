@@ -188,6 +188,76 @@ pub fn equalizer(pal: &SharedPalette) -> DrawingArea {
     area
 }
 
+// ---------------------------------------------------------------------------
+// Mayan numerals
+// ---------------------------------------------------------------------------
+
+/// Widest a numeral gets: four dots at [`DOT`]px with [`DOT_GAP`]px between them.
+const DOT: f64 = 3.0;
+const DOT_GAP: f64 = 2.5;
+const BAR_W: f64 = 13.0;
+const BAR_H: f64 = 2.5;
+const ROW_GAP: f64 = 2.0;
+const NUMERAL_W: i32 = 20;
+/// Fixed, so a "1" and a "19" occupy the same box and the pills stay aligned.
+const NUMERAL_H: i32 = 18;
+
+/// The largest value that has a bar-and-dot form here. Mayan is vigesimal, so
+/// past this a numeral becomes a stack of positional digits — three rows of
+/// bars-and-dots for a single workspace, which is unreadable at 26px. Callers
+/// fall back to the digit above this.
+pub const MAYAN_MAX: i32 = 19;
+
+/// A Mayan bar-and-dot numeral, drawn rather than typed.
+///
+/// The Unicode Mayan Numerals block (U+1D2E0…) needs Noto Sans Mayan Numerals
+/// installed, and a workspace pill that renders as a tofu box on a machine
+/// without it is worse than no feature at all. The glyphs are four rectangles
+/// and some circles — drawing them costs less than depending on a font.
+///
+/// Colour comes from the widget's own CSS `color`, so the numeral follows the
+/// pill through idle → occupied → active without knowing those states exist.
+pub fn mayan_numeral(value: i32) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.set_content_width(NUMERAL_W);
+    area.set_content_height(NUMERAL_H);
+    area.set_valign(gtk4::Align::Center);
+    area.set_halign(gtk4::Align::Center);
+
+    area.set_draw_func(move |a, cr, w, h| {
+        let (bars, dots) = (value / 5, value % 5);
+        if !(1..=MAYAN_MAX).contains(&value) {
+            return;
+        }
+        let c = a.color();
+        cr.set_source_rgba(c.red() as f64, c.green() as f64, c.blue() as f64, c.alpha() as f64);
+
+        // Dots ride above the bars, which is how the numerals are written.
+        let rows = usize::from(dots > 0) + bars as usize;
+        let total = if dots > 0 { DOT } else { 0.0 }
+            + bars as f64 * BAR_H
+            + ROW_GAP * rows.saturating_sub(1) as f64;
+        let (cx, mut y) = (w as f64 / 2.0, (h as f64 - total) / 2.0);
+
+        if dots > 0 {
+            let span = dots as f64 * DOT + DOT_GAP * (dots - 1) as f64;
+            let mut x = cx - span / 2.0;
+            for _ in 0..dots {
+                cr.arc(x + DOT / 2.0, y + DOT / 2.0, DOT / 2.0, 0.0, 2.0 * PI);
+                let _ = cr.fill();
+                x += DOT + DOT_GAP;
+            }
+            y += DOT + ROW_GAP;
+        }
+        for _ in 0..bars {
+            rounded_rect(cr, cx - BAR_W / 2.0, y, BAR_W, BAR_H, BAR_H / 2.0);
+            let _ = cr.fill();
+            y += BAR_H + ROW_GAP;
+        }
+    });
+    area
+}
+
 /// Trace a rounded rectangle path (cairo has no primitive).
 fn rounded_rect(cr: &Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
     let r = r.min(w / 2.0).min(h / 2.0);

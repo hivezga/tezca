@@ -5,6 +5,8 @@
 //! partial file still runs.
 
 use crate::ai::AiConfig;
+use crate::llm::LlmConfig;
+use crate::weather::WeatherConfig;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -45,6 +47,37 @@ impl Numerals {
     }
 }
 
+/// What to do about the right cluster once it holds twenty-odd modules.
+///
+/// There is no single right answer — it depends on how wide the monitor is and
+/// how much of the cluster you actually read — so the bar offers four and lets
+/// you pick, rather than choosing one and calling it the design.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clutter {
+    /// Every module, all the time. The historical behaviour.
+    All,
+    /// Privacy indicators and hardware metrics each collapse into one chip you
+    /// can click open. Densest without hiding anything.
+    Grouped,
+    /// Everything stays, but the modules you rarely read fade back until you
+    /// hover the bar. Nothing moves, so nothing shifts under the pointer.
+    Hover,
+    /// The third-tier modules are dropped from the layout entirely.
+    Tiers,
+}
+
+impl Clutter {
+    fn parse(s: &str) -> Option<Clutter> {
+        Some(match s.trim().to_lowercase().as_str() {
+            "all" | "none" | "off" => Clutter::All,
+            "grouped" | "group" | "clusters" => Clutter::Grouped,
+            "hover" | "reveal" | "hover-reveal" => Clutter::Hover,
+            "tiers" | "tier" | "priority" => Clutter::Tiers,
+            _ => return None,
+        })
+    }
+}
+
 /// A placeable bar module — one widget slot in a region's ordered layout.
 /// `Sep` is a thin vertical divider and may repeat; every other variant maps to
 /// exactly one built-in widget built in `bar.rs`. Unknown names never parse (so
@@ -63,6 +96,8 @@ pub enum Mod {
     Caffeine,
     NightLight,
     Ai,
+    Weather,
+    Llm,
     Tray,
     Cpu,
     Mem,
@@ -95,6 +130,8 @@ impl Mod {
             "caffeine" | "keepawake" | "keep-awake" | "inhibit" => Mod::Caffeine,
             "night" | "nightlight" | "night-light" | "bluelight" => Mod::NightLight,
             "ai" => Mod::Ai,
+            "weather" | "forecast" => Mod::Weather,
+            "llm" | "ollama" | "localai" | "local-ai" => Mod::Llm,
             "tray" => Mod::Tray,
             "cpu" => Mod::Cpu,
             "mem" | "memory" | "ram" => Mod::Mem,
@@ -110,6 +147,29 @@ impl Mod {
             "sep" | "separator" | "|" => Mod::Sep,
             _ => return None,
         })
+    }
+
+    /// Modules the [`Clutter::Tiers`] strategy drops.
+    ///
+    /// The test is "would you notice this were gone for an hour". A GPU
+    /// percentage and a keep-awake glyph both fail it; a clock and a battery
+    /// do not. Deliberately not configurable — a per-module priority list is a
+    /// second layout to keep in step with the first, and the layout keys
+    /// already let you remove anything outright.
+    pub fn is_tier3(self) -> bool {
+        matches!(self, Mod::Caffeine | Mod::NightLight | Mod::Tray | Mod::Gpu | Mod::Brightness)
+    }
+
+    /// Modules the [`Clutter::Hover`] strategy fades until the bar is hovered.
+    ///
+    /// A superset of [`Self::is_tier3`] minus the GPU (a metric you glance at
+    /// mid-task) plus Bluetooth (a battery you check on purpose, never by
+    /// accident).
+    pub fn is_ambient(self) -> bool {
+        matches!(
+            self,
+            Mod::Caffeine | Mod::NightLight | Mod::Tray | Mod::Bluetooth | Mod::Brightness
+        )
     }
 }
 
@@ -202,11 +262,18 @@ pub struct Config {
     /// AI provider usage module — opt-in, and the only module that can make a
     /// network request. See `ai.rs` for the privacy posture.
     pub ai: AiConfig,
+    /// Weather module — opt-in, and the second (and only other) module that can
+    /// make a network request. See `weather.rs` for the privacy posture.
+    pub weather: WeatherConfig,
+    /// Local AI (Ollama). Loopback only — see `llm.rs`.
+    pub llm: LlmConfig,
     /// Show the transient volume on-screen display (the glass pill that fades in
     /// when the volume changes or mutes). See `osd.rs`.
     pub osd_enabled: bool,
     /// How long the volume OSD dwells before fading out, milliseconds.
     pub osd_timeout_ms: u32,
+    /// How the right cluster copes with its own length. See [`Clutter`].
+    pub clutter: Clutter,
     /// Which modules each region shows, in order. `layout_*` config keys (a
     /// comma-separated list of module ids) override these; the defaults
     /// reproduce the historical hardcoded arrangement exactly. Entries are
@@ -234,8 +301,11 @@ impl Default for Config {
             hide_empty: false,
             compact: false,
             ai: AiConfig::default(),
+            weather: WeatherConfig::default(),
+            llm: LlmConfig::default(),
             osd_enabled: true,
             osd_timeout_ms: 1400,
+            clutter: Clutter::All,
             layout_left: default_layout_left(),
             layout_center: default_layout_center(),
             layout_right: default_layout_right(),
@@ -323,9 +393,42 @@ impl Config {
                 "ai_local" => set_bool(&mut self.ai.local, v),
                 "ai_warn" => set_f64(&mut self.ai.warn, v),
                 "ai_critical" => set_f64(&mut self.ai.critical, v),
+                // --- Weather ---------------------------------------------
+                "weather_enabled" => set_bool(&mut self.weather.enabled, v),
+                // Absent or unparseable leaves the coordinate as None, which
+                // keeps the module unusable — never a guessed location.
+                "weather_lat" | "weather_latitude" => self.weather.lat = v.parse().ok(),
+                "weather_lon" | "weather_longitude" => self.weather.lon = v.parse().ok(),
+                "weather_place" | "weather_label" => self.weather.place = v.to_string(),
+                "weather_interval" => set_u32(&mut self.weather.interval, v),
+                "weather_unit" => {
+                    self.weather.fahrenheit = matches!(
+                        v.trim().to_lowercase().as_str(),
+                        "f" | "fahrenheit" | "imperial" | "us"
+                    )
+                }
+                "weather_aqi" => set_bool(&mut self.weather.aqi, v),
+                // --- Local AI (Ollama) ------------------------------------
+                "llm_enabled" => set_bool(&mut self.llm.enabled, v),
+                // Blank / "auto" leaves it None, which probes for whichever
+                // server is actually running.
+                "llm_backend" => self.llm.backend = crate::llm::Backend::parse(v),
+                "llm_port" => {
+                    if let Ok(n) = v.parse() {
+                        self.llm.port = n;
+                    }
+                }
+                "llm_interval" => set_u32(&mut self.llm.interval, v),
+                "llm_model" => self.llm.model = v.to_string(),
+                "llm_system" => self.llm.system = v.to_string(),
                 // --- Volume OSD ------------------------------------------
                 "osd_enabled" => set_bool(&mut self.osd_enabled, v),
                 "osd_timeout_ms" | "osd_timeout" => set_u32(&mut self.osd_timeout_ms, v),
+                "clutter" | "right_cluster" => {
+                    if let Some(c) = Clutter::parse(v) {
+                        self.clutter = c;
+                    }
+                }
                 // --- Module layout (per region, ordered) -----------------
                 // An empty / all-unknown value keeps the built-in default so a
                 // stray line can never blank out a region.
@@ -374,6 +477,12 @@ impl Config {
         self.ai.warn = self.ai.warn.clamp(0.0, 100.0);
         self.ai.critical = self.ai.critical.clamp(self.ai.warn, 100.0);
         self.osd_timeout_ms = self.osd_timeout_ms.clamp(400, 10_000);
+        // Weather changes on the scale of tens of minutes; a tighter loop is
+        // free load on a service that charges nothing for it.
+        self.weather.interval = self.weather.interval.max(300);
+        // A coordinate outside the globe is a typo, not a place.
+        self.weather.lat = self.weather.lat.filter(|v| (-90.0..=90.0).contains(v));
+        self.weather.lon = self.weather.lon.filter(|v| (-180.0..=180.0).contains(v));
     }
 }
 
@@ -486,9 +595,53 @@ mod tests {
     #[test]
     fn custom_prefix_makes_a_custom_slot_bare_unknown_is_still_dropped() {
         let mut c = Config::default();
-        c.apply("layout_right = cpu, custom:weather, custom: , weather");
-        // `custom:weather` → a custom slot; the empty `custom:` and the bare
-        // `weather` (not a built-in id) are both dropped.
-        assert_eq!(c.layout_right, vec![m(Mod::Cpu), Slot::Custom("weather".into())]);
+        c.apply("layout_right = cpu, custom:barometer, custom: , barometer");
+        // `custom:barometer` → a custom slot; the empty `custom:` and the bare
+        // `barometer` (not a built-in id) are both dropped.
+        assert_eq!(c.layout_right, vec![m(Mod::Cpu), Slot::Custom("barometer".into())]);
+    }
+
+    #[test]
+    fn a_custom_module_may_share_a_name_with_a_builtin() {
+        // `weather` became a built-in after `custom:weather` was a plausible
+        // thing to have installed. The prefix is what disambiguates, so both
+        // can sit in the same layout and neither shadows the other.
+        let mut c = Config::default();
+        c.apply("layout_right = weather, custom:weather");
+        assert_eq!(c.layout_right, vec![m(Mod::Weather), Slot::Custom("weather".into())]);
+    }
+
+    #[test]
+    fn weather_needs_both_coordinates_and_rejects_impossible_ones() {
+        let mut c = Config::default();
+        c.apply("weather_enabled = true\nweather_lat = 19.4326");
+        assert!(!c.weather.usable(), "half a coordinate is not a location");
+
+        let mut c = Config::default();
+        c.apply("weather_enabled = true\nweather_lat = 19.4326\nweather_lon = -99.1332");
+        assert!(c.weather.usable());
+
+        // Off the globe is a typo, not a place — and the module must not poll.
+        let mut c = Config::default();
+        c.apply("weather_enabled = true\nweather_lat = 991.0\nweather_lon = -99.1332");
+        assert_eq!(c.weather.lat, None);
+        assert!(!c.weather.usable());
+    }
+
+    #[test]
+    fn weather_stays_off_unless_asked_for() {
+        // The default must never reach the network: coordinates alone are not
+        // consent, and neither is the module being placed in a layout.
+        let mut c = Config::default();
+        assert!(!c.weather.enabled);
+        c.apply("weather_lat = 19.4326\nweather_lon = -99.1332");
+        assert!(!c.weather.usable());
+    }
+
+    #[test]
+    fn weather_interval_has_a_floor() {
+        let mut c = Config::default();
+        c.apply("weather_interval = 5");
+        assert_eq!(c.weather.interval, 300);
     }
 }

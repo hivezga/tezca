@@ -5,7 +5,7 @@
 //!   scan [--seconds N]        discover nearby devices (blocking)
 //!   list [--machine]          paired / known devices
 //!   connect|disconnect <id>   `id` is a MAC or an exact device name
-//!   pair|trust|remove <id>
+//!   pair|trust|untrust|remove <id>
 //!
 //! ## Why `bluetoothctl` and not BlueZ's D-Bus API
 //!
@@ -43,6 +43,10 @@ pub fn run(args: &[&str]) -> i32 {
         Some("disconnect") => cmd_device_action("disconnect", &args[1..]),
         Some("pair") => cmd_device_action("pair", &args[1..]),
         Some("trust") => cmd_device_action("trust", &args[1..]),
+        // Trusting is what lets a device reconnect on its own, so it has to be
+        // undoable without also un-pairing: `remove` would drop the keys and mean
+        // pairing the thing again.
+        Some("untrust") => cmd_device_action("untrust", &args[1..]),
         Some("remove") | Some("forget") => cmd_device_action("remove", &args[1..]),
         Some("-h") | Some("--help") => {
             print_help();
@@ -50,7 +54,8 @@ pub fn run(args: &[&str]) -> i32 {
         }
         Some(other) => Err(format!(
             "unknown bt subcommand: {other}\n  try: status · power on|off · scan · list · \
-             connect <id> · disconnect <id> · pair <id> · remove <id>"
+             connect <id> · disconnect <id> · pair <id> · trust <id> · untrust <id> · \
+             remove <id>"
         )),
     };
     match r {
@@ -269,16 +274,7 @@ fn cmd_list(args: &[&str]) -> Result<(), String> {
     }
     for d in &ds {
         let dot = if d.connected { term::green("●") } else { term::dim("○") };
-        let mut tags: Vec<String> = Vec::new();
-        if let Some(b) = d.battery {
-            tags.push(format!("{b}%"));
-        }
-        if !d.icon.is_empty() {
-            tags.push(d.icon.clone());
-        }
-        if !d.paired {
-            tags.push("unpaired".into());
-        }
+        let tags = device_tags(d);
         println!(
             "  {} {:<26} {}",
             dot,
@@ -288,6 +284,29 @@ fn cmd_list(args: &[&str]) -> Result<(), String> {
     }
     println!();
     Ok(())
+}
+
+/// The `·`-joined notes shown after a device's address.
+///
+/// `trusted` is in here because it is otherwise invisible outside `--machine`,
+/// and it is the one property that changes what the machine does when you are
+/// not looking: a trusted device reconnects on its own. Being unable to see
+/// which devices those are is the same problem as not being able to turn it off.
+fn device_tags(d: &Device) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    if let Some(b) = d.battery {
+        tags.push(format!("{b}%"));
+    }
+    if !d.icon.is_empty() {
+        tags.push(d.icon.clone());
+    }
+    if d.trusted {
+        tags.push("trusted".into());
+    }
+    if !d.paired {
+        tags.push("unpaired".into());
+    }
+    tags
 }
 
 /// Resolve a MAC or an exact device name to a MAC.
@@ -385,7 +404,8 @@ fn print_help() {
         ("connect <id>", "connect by address or exact name"),
         ("disconnect <id>", "disconnect"),
         ("pair <id>", "pair (simple pairing only — see below)"),
-        ("trust <id>", "allow auto-reconnect"),
+        ("trust <id>", "let it reconnect on its own"),
+        ("untrust <id>", "stop it reconnecting on its own"),
         ("remove <id>", "forget the device"),
     ] {
         println!("  {:<22} {}", term::cyan(c), term::dim(d));
@@ -409,6 +429,35 @@ mod tests {
         // A GUI caller still gets the parseable form.
         assert_eq!(scan_list_args(&["--machine"]), vec!["--all", "--machine"]);
         assert_eq!(scan_list_args(&["-s", "5", "-m"]), vec!["--all", "--machine"]);
+    }
+
+    fn dev(paired: bool, trusted: bool) -> Device {
+        Device {
+            mac: "AA:BB:CC:DD:EE:FF".into(),
+            name: "WH-1000XM4".into(),
+            paired,
+            trusted,
+            connected: true,
+            battery: Some(90),
+            icon: "audio-headset".into(),
+        }
+    }
+
+    #[test]
+    fn the_listing_says_which_devices_reconnect_on_their_own() {
+        // Trust decides whether a device comes back without being asked, so it
+        // has to be visible somewhere other than `--machine` — otherwise the only
+        // way to see it is to run bluetoothctl, and the only way to undo it used
+        // to be un-pairing.
+        assert!(device_tags(&dev(true, true)).contains(&"trusted".to_string()));
+        assert!(!device_tags(&dev(true, false)).contains(&"trusted".to_string()));
+
+        // The pre-existing notes still come first and still read the same way.
+        assert_eq!(device_tags(&dev(true, false)), vec!["90%", "audio-headset"]);
+        assert_eq!(
+            device_tags(&dev(false, true)),
+            vec!["90%", "audio-headset", "trusted", "unpaired"]
+        );
     }
 
     const INFO: &str = "Device AA:BB:CC:DD:EE:FF (public)

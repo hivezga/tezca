@@ -3030,6 +3030,49 @@ fn bluetooth_section(c: &Box, status: &Status, rebuild: &RenderCell) {
         row.append(&l);
         row.append(&meta);
 
+        // Trust is what lets a device reconnect without being asked, so it only
+        // means anything once the device is paired — and it is worth a switch
+        // rather than a button, because it is a standing state you should be
+        // able to read off the row, not an action you fire once.
+        if paired {
+            let tl = Label::new(Some("Auto-connect"));
+            tl.add_css_class("tz-hint");
+            let tsw = Switch::new();
+            tsw.set_valign(Align::Center);
+            tsw.set_active(backend::rec_bool(d, "trusted"));
+            tsw.set_tooltip_text(Some(
+                "Let this device connect to the machine on its own, without you \
+                 asking each time",
+            ));
+            {
+                // Set active first, connect after: otherwise seeding the switch
+                // from the current state fires the handler and writes it back.
+                let stt = status.clone();
+                let rb = rebuild.clone();
+                let mac = mac.clone();
+                let name = name.clone();
+                tsw.connect_state_set(move |_, on| {
+                    let verb = if on { "trust" } else { "untrust" };
+                    let r = backend::tezca_result(&["bt", verb, &mac]);
+                    stt.report(
+                        &r,
+                        &format!(
+                            "{name} {}.",
+                            if on {
+                                "will reconnect on its own"
+                            } else {
+                                "will not reconnect on its own"
+                            }
+                        ),
+                    );
+                    redraw(&rb);
+                    glib::Propagation::Proceed
+                });
+            }
+            row.append(&tl);
+            row.append(&tsw);
+        }
+
         let action = if connected {
             "disconnect"
         } else if paired {

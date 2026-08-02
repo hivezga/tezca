@@ -256,7 +256,16 @@ fn cmd_list(args: &[&str]) -> Result<(), String> {
     println!("{}", term::header("tezca bt"));
     println!();
     if ds.is_empty() {
-        println!("  {}", term::dim("no paired devices — `tezca bt scan` to find some"));
+        // Pointing at `scan` is only useful advice when a scan is not what just
+        // ran; after one it reads as though the command did nothing.
+        println!(
+            "  {}",
+            term::dim(if all {
+                "no devices found — check the device is powered on and in pairing mode"
+            } else {
+                "no paired devices — `tezca bt scan` to find some"
+            })
+        );
     }
     for d in &ds {
         let dot = if d.connected { term::green("●") } else { term::dim("○") };
@@ -346,7 +355,23 @@ fn cmd_scan(args: &[&str]) -> Result<(), String> {
     if !status.success() {
         return Err("scan failed".into());
     }
-    cmd_list(args)
+
+    cmd_list(&scan_list_args(args))
+}
+
+/// The flags a post-scan listing runs with.
+///
+/// `--all`, never the caller's own flags. `cmd_scan`'s `args` are its
+/// `--seconds N`, so passing them straight through meant `--all` was never set
+/// and a scan listed the *paired* devices it had not just discovered —
+/// answering "no paired devices" immediately after finding one. Only `--machine`
+/// is worth carrying across, so a GUI caller still gets the parseable form.
+fn scan_list_args(args: &[&str]) -> Vec<&'static str> {
+    let mut out = vec!["--all"];
+    if args.iter().any(|a| *a == "--machine" || *a == "-m") {
+        out.push("--machine");
+    }
+    out
 }
 
 fn print_help() {
@@ -373,6 +398,18 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scan_lists_what_it_discovered_not_only_what_was_already_paired() {
+        // The scan's own flags must not decide the listing: `--seconds 12` was
+        // being forwarded verbatim, so `--all` was never set and a successful
+        // scan reported "no paired devices" having just found a device.
+        assert_eq!(scan_list_args(&["--seconds", "12"]), vec!["--all"]);
+        assert_eq!(scan_list_args(&[]), vec!["--all"]);
+        // A GUI caller still gets the parseable form.
+        assert_eq!(scan_list_args(&["--machine"]), vec!["--all", "--machine"]);
+        assert_eq!(scan_list_args(&["-s", "5", "-m"]), vec!["--all", "--machine"]);
+    }
 
     const INFO: &str = "Device AA:BB:CC:DD:EE:FF (public)
 \tName: WH-1000XM4

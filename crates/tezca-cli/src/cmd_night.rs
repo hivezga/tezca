@@ -26,8 +26,6 @@ use crate::{atomic, repo, term, util};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-/// Daylight — what "off" restores.
-const DAY_TEMP: u32 = 6500;
 const DEFAULT_NIGHT_TEMP: u32 = 4000;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -162,34 +160,52 @@ fn write(n: &Night) -> Result<(), String> {
 // hyprsunset
 // ---------------------------------------------------------------------------
 
-/// Set the screen temperature now.
+/// Did a `hyprctl hyprsunset …` call actually do anything?
 ///
-/// hyprsunset ships both a daemon and `hyprctl hyprsunset <cmd>` control, and
-/// which one answers depends on the version and whether the daemon is up. Try
-/// the hyprctl route first (no new process when the daemon is already running),
-/// then fall back to invoking hyprsunset directly, which starts it.
-fn set_temperature(kelvin: u32) -> Result<(), String> {
+/// It answers `ok` on success — and, when no daemon is listening, prints
+/// `Couldn't connect to …/.hyprsunset.sock. (3)` **and still exits 0**. So
+/// success cannot be judged on the exit status, and it cannot be judged by
+/// looking for words like "error" or "invalid" either: that message contains
+/// none of them. The only reliable test is the positive one. (Observed on
+/// hyprsunset 0.4.0 / Hyprland 0.56.1; the same exit-0-refusal shape `hypr.rs`
+/// already documents for `hyprctl keyword`.)
+fn ctl_succeeded(stdout: &str) -> bool {
+    stdout.trim().eq_ignore_ascii_case("ok")
+}
+
+/// Send one command to a running hyprsunset daemon. False when none is listening.
+fn hyprsunset_ctl(args: &[&str]) -> bool {
+    let mut argv = vec!["hyprsunset"];
+    argv.extend_from_slice(args);
+    Command::new("hyprctl")
+        .args(&argv)
+        .output()
+        .ok()
+        .map(|o| ctl_succeeded(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or(false)
+}
+
+/// Apply a screen temperature now — `None` restores the unfiltered display.
+///
+/// Prefers the running daemon (no new process, and it applies instantly), and
+/// starts one when there is nothing listening. `identity` is hyprsunset's own
+/// term for "no adjustment", which is a truer "off" than asking for 6500 K.
+fn set_temperature(kelvin: Option<u32>) -> Result<(), String> {
     if !util::has("hyprsunset") {
         return Err("hyprsunset not found — install it (`paru -S hyprsunset`)".into());
     }
-    let via_hyprctl = Command::new("hyprctl")
-        .args(["hyprsunset", "temperature", &kelvin.to_string()])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| {
-            let s = String::from_utf8_lossy(&o.stdout).to_lowercase();
-            // hyprctl answers unknown commands on stdout with exit 0.
-            !s.contains("invalid") && !s.contains("unknown") && !s.contains("not found")
-        })
-        .unwrap_or(false);
-    if via_hyprctl {
+    let temp = kelvin.map(|k| k.to_string());
+    let ctl_args: Vec<&str> = match &temp {
+        Some(t) => vec!["temperature", t.as_str()],
+        None => vec!["identity"],
+    };
+    if hyprsunset_ctl(&ctl_args) {
         return Ok(());
     }
-    // No daemon (or an older build): (re)start one at this temperature. Detached
-    // and with its stdio nulled, so a caller capturing our output does not block
-    // waiting for a long-lived child to close the pipe.
-    let _ = Command::new("pkill").args(["-x", "hyprsunset"]).status();
+
+    // Nothing listening: start a daemon in the wanted state. Detached, with its
+    // stdio nulled — it outlives us, and a caller capturing our output would
+    // otherwise block waiting for a pipe the daemon never closes.
     let mut cmd = if util::has("setsid") {
         let mut c = Command::new("setsid");
         c.arg("hyprsunset");
@@ -197,8 +213,12 @@ fn set_temperature(kelvin: u32) -> Result<(), String> {
     } else {
         Command::new("hyprsunset")
     };
-    cmd.args(["-t", &kelvin.to_string()])
-        .stdin(Stdio::null())
+    if let Some(t) = &temp {
+        cmd.args(["-t", t]);
+    } else {
+        cmd.arg("--identity");
+    }
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -341,8 +361,11 @@ fn cmd_apply() -> Result<(), String> {
 }
 
 fn apply(n: &Night) -> Result<(), String> {
-    let target = if n.active_at(now_minutes()) { n.temp } else { DAY_TEMP };
-    set_temperature(target)
+    if n.active_at(now_minutes()) {
+        set_temperature(Some(n.temp))
+    } else {
+        set_temperature(None)
+    }
 }
 
 fn print_help() {
@@ -398,6 +421,24 @@ mod tests {
             Night { enabled: true, temp: 3200, from: Some(1290), to: Some(390) },
         ] {
             assert_eq!(parse(&render(&n)), n);
+        }
+    }
+
+    #[test]
+    fn only_a_literal_ok_counts_as_the_daemon_having_answered() {
+        // Both of these come out of `hyprctl hyprsunset …` with exit status 0.
+        assert!(ctl_succeeded("ok\n"));
+        assert!(ctl_succeeded("OK"));
+        assert!(!ctl_succeeded(
+            "Couldn't connect to /run/user/1000/hypr/…/.hyprsunset.sock. (3)\n"
+        ));
+        assert!(!ctl_succeeded(""));
+        // The reason this is an allowlist: the real refusal contains none of the
+        // words a denylist would look for, so a denylist reports success and the
+        // daemon never gets started.
+        let refusal = "Couldn't connect to /run/user/1000/hypr/x/.hyprsunset.sock. (3)";
+        for word in ["error", "invalid", "unknown", "not found", "fail"] {
+            assert!(!refusal.to_lowercase().contains(word), "denylist word {word:?} would miss it");
         }
     }
 

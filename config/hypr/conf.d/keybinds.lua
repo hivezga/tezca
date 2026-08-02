@@ -9,6 +9,7 @@
 --   • Game mode sits on SUPER+ALT+G — which is exactly where HyDE puts it too.
 -- Cheat-sheet: SUPER+/  (Walker keybind hint, see scripts/cheatsheet.sh).
 -- Control center (full GUI): SUPER+SHIFT+A  →  tezca-settings.
+-- Local AI panel: SUPER+I  →  the docked Ollama chat column.
 --
 -- HYPRLANG → LUA BIND FLAGS. The bind variants became an options table:
 --   bind   →  (no options)      binde  →  { repeating = true }
@@ -93,7 +94,13 @@ hl.bind("CTRL + SHIFT + Escape", hl.dsp.exec_cmd("uwsm app -- alacritty --class 
 -- applies the uwsm prefix itself (auto_detect_launch_prefix, default true).
 hl.bind(mod .. " + A",         hl.dsp.exec_cmd("walker -m desktopapplications")) -- application finder (HyDE)
 hl.bind(mod .. " + SPACE",     hl.dsp.exec_cmd("walker"))                        -- Spotlight muscle-memory (Tezca, DESIGN §12)
-hl.bind(mod .. " + Tab",       hl.dsp.exec_cmd("walker -m windows"))             -- window switcher (HyDE)
+-- Window switcher. HyDE binds this to `walker -m windows`, which is dead on
+-- Hyprland: elephant DOES ship a `windows` provider, but it is niri-only —
+-- /etc/xdg/elephant/providers/windows.so exports NiriWindow and
+-- NiriWorkspaceHandler and nothing else, so the provider returns nothing here.
+-- scripts/window-switcher.sh gets the same result through walker's dmenu mode,
+-- the way the clipboard bind above does.
+hl.bind(mod .. " + Tab",       hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/window-switcher.sh")) -- window switcher (was HyDE `walker -m windows`)
 hl.bind(mod .. " + SHIFT + E", hl.dsp.exec_cmd("walker -m files"))               -- file finder (HyDE)
 hl.bind(mod .. " + comma",     hl.dsp.exec_cmd("walker -m unicode"))             -- emoji picker (HyDE)
 hl.bind(mod .. " + period",    hl.dsp.exec_cmd("walker -m symbols"))             -- glyph picker (HyDE)
@@ -104,6 +111,11 @@ hl.bind(mod .. " + V",         hl.dsp.exec_cmd("cliphist list | walker -d -p Cli
 hl.bind(mod .. " + SHIFT + V", hl.dsp.exec_cmd([[uwsm app -- sh -c 'cliphist wipe && notify-send Tezca "Clipboard history cleared"']])) -- clipboard manager (HyDE)
 hl.bind(mod .. " + slash",     hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/cheatsheet.sh"))       -- keybindings hint (HyDE)
 hl.bind(mod .. " + SHIFT + A", hl.dsp.exec_cmd("$HOME/.local/bin/tezca settings"))                -- control center (repurposed from HyDE "select launcher")
+-- Local-AI panel: a layer-shell column docked to the right edge, so the tiled
+-- area reflows around it rather than being covered. The same command opens and
+-- closes it — the panel is a single-instance GtkApplication, so pressing this
+-- again reaches the running one and it closes itself.
+hl.bind(mod .. " + I",         hl.dsp.exec_cmd("$HOME/.local/bin/tezca-bar --llm-panel"))         -- local AI chat panel (Ollama)
 
 -- ============================== Hardware — audio =============================
 -- HyDE binds the bare F10-F12 keys as well. These grab those keys globally, so

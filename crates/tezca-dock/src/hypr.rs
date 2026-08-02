@@ -20,6 +20,12 @@ pub struct Client {
     pub class: String,
     #[serde(default)]
     pub mapped: bool,
+    /// Hyprland's urgency hint — an app asking for attention it did not get.
+    /// This is the only per-window "something happened here" signal a Wayland
+    /// compositor exposes; there is no unread-count protocol on Linux, so it is
+    /// what the dock badge is built on.
+    #[serde(default)]
+    pub urgent: bool,
 }
 
 /// All mapped, real windows (drops the scratch terminal + unmapped clients).

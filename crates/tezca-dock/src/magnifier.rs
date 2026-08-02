@@ -22,9 +22,17 @@ const DIVIDER_GAP: f64 = 14.0;
 const SLIDE: f64 = 22.0;
 /// Reserved band above the icons for the hover label.
 const LABEL_ZONE: f64 = 24.0;
+/// Attention-badge diameter as a fraction of the icon it rides, then clamped —
+/// so it grows with magnification but never becomes a second icon.
+const BADGE_FRACTION: f64 = 0.34;
+const BADGE_MIN: f64 = 14.0;
+const BADGE_MAX: f64 = 22.0;
 
 /// Called with the index of the dock item the pointer activated.
 type ActivateCb = Box<dyn Fn(usize)>;
+
+/// Called with the dock item a drop landed on and the files that were dropped.
+type DropCb = Box<dyn Fn(usize, Vec<String>)>;
 
 mod imp {
     use super::*;
@@ -41,6 +49,10 @@ mod imp {
         pub on_activate: RefCell<Option<ActivateCb>>,
         pub on_enter: RefCell<Option<Box<dyn Fn()>>>,
         pub on_leave: RefCell<Option<Box<dyn Fn()>>>,
+        pub on_drop: RefCell<Option<DropCb>>,
+        /// Item a drag is currently hovering, so it can be ringed. A mis-drop
+        /// should be visible *before* you let go, not after.
+        pub drop_target: Cell<Option<usize>>,
     }
 
     #[glib::object_subclass]
@@ -104,6 +116,70 @@ mod imp {
                 }
             ));
             obj.add_controller(click);
+
+            // Drag-and-drop: dropping files on an icon opens them with that
+            // app. Accepts `gdk::FileList`, which is what a Wayland file
+            // manager offers — a plain text/uri-list would also arrive from
+            // some sources, but FileList is the one GTK hands us already
+            // parsed, and taking only it keeps the paths out of string
+            // munging entirely.
+            let drop = gtk4::DropTarget::new(
+                gtk4::gdk::FileList::static_type(),
+                gtk4::gdk::DragAction::COPY,
+            );
+            drop.connect_motion(glib::clone!(
+                #[weak]
+                obj,
+                #[upgrade_or]
+                gtk4::gdk::DragAction::empty(),
+                move |_, x, _| {
+                    let hit = obj.hit_test(x);
+                    if obj.imp().drop_target.get() != hit {
+                        obj.imp().drop_target.set(hit);
+                        obj.queue_draw();
+                    }
+                    // Refuse the gap between icons rather than guessing which
+                    // neighbour was meant.
+                    match hit {
+                        Some(_) => gtk4::gdk::DragAction::COPY,
+                        None => gtk4::gdk::DragAction::empty(),
+                    }
+                }
+            ));
+            drop.connect_leave(glib::clone!(
+                #[weak]
+                obj,
+                move |_| {
+                    obj.imp().drop_target.set(None);
+                    obj.queue_draw();
+                }
+            ));
+            drop.connect_drop(glib::clone!(
+                #[weak]
+                obj,
+                #[upgrade_or]
+                false,
+                move |_, value, x, _| {
+                    obj.imp().drop_target.set(None);
+                    obj.queue_draw();
+                    let Some(i) = obj.hit_test(x) else { return false };
+                    let Ok(list) = value.get::<gtk4::gdk::FileList>() else { return false };
+                    let paths: Vec<String> = list
+                        .files()
+                        .iter()
+                        .filter_map(|f| f.path())
+                        .filter_map(|p| p.to_str().map(str::to_string))
+                        .collect();
+                    if paths.is_empty() {
+                        return false;
+                    }
+                    if let Some(cb) = obj.imp().on_drop.borrow().as_ref() {
+                        cb(i, paths);
+                    }
+                    true
+                }
+            ));
+            obj.add_controller(drop);
         }
     }
 
@@ -184,6 +260,9 @@ impl Magnifier {
     }
     pub fn connect_pointer_leave<F: Fn() + 'static>(&self, f: F) {
         self.imp().on_leave.replace(Some(Box::new(f)));
+    }
+    pub fn connect_drop<F: Fn(usize, Vec<String>) + 'static>(&self, f: F) {
+        self.imp().on_drop.replace(Some(Box::new(f)));
     }
 
     // --- intrinsic size ---------------------------------------------------
@@ -359,12 +438,35 @@ impl Magnifier {
             }
         }
 
+        let drop_on = self.imp().drop_target.get();
         for (i, g) in geoms.iter().enumerate() {
             let top = bottom - g.size;
+            // While a drag is in flight, everything that is not the receiving
+            // app fades back — so which icon will get the file is unambiguous
+            // *before* the button is released, not after.
+            let dim = drop_on.is_some_and(|t| t != i);
             snapshot.save();
             snapshot.translate(&graphene::Point::new(g.left as f32, top as f32));
+            if dim {
+                snapshot.push_opacity(0.45);
+            }
             items[i].icon.snapshot(snapshot, g.size, g.size);
+            if dim {
+                snapshot.pop();
+            }
             snapshot.restore();
+
+            if drop_on == Some(i) {
+                let pad = 3.0;
+                let rect = graphene::Rect::new(
+                    (g.left - pad) as f32,
+                    (top - pad) as f32,
+                    (g.size + 2.0 * pad) as f32,
+                    (g.size + 2.0 * pad) as f32,
+                );
+                let rr = gsk::RoundedRect::from_rect(rect, (g.size * 0.24) as f32);
+                snapshot.append_border(&rr, &[2.0; 4], &[pal.accent; 4]);
+            }
 
             // Running indicator dot below the icon.
             if items[i].running {
@@ -381,6 +483,29 @@ impl Magnifier {
                 snapshot.push_rounded_clip(&dr);
                 snapshot.append_color(&pal.accent, &dot);
                 snapshot.pop();
+            }
+
+            // Attention badge on the top-right corner.
+            //
+            // Driven by Hyprland's per-window urgency hint, which is the only
+            // "something happened here" signal a Wayland compositor exposes —
+            // there is no unread-count protocol on Linux, so this counts
+            // *windows asking for attention*, not messages. It scales with the
+            // icon so it stays pinned to the corner through magnification.
+            if items[i].urgent > 0 {
+                let d = (g.size * BADGE_FRACTION).clamp(BADGE_MIN, BADGE_MAX);
+                let bx = g.left + g.size - d * 0.72;
+                let by = top - d * 0.28;
+                let rect = graphene::Rect::new(bx as f32, by as f32, d as f32, d as f32);
+                let rr = gsk::RoundedRect::from_rect(rect, (d / 2.0) as f32);
+                snapshot.push_rounded_clip(&rr);
+                snapshot.append_color(&pal.urgent, &rect);
+                snapshot.pop();
+                // The count only earns its ink past one: a badge reading "1" is
+                // the same message the badge itself already carries.
+                if items[i].urgent > 1 {
+                    self.draw_badge_count(snapshot, items[i].urgent, bx + d / 2.0, by + d / 2.0, d);
+                }
             }
         }
 
@@ -404,6 +529,30 @@ impl Magnifier {
 
         snapshot.pop(); // opacity
         snapshot.pop(); // clip
+    }
+
+    /// The number inside an attention badge, centred on it.
+    fn draw_badge_count(&self, snapshot: &gtk4::Snapshot, n: usize, cx: f64, cy: f64, d: f64) {
+        // Past a point the exact number stops mattering and the width starts
+        // costing more than the information is worth.
+        let text = if n > 9 { "9+".to_string() } else { n.to_string() };
+        let layout = self.create_pango_layout(Some(&text));
+        // Sized off the badge so it stays proportionate through magnification.
+        let desc = gtk4::pango::FontDescription::from_string(&format!(
+            "Inter Bold {}",
+            (d * 0.42).round() as i32
+        ));
+        layout.set_font_description(Some(&desc));
+        let (tw, th) = layout.pixel_size();
+        snapshot.save();
+        snapshot.translate(&graphene::Point::new(
+            (cx - tw as f64 / 2.0) as f32,
+            (cy - th as f64 / 2.0) as f32,
+        ));
+        // White rather than a token: the badge is always the urgent colour, and
+        // white is the only foreground guaranteed to read on it in every theme.
+        snapshot.append_layout(&layout, &gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0));
+        snapshot.restore();
     }
 
     fn draw_label(

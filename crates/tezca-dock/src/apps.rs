@@ -25,6 +25,10 @@ pub struct DockItem {
     pub pinned: bool,
     /// Live window addresses for this app (for focus/cycle).
     pub addresses: Vec<String>,
+    /// How many of this app's windows are asking for attention. Zero for the
+    /// overwhelming majority of items, which is why the badge is drawn only
+    /// when it is not.
+    pub urgent: usize,
     /// What to hand `uwsm app` when launching; None for running-only items.
     pub launch_id: Option<String>,
     /// Draw a group separator immediately before this item.
@@ -43,12 +47,17 @@ struct AppEntry {
 pub fn build(cfg: &Config, theme: &IconTheme) -> Vec<DockItem> {
     let clients = hypr::clients();
 
-    // Group running windows by class, preserving first-seen order.
-    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    // Group running windows by class, preserving first-seen order. The urgent
+    // count rides along: it belongs to the *app*, not to one of its windows,
+    // because that is the granularity the dock draws at.
+    let mut groups: Vec<(String, Vec<String>, usize)> = Vec::new();
     for c in &clients {
-        match groups.iter_mut().find(|(cl, _)| cl == &c.class) {
-            Some((_, addrs)) => addrs.push(c.address.clone()),
-            None => groups.push((c.class.clone(), vec![c.address.clone()])),
+        match groups.iter_mut().find(|(cl, _, _)| cl == &c.class) {
+            Some((_, addrs, urgent)) => {
+                addrs.push(c.address.clone());
+                *urgent += usize::from(c.urgent);
+            }
+            None => groups.push((c.class.clone(), vec![c.address.clone()], usize::from(c.urgent))),
         }
     }
     let mut consumed = vec![false; groups.len()];
@@ -58,10 +67,12 @@ pub fn build(cfg: &Config, theme: &IconTheme) -> Vec<DockItem> {
     for id in &cfg.pinned {
         let app = resolve_app(id);
         let mut addresses = Vec::new();
-        for (i, (class, addrs)) in groups.iter().enumerate() {
+        let mut urgent = 0;
+        for (i, (class, addrs, urg)) in groups.iter().enumerate() {
             if !consumed[i] && class_matches(class, id, app.as_ref()) {
                 consumed[i] = true;
                 addresses.extend(addrs.iter().cloned());
+                urgent += urg;
             }
         }
         let label = app.as_ref().map(|a| a.name.clone()).unwrap_or_else(|| pretty(id));
@@ -73,6 +84,7 @@ pub fn build(cfg: &Config, theme: &IconTheme) -> Vec<DockItem> {
             running: !addresses.is_empty(),
             pinned: true,
             addresses,
+            urgent,
             launch_id: Some(launch_id),
             divider_before: false,
         });
@@ -80,7 +92,7 @@ pub fn build(cfg: &Config, theme: &IconTheme) -> Vec<DockItem> {
 
     // Running apps that aren't pinned — trailing group, separated by a divider.
     let mut first_running = true;
-    for (i, (class, addrs)) in groups.iter().enumerate() {
+    for (i, (class, addrs, urgent)) in groups.iter().enumerate() {
         if consumed[i] {
             continue;
         }
@@ -93,6 +105,7 @@ pub fn build(cfg: &Config, theme: &IconTheme) -> Vec<DockItem> {
             running: true,
             pinned: false,
             addresses: addrs.clone(),
+            urgent: *urgent,
             launch_id: None,
             divider_before: std::mem::take(&mut first_running),
         });

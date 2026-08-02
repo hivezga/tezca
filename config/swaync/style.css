@@ -37,9 +37,26 @@
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 
+/* Three urgency levels, matching config.json's timeouts (low 4s, normal 8s,
+   critical 0 = never self-dismisses). Critical takes the same red rim the bar
+   uses for battery and recording, so the colour means one thing everywhere. */
 .notification.critical {
     border: 1px solid alpha(@tz_urgent, 0.55);
 }
+
+/* Low urgency is background noise by definition — present, but not competing
+   with whatever you were reading. */
+.notification.low {
+    opacity: 0.9;
+}
+
+/* NOT DONE HERE, and not doable here:
+ *   • a countdown hairline showing the remaining timeout, and
+ *   • collapsing a run of same-app toasts behind one counted card.
+ * swaync renders neither and exposes no option for either, so both would need
+ * a fork or a wrapper daemon rather than a stylesheet rule. The bell module in
+ * tezca-bar already keeps the full history, which is the part that matters;
+ * these two are presentation we have chosen not to fork upstream for. */
 
 .notification-content {
     padding: 12px;

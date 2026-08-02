@@ -19,6 +19,9 @@ pub struct Palette {
     pub accent: RGBA,
     pub accent_dim: RGBA,
     pub gold: RGBA,
+    /// The attention colour, shared with the bar's urgent states so a red mark
+    /// means the same thing wherever it appears on this desktop.
+    pub urgent: RGBA,
 }
 
 impl Default for Palette {
@@ -33,6 +36,7 @@ impl Default for Palette {
             accent: hex("#3FB8AF"),
             accent_dim: hex("#2A8C86"),
             gold: hex("#C9A24B"),
+            urgent: hex("#E06C75"),
         }
     }
 }
@@ -54,6 +58,7 @@ impl Palette {
                 "tz_accent" => p.accent = rgba,
                 "tz_accent_dim" => p.accent_dim = rgba,
                 "tz_gold" => p.gold = rgba,
+                "tz_urgent" => p.urgent = rgba,
                 _ => {}
             }
         }

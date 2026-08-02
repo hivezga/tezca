@@ -145,6 +145,29 @@ impl Dock {
         }
     }
 
+    /// Files dropped on item `i`: open them with that app.
+    ///
+    /// `uwsm app -- <desktop-id> <paths…>` is the same launch path a click
+    /// takes, with the files appended — so the app starts in the user's session
+    /// scope exactly as it would otherwise, and a `.desktop` entry's own
+    /// `%f`/`%U` handling does the rest. Items with no desktop id (a running
+    /// app that was never pinned and has no entry) cannot be launch targets,
+    /// so a drop on one is ignored rather than guessed at.
+    fn drop_files(&self, i: usize, paths: Vec<String>) {
+        let launch_id = {
+            let meta = self.meta.borrow();
+            let Some(m) = meta.get(i) else { return };
+            let Some(id) = m.launch_id.clone() else { return };
+            id
+        };
+        let mut args: Vec<String> = vec!["app".into(), "--".into(), launch_id];
+        args.extend(paths);
+        let _ = Command::new("uwsm").args(&args).spawn();
+        for s in self.surfaces.borrow().iter() {
+            s.hide_after_activate();
+        }
+    }
+
     /// Click on item `i` of any surface: focus/cycle a running app, else launch.
     fn activate(&self, i: usize) {
         let (addresses, launch_id) = {
@@ -267,6 +290,15 @@ impl DockSurface {
             if let Some(s) = wa.upgrade() {
                 if let Some(m) = s.manager.upgrade() {
                     m.activate(i);
+                }
+            }
+        });
+
+        let wd = weak.clone();
+        self.mag.connect_drop(move |i, paths| {
+            if let Some(s) = wd.upgrade() {
+                if let Some(m) = s.manager.upgrade() {
+                    m.drop_files(i, paths);
                 }
             }
         });

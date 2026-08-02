@@ -385,3 +385,52 @@ button.tz-approw:hover {
     background-color: alpha(@tz_accent, 0.14);
     color: @tz_text;
 }
+
+/* --- Page status surface (E0) ------------------------------------------- */
+/* A Revealer pinned at the top of a page. Success auto-hides; a failure stays
+   until dismissed, because an error nobody reads is an error that gets
+   reported to us instead. */
+.tz-status {
+    border-radius: 12px;
+    padding: 9px 12px;
+    margin: 0 0 6px 0;
+    background-color: alpha(@tz_surface, 0.55);
+    border: 1px solid alpha(@tz_faint, 0.35);
+}
+.tz-status label {
+    font-size: 10pt;
+    color: @tz_subtext;
+}
+.tz-status .tz-status-glyph {
+    font-weight: 700;
+    margin-right: 2px;
+}
+.tz-status.ok {
+    background-color: alpha(@tz_accent, 0.14);
+    border-color: alpha(@tz_accent, 0.45);
+}
+.tz-status.ok label { color: @tz_text; }
+.tz-status.ok .tz-status-glyph { color: @tz_accent; }
+.tz-status.warn {
+    background-color: alpha(@tz_gold, 0.14);
+    border-color: alpha(@tz_gold, 0.45);
+}
+.tz-status.warn label { color: @tz_text; }
+.tz-status.warn .tz-status-glyph { color: @tz_gold; }
+.tz-status.err {
+    background-color: alpha(@tz_urgent, 0.16);
+    border-color: alpha(@tz_urgent, 0.5);
+}
+.tz-status.err label { color: @tz_text; }
+.tz-status.err .tz-status-glyph { color: @tz_urgent; }
+.tz-status.busy .tz-status-glyph { color: @tz_muted; }
+button.tz-statusclose {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0 4px;
+    min-height: 18px;
+    min-width: 18px;
+    color: @tz_muted;
+}
+button.tz-statusclose:hover { color: @tz_text; }

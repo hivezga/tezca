@@ -1,15 +1,15 @@
 //! tezca-settings — the Project:Tezca GTK4 control center.
 //!
 //! A single-instance obsidian-glass window: an icon sidebar + a stack of pages
-//! (Appearance, Displays, Bar, Dock, Desktop, Keybinds, Gaming, System). It owns no
-//! state — every action shells out to the `tezca` CLI / hyprctl / the
-//! hypr/scripts helpers, so the GUI and the keyboard bindings drive exactly the
-//! same code paths. Pages are built lazily on first visit (so e.g. the slow DDC
+//! (Appearance, Displays, Bar, Dock, Desktop, Network, Startup, Sound, Power,
+//! Input, Keybinds, Gaming, System). It owns no state — every action shells out to the `tezca`
+//! CLI / hyprctl / the hypr/scripts helpers, so the GUI and the keyboard
+//! bindings drive exactly the same code paths. Pages are built lazily on first visit (so e.g. the slow DDC
 //! brightness probe on the Displays tab never blocks startup).
 //!
 //! Launched by `tezca settings` (bound to SUPER+SHIFT+A). An optional
-//! `--page <appearance|displays|bar|dock|desktop|keybinds|gaming|system>` opens
-//! straight to a tab.
+//! `--page <appearance|displays|bar|dock|desktop|network|startup|sound|power|
+//! input|keybinds|gaming|system>` opens straight to a tab.
 
 mod backend;
 mod css;
@@ -34,6 +34,11 @@ const PAGES: &[(&str, &str, &str)] = &[
     ("bar", "Bar", "open-menu-symbolic"),
     ("dock", "Dock", "view-grid-symbolic"),
     ("desktop", "Desktop", "preferences-desktop-symbolic"),
+    ("network", "Network", "network-wireless-symbolic"),
+    ("startup", "Startup", "system-run-symbolic"),
+    ("sound", "Sound", "audio-volume-high-symbolic"),
+    ("power", "Power", "battery-symbolic"),
+    ("input", "Input", "input-mouse-symbolic"),
     ("keybinds", "Keybinds", "input-keyboard-symbolic"),
     ("gaming", "Gaming", "applications-games-symbolic"),
     ("system", "System", "emblem-system-symbolic"),
@@ -161,6 +166,11 @@ fn build_page(id: &str, window: &Window) -> Widget {
         "bar" => pages::bar(),
         "dock" => pages::dock(),
         "desktop" => pages::desktop(),
+        "network" => pages::network(window),
+        "startup" => pages::startup(window),
+        "sound" => pages::sound(),
+        "power" => pages::power(),
+        "input" => pages::input(),
         "keybinds" => pages::keybinds(window),
         "gaming" => pages::gaming(),
         "system" => pages::system(),

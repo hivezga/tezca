@@ -2,6 +2,8 @@
 //! work itself — every action is a `tezca` / hyprctl / script call, the same
 //! thing the keybinds do, so the GUI and keyboard paths stay identical.
 
+use gtk4::gio;
+use gtk4::glib;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -127,23 +129,210 @@ pub fn run_script(name: &str, args: &[&str]) {
 // ---------------------------------------------------------------------------
 
 /// Result of a `tezca` invocation we need to branch on (e.g. rebind conflicts).
+#[derive(Clone, Default)]
 pub struct CmdResult {
     pub code: i32,
+    pub stdout: String,
     pub stderr: String,
 }
 
-/// Run `tezca <args>` synchronously, returning its exit code + stderr.
-pub fn tezca_result(args: &[&str]) -> CmdResult {
-    match Command::new(tezca_bin()).args(args).output() {
-        Ok(o) => CmdResult {
-            code: o.status.code().unwrap_or(-1),
-            stderr: String::from_utf8_lossy(&o.stderr).trim().to_string(),
-        },
-        Err(e) => CmdResult { code: -1, stderr: e.to_string() },
+impl CmdResult {
+    pub fn ok(&self) -> bool {
+        self.code == 0
+    }
+
+    /// The most useful line to show a user when this failed: the CLI's own error
+    /// text, falling back to stdout (hyprctl-style tools answer on stdout) and
+    /// finally to a generic message, so an error surface is never blank.
+    pub fn message(&self) -> String {
+        for s in [&self.stderr, &self.stdout] {
+            let line = s.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+            if !line.is_empty() {
+                // The CLI prefixes its failures with a coloured "error:"; the
+                // surface already says as much visually.
+                return strip_error_prefix(line).to_string();
+            }
+        }
+        format!("command failed (exit {})", self.code)
     }
 }
 
+/// Drop a leading `error:` label, with or without its ANSI colour wrapper.
+fn strip_error_prefix(line: &str) -> &str {
+    let mut s = line.trim_start();
+    // ESC [ … m
+    while let Some(rest) = s.strip_prefix('\u{1b}') {
+        match rest.find('m') {
+            Some(i) => s = &rest[i + 1..],
+            None => break,
+        }
+    }
+    s.strip_prefix("error:").unwrap_or(s).trim_start()
+}
+
+/// Run `tezca <args>` synchronously, returning its exit code + output.
+pub fn tezca_result(args: &[&str]) -> CmdResult {
+    capture(&tezca_bin(), args)
+}
+
+/// Run any command synchronously, capturing everything we might want to report.
+pub fn capture(cmd: &str, args: &[&str]) -> CmdResult {
+    match Command::new(cmd).args(args).output() {
+        Ok(o) => CmdResult {
+            code: o.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            stderr: String::from_utf8_lossy(&o.stderr).trim().to_string(),
+        },
+        Err(e) => CmdResult { code: -1, stdout: String::new(), stderr: e.to_string() },
+    }
+}
+
+/// Run a command **off the GTK main thread**, then hand the result back on it.
+///
+/// Everything else in this module blocks the caller, which is fine for the
+/// millisecond-scale reads the older pages do. It is not fine for the tools the
+/// connectivity pages drive: `nmcli device wifi list --rescan yes` takes seconds,
+/// `bluetoothctl scan` takes exactly as long as you ask it to, and `ddcutil`
+/// is slow enough to feel. Run those here or the whole window (and, in the bar,
+/// the clock) freezes for the duration.
+///
+/// `gio::spawn_blocking` puts the work on GIO's shared I/O thread pool and
+/// `spawn_future_local` resumes on the main context, so `on_done` can touch
+/// widgets directly. The pool is shared and rate-limited, so callers must keep
+/// their commands bounded (pass `--timeout`, never block indefinitely).
+pub fn run_async<F>(cmd: &str, args: &[&str], on_done: F)
+where
+    F: FnOnce(CmdResult) + 'static,
+{
+    let cmd = cmd.to_string();
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    glib::spawn_future_local(async move {
+        let handle = gio::spawn_blocking(move || {
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            capture(&cmd, &refs)
+        });
+        match handle.await {
+            Ok(r) => on_done(r),
+            // The worker panicked. Report it rather than dropping the callback,
+            // or the UI sits on "Scanning…" forever.
+            Err(_) => on_done(CmdResult {
+                code: -1,
+                stdout: String::new(),
+                stderr: "the background task panicked".to_string(),
+            }),
+        }
+    });
+}
+
+/// [`run_async`] for the `tezca` CLI itself.
+pub fn tezca_async<F>(args: &[&str], on_done: F)
+where
+    F: FnOnce(CmdResult) + 'static,
+{
+    run_async(&tezca_bin(), args, on_done);
+}
+
+/// Run `tezca <args>` with `input` on its stdin, off the main thread.
+///
+/// This is how a Wi-Fi password gets from the dialog to NetworkManager: down a
+/// pipe. Passing it as an argument instead would publish it in `/proc/<pid>/cmdline`,
+/// which every process on the machine can read — `ps` would print the
+/// pre-shared key of the network the user just joined.
+pub fn tezca_async_stdin<F>(args: &[&str], input: String, on_done: F)
+where
+    F: FnOnce(CmdResult) + 'static,
+{
+    let cmd = tezca_bin();
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    glib::spawn_future_local(async move {
+        let handle = gio::spawn_blocking(move || {
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            capture_stdin(&cmd, &refs, &input)
+        });
+        match handle.await {
+            Ok(r) => on_done(r),
+            Err(_) => on_done(CmdResult {
+                code: -1,
+                stdout: String::new(),
+                stderr: "the background task panicked".to_string(),
+            }),
+        }
+    });
+}
+
+fn capture_stdin(cmd: &str, args: &[&str], input: &str) -> CmdResult {
+    use std::io::Write;
+    let child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => return CmdResult { code: -1, stdout: String::new(), stderr: e.to_string() },
+    };
+    if let Some(mut si) = child.stdin.take() {
+        let _ = si.write_all(input.as_bytes());
+        // Dropping the handle closes the pipe, which is what tells the child to
+        // stop waiting for more input.
+    }
+    match child.wait_with_output() {
+        Ok(o) => CmdResult {
+            code: o.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            stderr: String::from_utf8_lossy(&o.stderr).trim().to_string(),
+        },
+        Err(e) => CmdResult { code: -1, stdout: String::new(), stderr: e.to_string() },
+    }
+}
+
+/// Split a `--machine` listing into records.
+///
+/// The CLI's machine format is a flat stream of `key=value` lines, with a line
+/// starting `@` opening a new record — the same shape `display list --machine`
+/// has always used. Returns each record as its own key/value list.
+pub fn records(out: &str) -> Vec<Vec<(String, String)>> {
+    let mut recs: Vec<Vec<(String, String)>> = Vec::new();
+    for line in out.lines() {
+        if line.starts_with('@') {
+            recs.push(Vec::new());
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        if let Some(last) = recs.last_mut() {
+            last.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    recs
+}
+
+/// One field out of a record, empty when absent.
+pub fn rec(r: &[(String, String)], key: &str) -> String {
+    r.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).unwrap_or_default()
+}
+
+/// One boolean field out of a record.
+pub fn rec_bool(r: &[(String, String)], key: &str) -> bool {
+    rec(r, key) == "true"
+}
+
+/// Parse a flat (record-less) `--machine` block, e.g. `net status --machine`.
+pub fn flat(out: &str) -> Vec<(String, String)> {
+    out.lines()
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .collect()
+}
+
 /// One connected monitor, from `tezca display list --machine`.
+///
+/// Mirrors every field the CLI prints. `vrr` and `bitdepth` are the *effective*
+/// values read off the compositor — `hyprctl` reports VRR as a bool and bit depth
+/// only as a pixel format — so they are evidence of what is live, not of what was
+/// configured. The configured value comes from `tezca display config`, which
+/// reads the override store; a control seeded from the compositor would flip back
+/// to "off" every time VRR happened not to be engaged.
 #[derive(Clone, Default)]
 pub struct Monitor {
     pub name: String,
@@ -152,13 +341,22 @@ pub struct Monitor {
     pub rate: String,
     pub pos: String,
     pub scale: String,
+    pub transform: String,
+    pub vrr: String,
+    pub bitdepth: String,
+    pub mirror: String,
+    pub disabled: bool,
     pub modes: Vec<String>, // "3440x1440@165.00"
 }
 
 pub fn monitors() -> Vec<Monitor> {
-    let Some(out) = tezca_out(&["display", "list", "--machine"]) else {
+    let Some(out) = tezca_out(&["display", "list", "--machine", "--all"]) else {
         return Vec::new();
     };
+    parse_monitors(&out)
+}
+
+fn parse_monitors(out: &str) -> Vec<Monitor> {
     let mut mons: Vec<Monitor> = Vec::new();
     for line in out.lines() {
         if let Some(name) = line.strip_prefix("@monitor ") {
@@ -173,11 +371,30 @@ pub fn monitors() -> Vec<Monitor> {
             "rate" => m.rate = v.to_string(),
             "pos" => m.pos = v.to_string(),
             "scale" => m.scale = v.to_string(),
+            "transform" => m.transform = v.to_string(),
+            "vrr" => m.vrr = v.to_string(),
+            "bitdepth" => m.bitdepth = v.to_string(),
+            "mirror" => m.mirror = v.to_string(),
+            "disabled" => m.disabled = v == "true",
             "modes" => m.modes = v.split_whitespace().map(str::to_string).collect(),
             _ => {}
         }
     }
     mons
+}
+
+/// The persisted per-monitor overrides (`tezca display config`) as
+/// `monitor:<NAME>.<field>` → value. This is the source of truth for controls
+/// whose configured value cannot be read back off the compositor (VRR mode, bit
+/// depth); absent means "never set", i.e. inherit the shipped config.
+pub fn display_config() -> Vec<(String, String)> {
+    config_pairs(&["display", "config"])
+}
+
+/// Look one `display_config` key up: `override_for(&cfg, "DP-1", "vrr")`.
+pub fn override_for(cfg: &[(String, String)], monitor: &str, field: &str) -> Option<String> {
+    let key = format!("monitor:{monitor}.{field}");
+    cfg.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()).filter(|v| !v.is_empty())
 }
 
 /// Per-monitor wallpaper targets: (name, is_override, path).
@@ -272,6 +489,12 @@ fn config_pairs(args: &[&str]) -> Vec<(String, String)> {
 }
 
 /// The current value of a Hyprland option (`tezca hypr get`).
+///
+/// `[[EMPTY]]` is filtered here as well as in the CLI: this is what populates
+/// text entries, and a sentinel reaching one of those is written back verbatim by
+/// the next Apply. Belt and braces for the case where an older `tezca` binary is
+/// on PATH than the settings binary — which is exactly what a partial install
+/// looks like.
 pub fn hypr_get(opt: &str) -> Option<String> {
-    tezca_out(&["hypr", "get", opt])
+    tezca_out(&["hypr", "get", opt]).filter(|v| v != "[[EMPTY]]")
 }

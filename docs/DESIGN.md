@@ -472,6 +472,7 @@ The shipped map is read-only. Rebinding writes an override layer to
 | **5 · Rust dock** | `tezca-dock` (gtk4-rs) with magnification, replaces nwg-dock | Signature bespoke dock |
 | **6 · Gaming/AI profiles** | `tezca game`, AI workspace/launchers, gamescope rules | Optimized modes per activity |
 | **7 · Share** | Screenshots, docs, curated themes, GitHub release | Publish `tezca` |
+| **11 · Desktop completeness** | Network (Wi-Fi/VPN/airplane), Bluetooth, advanced displays + layout profiles, startup apps, input/sound/power pages, night light, screen recording | Run the desktop without dropping to a terminal |
 
 ---
 
@@ -507,3 +508,11 @@ The shipped map is read-only. Rebinding writes an override layer to
 - ~~**`tezca-dock` scope**~~ — **resolved.** Magnification + blur in gtk4-rs shipped
   (Phase 5) and nwg-dock-hyprland has since been removed.
 - **Repo name**: `tezca` on GitHub (the local `:` path stays as-is).
+- ~~**Everything needs a terminal**~~ — **resolved (Phase 11, issue #2).** Wi-Fi,
+  Bluetooth, audio device switching, startup apps, idle timeouts, display rotation
+  and arrangement, night light and screen recording all have a CLI verb, a Settings
+  page, and (where it earns the space) a bar module. The `hl.monitor` field
+  vocabulary the advanced display work needed was established by probing the running
+  compositor — it rejects unknown fields, so the accepted set is knowable:
+  `vrr · bitdepth · mirror · transform · disabled · cm · sdrbrightness ·
+  sdrsaturation · supports_wide_color · supports_hdr` (there is no `enabled`).

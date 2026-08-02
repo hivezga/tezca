@@ -1,7 +1,8 @@
 -- conf.d/autostart.lua — session startup.
 --
 -- Only what a correct session needs, in dependency order: services first, then the
--- shell surfaces (bar, notifications, launcher), then the wallpaper daemon.
+-- shell surfaces (bar, notifications, launcher), then the wallpaper daemon — and
+-- finally whatever the user has added themselves.
 --
 -- Launch GUI services through `uwsm app` so they land in the right systemd slice
 -- (correct cgroup accounting, clean shutdown).
@@ -12,15 +13,52 @@
 -- copy of every daemon. `hl.exec_cmd` runs through `sh -c` and spawns
 -- asynchronously, so the `&&`, `||` and `$HOME` below still work as written and
 -- nothing needs `& disown`.
+--
+-- USER CONTROL. Every shipped launch below carries an id and goes through
+-- `launch(id, cmd)`, which skips it when that id appears in the `disabled` list
+-- of ~/.config/tezca/startup.lua. That file also holds the user's own entries,
+-- and is managed by `tezca startup` / Settings → Startup. It lives outside the
+-- repo on purpose: this file is a symlink into the checkout, so adding an app by
+-- editing it would dirty the working tree and break `git pull` downstream.
+--
+-- It is loaded through `util.load`, which returns nil for a missing OR malformed
+-- file. That matters more than it looks: an uncaught Lua error anywhere in the
+-- config aborts the whole thing and drops Hyprland into emergency mode — one
+-- keybind, black screen. A broken startup.lua must cost you your extra apps,
+-- never your session.
+
+local util = require("util")
+
+local startup = util.load(util.config("tezca/startup.lua"))
+if type(startup) ~= "table" then
+    startup = {}
+end
+
+-- Shipped-service ids the user has switched off, as a set for cheap lookup.
+local off = {}
+for _, id in ipairs(startup.disabled or {}) do
+    if type(id) == "string" then
+        off[id] = true
+    end
+end
+
+--- Launch a shipped service unless the user disabled it.
+--- @param id string   stable id, matching the SHIPPED table in cmd_startup.rs
+--- @param cmd string
+local function launch(id, cmd)
+    if not off[id] then
+        hl.exec_cmd(cmd)
+    end
+end
 
 hl.on("hyprland.start", function()
     -- --- Phase 1: essential -------------------------------------------------
     -- Polkit agent — GUI auth prompts (sudo-in-GUI, mount, etc.).
-    hl.exec_cmd("uwsm app -- systemctl --user start hyprpolkitagent 2>/dev/null || uwsm app -- /usr/lib/hyprpolkitagent/hyprpolkitagent")
+    launch("polkit", "uwsm app -- systemctl --user start hyprpolkitagent 2>/dev/null || uwsm app -- /usr/lib/hyprpolkitagent/hyprpolkitagent")
 
     -- Clipboard history daemon (text + images) — cheap, useful from day one.
-    hl.exec_cmd("uwsm app -- wl-paste --type text --watch cliphist store")
-    hl.exec_cmd("uwsm app -- wl-paste --type image --watch cliphist store")
+    launch("cliphist-text", "uwsm app -- wl-paste --type text --watch cliphist store")
+    launch("cliphist-image", "uwsm app -- wl-paste --type image --watch cliphist store")
 
     -- --- Phase 2: aesthetic core --------------------------------------------
     -- Menubar + notification center.
@@ -29,10 +67,13 @@ hl.on("hyprland.start", function()
     -- include ~/.local/bin (where install.sh puts the binary), so a bare
     -- `tezca-bar` would silently fail to launch, exactly like tezca-dock below.
     -- $HOME is expanded by the shell hl.exec_cmd runs the command through.
+    -- Deliberately NOT wrapped in `launch()`: the bar is the way back to the
+    -- settings window that would switch it on again, so `tezca startup` refuses
+    -- to disable it and there is nothing to check here.
     hl.exec_cmd("uwsm app -- $HOME/.local/bin/tezca-bar")
-    hl.exec_cmd("uwsm app -- swaync")
+    launch("swaync", "uwsm app -- swaync")
     -- Walker launcher's provider backend (SUPER+SPACE).
-    hl.exec_cmd("uwsm app -- elephant")
+    launch("elephant", "uwsm app -- elephant")
     -- Walker itself, as a resident GApplication service. This is what makes the
     -- launcher feel instant: cold-starting walker per keypress cost ~1.2s (GTK4
     -- init + theme/CSS load + elephant handshake), long enough that a second
@@ -43,17 +84,23 @@ hl.on("hyprland.start", function()
     -- call bare `walker`, NOT `uwsm app -- walker` (see the note there).
     -- Waits for elephant on its own ("waiting for elephant to start..."), so the
     -- ordering above is a preference, not a requirement.
-    hl.exec_cmd("uwsm app -- walker --gapplication-service")
+    launch("walker", "uwsm app -- walker --gapplication-service")
     -- Wallpaper daemon. NOTE: swww was renamed "awww" upstream (Provides/Replaces
     -- swww, but the binaries are awww / awww-daemon — there is no swww-daemon).
-    hl.exec_cmd("uwsm app -- awww-daemon")
-    -- Idle/lock/dpms orchestration (config: hypr/hypridle.conf).
-    hl.exec_cmd("uwsm app -- hypridle")
+    launch("awww", "uwsm app -- awww-daemon")
+    -- Idle/lock/dpms orchestration. Prefers the config generated by `tezca idle`
+    -- (Settings → Power) and falls back to the shipped hypridle.conf when that
+    -- file does not exist, which is the state on a fresh install.
+    launch(
+        "hypridle",
+        'uwsm app -- sh -c \'cfg="${XDG_CONFIG_HOME:-$HOME/.config}/tezca/hypridle.conf"; '
+            .. 'if [ -f "$cfg" ]; then exec hypridle -c "$cfg"; else exec hypridle; fi\''
+    )
     -- Bespoke gtk4-rs magnifying macOS dock (Phase 5). Autohides at the bottom
     -- edge, magnifies on hover, glass + theme-driven colors. Reads
     -- ~/.config/tezca-dock/dock.toml. Launched through `uwsm app` for the correct
     -- systemd slice. NOTE: absolute path on purpose, same reason as tezca-bar.
-    hl.exec_cmd("uwsm app -- $HOME/.local/bin/tezca-dock")
+    launch("tezca-dock", "uwsm app -- $HOME/.local/bin/tezca-dock")
 
     -- --- Wallpaper ----------------------------------------------------------
     -- `tezca wallpaper apply` paints the ACTIVE theme's wallpaper on every output
@@ -61,7 +108,29 @@ hl.on("hyprland.start", function()
     -- It reads ~/.config/tezca/current/wallpaper + monitor-wallpapers, so it
     -- follows theme switches automatically (no hard-coded image). Absolute path:
     -- ~/.local/bin isn't on the uwsm --user PATH at login.
-    hl.exec_cmd('sleep 1 && [ -x "$HOME/.local/bin/tezca" ] && "$HOME/.local/bin/tezca" wallpaper apply')
+    launch("wallpaper", 'sleep 1 && [ -x "$HOME/.local/bin/tezca" ] && "$HOME/.local/bin/tezca" wallpaper apply')
+
+    -- --- Night light --------------------------------------------------------
+    -- `tezca night apply` re-applies the saved colour temperature, and is a no-op
+    -- when night light is switched off — so this costs one short-lived process at
+    -- login and nothing else.
+    launch("night", '[ -x "$HOME/.local/bin/tezca" ] && "$HOME/.local/bin/tezca" night apply')
+
+    -- --- The user's own apps ------------------------------------------------
+    -- Managed by `tezca startup` / Settings → Startup. `delay` exists because
+    -- some apps want the bar and its tray up before they launch; it is applied
+    -- with `sleep`, which costs nothing (hl.exec_cmd already goes through a shell
+    -- and does not block).
+    for _, e in ipairs(startup.entries or {}) do
+        if type(e) == "table" and type(e.exec) == "string" and e.exec ~= "" and e.enabled ~= false then
+            local delay = tonumber(e.delay) or 0
+            if delay > 0 then
+                hl.exec_cmd("sleep " .. math.floor(delay) .. " && " .. e.exec)
+            else
+                hl.exec_cmd(e.exec)
+            end
+        end
+    end
 end)
 
 -- Flat obsidian base, so there's never a jarring default-grey flash before the

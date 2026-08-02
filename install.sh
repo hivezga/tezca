@@ -49,11 +49,12 @@ PKGS_CORE=(hyprland uwsm hyprpolkitagent
            qt5-wayland qt6-wayland alacritty
            cliphist wl-clipboard
            pipewire wireplumber
+           networkmanager bluez bluez-utils
            polkit brightnessctl playerctl)
 
 PKGS_AESTHETIC=(swaync
-                hyprlock hypridle wlogout
-                hyprshot grim slurp swappy hyprpicker
+                hyprlock hypridle wlogout hyprsunset
+                hyprshot grim slurp swappy hyprpicker wf-recorder
                 gtk4 gtk4-layer-shell ddcutil
                 inter-font ttf-jetbrains-mono-nerd)
 

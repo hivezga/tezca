@@ -139,6 +139,13 @@ hl.bind(mod .. " + SHIFT + ALT + P", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts
 hl.bind("Print",                     hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/screenshot.sh all"))     -- snip all monitors → save + copy (Tezca)
 hl.bind(mod .. " + SHIFT + P",       hl.dsp.exec_cmd("uwsm app -- hyprpicker -a"))                        -- color picker → clipboard (HyDE)
 hl.bind(mod .. " + CTRL + R",        hl.dsp.exec_cmd("hyprctl reload"))                                   -- reload Hyprland config (Tezca)
+-- Screen recording — the moving-picture half of the screenshot binds above.
+-- SUPER+SHIFT+R and SUPER+CTRL+R are both taken (theme selector, config reload),
+-- so recording sits on ALT. Toggling: the same key stops and saves, which is a
+-- clean SIGINT — the recorder needs it to finalise a playable file.
+hl.bind(mod .. " + ALT + R",         hl.dsp.exec_cmd("$HOME/.local/bin/tezca record toggle"))              -- record all screens / stop (Tezca)
+hl.bind(mod .. " + SHIFT + ALT + R", hl.dsp.exec_cmd("$HOME/.local/bin/tezca record toggle --region"))     -- record a region / stop (Tezca)
+hl.bind(mod .. " + SHIFT + N",       hl.dsp.exec_cmd("$HOME/.local/bin/tezca night toggle"))               -- night light on/off (Tezca)
 
 -- ============================ Theming and wallpaper ==========================
 hl.bind(mod .. " + ALT + right", hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/wallpaper.sh next"))    -- next wallpaper (HyDE)

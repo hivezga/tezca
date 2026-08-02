@@ -60,9 +60,18 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
   per monitor — the ultrawide shows the full cluster, a narrower screen tightens.
 - **`tezca-dock`** — a bespoke **Rust + GTK4** magnifying macOS dock (cosine
   magnification, glass blur, running dots, autohide).
-- **`tezca-settings`** — a GTK4 control center for themes, displays, wallpaper, the
-  desktop, keybinds, gaming, and the session. It shells out to `tezca` for every
-  action, so the GUI and your keybindings drive identical code paths.
+- **`tezca-settings`** — a GTK4 control center: appearance, displays, bar, dock,
+  desktop, **network, startup, sound, power**, input, keybinds, gaming and the
+  session. It shells out to `tezca` for every action, so the GUI and your
+  keybindings drive identical code paths.
+- **Connectivity without leaving the desktop** — Wi-Fi (scan, connect, forget) and
+  Bluetooth (scan, pair, connect, battery) from the bar or the Settings window.
+  Wi-Fi passwords are handed to NetworkManager **on stdin**, never as a command-line
+  argument, so they never appear in `ps`.
+- **Displays that cannot lock you out** — rotation, per-monitor VRR, 10-bit colour,
+  mirroring, enable/disable and arrangement, each behind a *keep these settings?*
+  countdown that puts the old ones back if you do nothing. Save a whole arrangement
+  as a profile and switch between "both screens" and "just the ultrawide".
 - **Custom bar modules** — drop a `<name>.toml` in `~/.config/tezca-bar/modules/` with
   an `exec` and it becomes a widget, Waybar-style (plain text or a
   `{"text","tooltip","class"}` JSON subset). Each runs on its own thread with a
@@ -115,8 +124,12 @@ lives outside the checkout, so pulling never conflicts with your own tweaks:
 | `~/.config/tezca/keybinds.lua` | `tezca keybind` — an override layer; the shipped map is never edited |
 | `~/.config/tezca-bar/` | `tezca bar set`, plus your custom module manifests |
 | `~/.config/tezca-dock/` | `tezca dock set` |
+| `~/.config/tezca/startup.lua` | `tezca startup` — your login apps, and any Tezca service you switched off |
+| `~/.config/tezca/hypridle.conf` | `tezca idle` — generated; hypridle is launched against it when present |
+| `~/.config/tezca/night.lua` | `tezca night` — night-light state and schedule |
+| `~/.config/tezca/display-profiles.lua` | `tezca display profile save` |
 
-All four are safe to delete: you get the shipped defaults back. `tezca link` seeds
+All of them are safe to delete: you get the shipped defaults back. `tezca link` seeds
 them and migrates an older install.
 
 ### The Hyprland config is Lua
@@ -156,7 +169,14 @@ takes `--help`.
 | `tezca theme list \| names \| set <name> \| wallpaper <img> \| reload` | wallpaper-driven theming |
 | `tezca bar status \| start \| stop \| restart \| toggle \| config \| set` | control the top menubar |
 | `tezca dock status \| start \| stop \| restart \| toggle \| config \| set` | control the magnifying dock |
-| `tezca display list \| set <name> … \| reset <name> \| brightness <name> [0-100]` | per-monitor mode/scale/position (live + persisted) + DDC/CI brightness |
+| `tezca display list \| set <name> … \| reset <name> \| config \| profile … \| brightness <name> [0-100]` | per-monitor mode/scale/position/rotation, VRR, 10-bit, mirroring, saved layout profiles, DDC/CI brightness |
+| `tezca net status \| list \| connect <ssid> \| forget \| radio \| airplane \| vpn` | Wi-Fi, VPN and airplane mode (NetworkManager) |
+| `tezca bt status \| power \| scan \| list \| connect \| pair \| remove` | Bluetooth devices + battery (BlueZ) |
+| `tezca audio status \| outputs \| inputs \| set-output \| volume \| mute` | output/input switching, volume, mute |
+| `tezca startup list \| add <cmd> \| remove \| enable \| disable \| run` | what launches at login, Tezca's own services included |
+| `tezca idle status \| set --lock N \| apply \| inhibit on\|off` | idle lock/blank/suspend timeouts + keep-awake |
+| `tezca night status \| on \| off \| temp <K> \| schedule <from> <to>` | night light / blue-light filter (hyprsunset) |
+| `tezca record start \| stop \| toggle \| status` | screen recording to `~/Videos/Tezca` |
 | `tezca wallpaper set <img> --monitor <name> \| clear \| list \| apply` | per-monitor wallpaper overrides (global image → `tezca theme`) |
 | `tezca hypr get \| set <opt> <val>… \| reset \| list` | live Hyprland option tuning that persists across reloads |
 | `tezca keybind list \| rebind --line N … \| set-action --line N … \| restore \| reset` | inspect + rebind keybindings safely |

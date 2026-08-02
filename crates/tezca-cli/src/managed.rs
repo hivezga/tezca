@@ -67,7 +67,15 @@ const HEADER: &str = "\
 
 /// One `hl.monitor` entry. Fields are kept as strings because they are echoed
 /// straight back to Hyprland; only `scale` is emitted unquoted when numeric.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// The optional fields below are emitted only when set, so a monitor configured
+/// the way every monitor was configured before they existed still renders
+/// byte-for-byte identically (there is a test for exactly that). `hl.monitor`
+/// validates its field names strictly — an unknown key aborts the call with
+/// `hl.monitor: unknown field 'x'` — so this list was established by probing the
+/// running compositor rather than from documentation. Note there is no `enabled`
+/// field: a monitor is switched off with `disabled = true`.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Monitor {
     pub output: String,
     pub mode: String,
@@ -75,6 +83,14 @@ pub struct Monitor {
     pub scale: String,
     /// Empty or "0" means "don't emit a transform".
     pub transform: String,
+    /// "" (inherit the global `misc:vrr`) | "0" off | "1" on | "2" fullscreen-only.
+    pub vrr: String,
+    /// "" (inherit) | "8" | "10".
+    pub bitdepth: String,
+    /// "" (none) | a connector name to mirror.
+    pub mirror: String,
+    /// True when the output is switched off entirely.
+    pub disabled: bool,
 }
 
 /// The whole generated store, in memory.
@@ -164,9 +180,14 @@ pub fn set(key: &str, value: &str) -> Result<(), String> {
     write(&store)
 }
 
+/// Every persisted monitor override, in file order.
+pub fn monitors() -> Vec<Monitor> {
+    read().map(|s| s.monitors).unwrap_or_default()
+}
+
 /// Upsert one monitor override, keyed by its connector name.
 pub fn set_monitor(m: Monitor) -> Result<(), String> {
-    if [&m.output, &m.mode, &m.position, &m.scale, &m.transform]
+    if [&m.output, &m.mode, &m.position, &m.scale, &m.transform, &m.vrr, &m.bitdepth, &m.mirror]
         .iter()
         .any(|f| f.contains(['\n', '\r', '"', '\\']))
     {
@@ -255,6 +276,43 @@ pub(crate) fn lua_value(v: &str) -> String {
     format!("\"{}\"", t.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// The `hl.monitor` field list for `m`, without the enclosing braces.
+///
+/// Shared by the generated override file ([`render`]) and the live-apply snippet
+/// (`hypr::lua_monitor_call`). These two must spell a monitor **identically** —
+/// they are the same setting applied now and applied again at the next reload, so
+/// any divergence shows up as the display visibly changing when you reload. They
+/// were separate copies of this logic until the optional fields below made that a
+/// standing bug waiting to happen.
+///
+/// Optional fields are emitted only when set: a monitor carrying none of them
+/// renders exactly as it did before they existed.
+pub(crate) fn monitor_fields(m: &Monitor) -> String {
+    let mut s = format!(
+        "output = \"{}\", mode = \"{}\", position = \"{}\", scale = {}",
+        m.output,
+        m.mode,
+        m.position,
+        lua_value(&m.scale)
+    );
+    if !m.transform.is_empty() && m.transform != "0" {
+        s.push_str(&format!(", transform = {}", lua_value(&m.transform)));
+    }
+    if !m.vrr.is_empty() {
+        s.push_str(&format!(", vrr = {}", lua_value(&m.vrr)));
+    }
+    if !m.bitdepth.is_empty() {
+        s.push_str(&format!(", bitdepth = {}", lua_value(&m.bitdepth)));
+    }
+    if !m.mirror.is_empty() {
+        s.push_str(&format!(", mirror = {}", lua_value(&m.mirror)));
+    }
+    if m.disabled {
+        s.push_str(", disabled = true");
+    }
+    s
+}
+
 /// Recover the value a caller originally passed from its Lua literal.
 fn unlua_value(lit: &str) -> String {
     let t = lit.trim();
@@ -285,17 +343,7 @@ fn render(store: &Store) -> String {
         }
         s.push_str("    monitors = {\n");
         for m in &store.monitors {
-            s.push_str(&format!(
-                "        {{ output = \"{}\", mode = \"{}\", position = \"{}\", scale = {}",
-                m.output,
-                m.mode,
-                m.position,
-                lua_value(&m.scale)
-            ));
-            if !m.transform.is_empty() && m.transform != "0" {
-                s.push_str(&format!(", transform = {}", lua_value(&m.transform)));
-            }
-            s.push_str(" },\n");
+            s.push_str(&format!("        {{ {} }},\n", monitor_fields(m)));
         }
         s.push_str("    },\n");
     }
@@ -345,15 +393,11 @@ fn parse(text: &str) -> Result<Store, String> {
     Ok(store)
 }
 
-fn parse_monitor_entry(line: &str) -> Option<Monitor> {
+/// Parse one rendered `{ output = …, … }` entry. Shared with the display-profile
+/// store, which uses the same entry grammar.
+pub(crate) fn parse_monitor_entry(line: &str) -> Option<Monitor> {
     let inner = line.trim().trim_start_matches('{').trim_end_matches(',').trim_end_matches('}');
-    let mut m = Monitor {
-        output: String::new(),
-        mode: String::new(),
-        position: String::new(),
-        scale: String::new(),
-        transform: String::new(),
-    };
+    let mut m = Monitor::default();
     for field in inner.split(',') {
         let Some((k, v)) = field.split_once('=') else { continue };
         let v = unlua_value(v.trim());
@@ -363,6 +407,10 @@ fn parse_monitor_entry(line: &str) -> Option<Monitor> {
             "position" => m.position = v,
             "scale" => m.scale = v,
             "transform" => m.transform = v,
+            "vrr" => m.vrr = v,
+            "bitdepth" => m.bitdepth = v,
+            "mirror" => m.mirror = v,
+            "disabled" => m.disabled = v == "true",
             _ => {}
         }
     }
@@ -400,6 +448,9 @@ fn parse_legacy_block(text: &str) -> Result<Store, String> {
                                 Some(i) => f.get(i + 1).unwrap_or(&"").to_string(),
                                 None => String::new(),
                             },
+                            // The hyprlang block predates all of these; a
+                            // migrated monitor simply has none of them set.
+                            ..Default::default()
                         });
                     }
                 } else if !lhs.is_empty() {
@@ -461,8 +512,52 @@ mod tests {
             mode: mode.into(),
             position: "0x0".into(),
             scale: "1".into(),
-            transform: String::new(),
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_plain_monitor_still_renders_exactly_as_it_did_before_the_advanced_fields() {
+        // The optional fields (vrr/bitdepth/mirror/disabled) must be invisible
+        // until used: an overrides.lua written by the previous version has to
+        // keep round-tripping, and upgrading must not rewrite anyone's file.
+        assert_eq!(
+            monitor_fields(&mon("DP-1", "3440x1440@165")),
+            r#"output = "DP-1", mode = "3440x1440@165", position = "0x0", scale = 1"#
+        );
+    }
+
+    #[test]
+    fn round_trips_every_advanced_monitor_field() {
+        let m = Monitor {
+            output: "DP-3".into(),
+            mode: "2560x1440@165".into(),
+            position: "3440x0".into(),
+            scale: "1.25".into(),
+            transform: "3".into(),
+            vrr: "2".into(),
+            bitdepth: "10".into(),
+            mirror: "DP-1".into(),
+            disabled: true,
+        };
+        let store = Store { options: vec![], monitors: vec![m.clone()] };
+        assert_eq!(parse(&render(&store)).unwrap(), store);
+        // …and rewriting stays a fixed point with the new fields present.
+        assert_eq!(render(&parse(&render(&store)).unwrap()), render(&store));
+    }
+
+    #[test]
+    fn reads_a_file_written_before_the_advanced_fields_existed() {
+        // Forward-compatibility, spelled out as a literal rather than generated:
+        // this is exactly what is sitting in users' ~/.config/tezca/overrides.lua.
+        let old = "\nreturn {\n    monitors = {\n        \
+                   { output = \"DP-1\", mode = \"3440x1440@165\", position = \"0x0\", scale = 1 },\n\
+                   \x20   },\n}\n";
+        let store = parse(old).unwrap();
+        assert_eq!(store.monitors.len(), 1);
+        assert_eq!(store.monitors[0], mon("DP-1", "3440x1440@165"));
+        assert!(store.monitors[0].vrr.is_empty());
+        assert!(!store.monitors[0].disabled);
     }
 
     #[test]

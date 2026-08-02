@@ -524,6 +524,10 @@ fn dependency_checks() -> Vec<Check> {
         ("hyprpicker", false, &[]),        // color picker (SUPER+SHIFT+P)
         ("dolphin", false, &[]),           // file manager (SUPER+E)
         ("ddcutil", false, &[]),           // Phase 9 external-monitor brightness (`tezca display brightness`)
+        ("nmcli", false, &[]),             // `tezca net` — Wi-Fi / VPN / airplane mode
+        ("bluetoothctl", false, &[]),      // `tezca bt` — Bluetooth
+        ("hyprsunset", false, &[]),        // `tezca night` — blue-light filter
+        ("wf-recorder", false, &["/usr/bin/wl-screenrec"]), // `tezca record`
     ];
 
     let mut checks: Vec<Check> = deps

@@ -38,7 +38,7 @@ const SCALARS: &[(&str, &str)] = &[
     ("layout_center", "nowplaying"),
     (
         "layout_right",
-        "gamemode, camera, microphone, ai, tray, cpu, mem, gpu, sep, network, volume, brightness, battery, sep, bell, clock, power",
+        "gamemode, camera, microphone, recording, caffeine, night, ai, tray, cpu, mem, gpu, sep, network, bluetooth, volume, brightness, battery, sep, bell, clock, power",
     ),
 ];
 

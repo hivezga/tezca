@@ -9,15 +9,22 @@
 //!   install bootstrap guidance (delegates to install.sh)
 
 mod atomic;
+mod cmd_audio;
 mod cmd_bar;
+mod cmd_bt;
 mod cmd_display;
 mod cmd_dock;
 mod cmd_doctor;
 mod cmd_game;
 mod cmd_hypr;
+mod cmd_idle;
 mod cmd_keybind;
 mod cmd_link;
+mod cmd_net;
+mod cmd_night;
+mod cmd_record;
 mod cmd_settings;
+mod cmd_startup;
 mod cmd_theme;
 mod cmd_wallpaper;
 mod hypr;
@@ -81,6 +88,14 @@ fn main() -> ExitCode {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_bar::run(&subargs) as u8)
         }
+        Some("net") | Some("network") | Some("wifi") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_net::run(&subargs) as u8)
+        }
+        Some("bt") | Some("bluetooth") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_bt::run(&subargs) as u8)
+        }
         Some("display") | Some("monitor") => {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_display::run(&subargs) as u8)
@@ -100,6 +115,26 @@ fn main() -> ExitCode {
         Some("game") => {
             let subargs: Vec<&str> = rest.collect();
             ExitCode::from(cmd_game::run(&subargs) as u8)
+        }
+        Some("audio") | Some("sound") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_audio::run(&subargs) as u8)
+        }
+        Some("idle") | Some("power") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_idle::run(&subargs) as u8)
+        }
+        Some("night") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_night::run(&subargs) as u8)
+        }
+        Some("record") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_record::run(&subargs) as u8)
+        }
+        Some("startup") => {
+            let subargs: Vec<&str> = rest.collect();
+            ExitCode::from(cmd_startup::run(&subargs) as u8)
         }
         Some("settings") => {
             let subargs: Vec<&str> = rest.collect();
@@ -137,10 +172,17 @@ fn print_help() {
         ("theme", "wallpaper-driven theming (list/set/wallpaper/reload)"),
         ("bar", "control the top menubar (start/stop/restart/toggle/config/set)"),
         ("dock", "control the magnifying dock (start/stop/restart/config/set)"),
-        ("display", "monitors: modes/scale + per-monitor brightness"),
+        ("display", "monitors: modes/scale/rotation, VRR, profiles, brightness"),
+        ("net", "Wi-Fi, VPN and airplane mode (NetworkManager)"),
+        ("bt", "Bluetooth: pair, connect, battery (BlueZ)"),
         ("wallpaper", "per-monitor wallpaper overrides (set/clear/apply)"),
         ("hypr", "live+persisted Hyprland option tuning (get/set/reset)"),
         ("keybind", "list + rebind keybindings (rebind/restore)"),
+        ("startup", "apps and services that launch at login"),
+        ("idle", "idle timeouts (lock/screen/suspend) + keep awake"),
+        ("audio", "output/input device switching, volume, mute"),
+        ("night", "night light / blue-light filter (hyprsunset)"),
+        ("record", "screen recording: start/stop/toggle"),
         ("game", "gaming profile: on/off/toggle/status/run"),
         ("settings", "open the GTK control center (tezca-settings)"),
         ("install", "bootstrap guidance (see install.sh)"),

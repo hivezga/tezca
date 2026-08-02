@@ -196,6 +196,48 @@ pub fn display_transform(v: &str) -> Result<(), String> {
     }
 }
 
+/// A VRR mode: empty (inherit the global setting), or 0/1/2.
+///
+/// Hyprland has historically grown modes here (0 off, 1 on, 2 fullscreen-only),
+/// so this accepts the three we drive and rejects the rest rather than passing an
+/// unknown number through to a monitor spec.
+pub fn display_vrr(v: &str) -> Result<(), String> {
+    match v.trim() {
+        "" | "0" | "1" | "2" => Ok(()),
+        other => Err(format!(
+            "invalid vrr {other:?} — expected 0 (off), 1 (on) or 2 (fullscreen-only)"
+        )),
+    }
+}
+
+/// A colour depth: empty (inherit), 8 or 10.
+pub fn display_bitdepth(v: &str) -> Result<(), String> {
+    match v.trim() {
+        "" | "8" | "10" => Ok(()),
+        other => Err(format!("invalid bitdepth {other:?} — expected 8 or 10")),
+    }
+}
+
+/// A saved-profile name. It becomes a `["…"]` key in generated Lua, so it is held
+/// to the same shape as any other generated identifier.
+pub fn profile_name(v: &str) -> Result<(), String> {
+    let n = v.trim();
+    if n.is_empty() {
+        return Err("profile name cannot be empty".to_string());
+    }
+    if n.len() > 64 {
+        return Err("profile name is too long (64 characters max)".to_string());
+    }
+    if let Some(bad) =
+        n.chars().find(|c| !(c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == ' '))
+    {
+        return Err(format!(
+            "invalid character {bad:?} in profile name {n:?} — letters, digits, spaces, '-' and '_'"
+        ));
+    }
+    Ok(())
+}
+
 /// A connector name as accepted on the command line (`DP-1`, `HDMI-A-1`, `eDP-1`).
 pub fn monitor_name(v: &str) -> Result<(), String> {
     let n = v.trim();
@@ -206,6 +248,77 @@ pub fn monitor_name(v: &str) -> Result<(), String> {
         return Err(format!(
             "invalid character {bad:?} in monitor name {n:?} — connectors are letters, \
              digits, '-' and '_' (e.g. DP-1, HDMI-A-1)"
+        ));
+    }
+    Ok(())
+}
+
+// --- network ---------------------------------------------------------------
+
+/// A Wi-Fi network name.
+///
+/// 802.11 allows almost any byte here, so this is not about what a network *can*
+/// be called — nmcli takes the name as an argv element, with no shell in
+/// between. It is about what we can round-trip: a control character would break
+/// the `--machine` records the GUI parses back, and an over-long name is not a
+/// real SSID at all (the field is 32 bytes).
+pub fn ssid(v: &str) -> Result<(), String> {
+    if v.is_empty() {
+        return Err("network name cannot be empty".to_string());
+    }
+    if v.len() > 32 {
+        return Err(format!("network name is too long ({} bytes; the maximum is 32)", v.len()));
+    }
+    reject_control("network name", v)
+}
+
+/// A Bluetooth address, `AA:BB:CC:DD:EE:FF`.
+pub fn mac(v: &str) -> Result<(), String> {
+    let m = v.trim();
+    let parts: Vec<&str> = m.split(':').collect();
+    let ok = parts.len() == 6
+        && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("invalid Bluetooth address {m:?} — expected AA:BB:CC:DD:EE:FF"))
+    }
+}
+
+// --- startup ---------------------------------------------------------------
+
+/// A command line that will be emitted into a generated Lua string and run
+/// through `sh -c` at login.
+///
+/// The quoting is handled at render time (`\` and `"` are escaped), so this only
+/// has to refuse what escaping cannot save: a newline or control character, which
+/// would end the generated line early and leave the rest of the table as
+/// syntactically broken Lua. That file is read by the Hyprland config, and a Lua
+/// error there is an emergency-mode session — so it is checked at the point of
+/// entry rather than trusted.
+pub fn exec_line(v: &str) -> Result<(), String> {
+    if v.trim().is_empty() {
+        return Err("command cannot be empty".to_string());
+    }
+    if v.len() > 4096 {
+        return Err("command is too long (4096 characters max)".to_string());
+    }
+    reject_control("command", v)
+}
+
+/// A startup entry id — it addresses an entry for enable/disable/remove and is
+/// emitted as a generated Lua string.
+pub fn startup_id(v: &str) -> Result<(), String> {
+    let id = v.trim();
+    if id.is_empty() {
+        return Err("id cannot be empty".to_string());
+    }
+    if id.len() > 64 {
+        return Err("id is too long (64 characters max)".to_string());
+    }
+    if let Some(bad) = id.chars().find(|c| !(c.is_ascii_alphanumeric() || *c == '-' || *c == '_')) {
+        return Err(format!(
+            "invalid character {bad:?} in id {id:?} — letters, digits, '-' and '_' only"
         ));
     }
     Ok(())
@@ -335,6 +448,71 @@ mod tests {
         assert!(display_scale("inf").is_err());
         assert!(display_scale("NaN").is_err());
         assert!(display_scale("1e3").is_err());
+    }
+
+    #[test]
+    fn accepts_the_advanced_display_values_and_rejects_the_rest() {
+        for v in ["", "0", "1", "2"] {
+            assert!(display_vrr(v).is_ok(), "{v:?} should be a valid vrr mode");
+        }
+        assert!(display_vrr("3").is_err());
+        assert!(display_vrr("on").is_err(), "the CLI maps names to numbers before validating");
+        for v in ["", "8", "10"] {
+            assert!(display_bitdepth(v).is_ok());
+        }
+        assert!(display_bitdepth("12").is_err());
+        assert!(display_bitdepth("10\nexec-once = evil").is_err());
+    }
+
+    #[test]
+    fn profile_names_stay_safe_as_generated_lua_keys() {
+        assert!(profile_name("dual 165").is_ok());
+        assert!(profile_name("solo-ultrawide").is_ok());
+        assert!(profile_name("").is_err());
+        // Would close the key and open a new table entry.
+        assert!(profile_name("x\"] = {}, [\"y").is_err());
+        assert!(profile_name("x\nreturn {}").is_err());
+    }
+
+    #[test]
+    fn network_names_round_trip_but_cannot_break_a_machine_record() {
+        assert!(ssid("Hivezga 5G").is_ok());
+        assert!(ssid("café:net").is_ok(), "a colon is legal in an SSID");
+        assert!(ssid("").is_err());
+        // Would inject a second record into `net list --machine`.
+        assert!(ssid("Net\n@ap\nssid=evil").is_err());
+        assert!(ssid(&"x".repeat(33)).is_err());
+        assert!(ssid(&"x".repeat(32)).is_ok());
+    }
+
+    #[test]
+    fn bluetooth_addresses_are_six_hex_octets() {
+        assert!(mac("AA:BB:CC:DD:EE:FF").is_ok());
+        assert!(mac("08:71:90:80:d9:cc").is_ok());
+        assert!(mac("08-71-90-80-D9-CC").is_err());
+        assert!(mac("08:71:90:80:D9").is_err());
+        assert!(mac("ZZ:71:90:80:D9:CC").is_err());
+        assert!(mac("").is_err());
+    }
+
+    #[test]
+    fn startup_commands_may_quote_but_never_break_the_generated_lua() {
+        assert!(exec_line("uwsm app -- discord.desktop").is_ok());
+        // Quotes and backslashes are legitimate: they are escaped on render.
+        assert!(exec_line(r#"sh -c 'brave --flag="a,b"'"#).is_ok());
+        assert!(exec_line("").is_err());
+        // Would terminate the generated line and leave the table unparseable.
+        assert!(exec_line("foo\nreturn {}").is_err());
+        assert!(exec_line(&"x".repeat(5000)).is_err());
+    }
+
+    #[test]
+    fn startup_ids_stay_addressable() {
+        assert!(startup_id("discord").is_ok());
+        assert!(startup_id("org-telegram_desktop").is_ok());
+        assert!(startup_id("").is_err());
+        assert!(startup_id("has space").is_err());
+        assert!(startup_id("x\"] = nil, [\"y").is_err());
     }
 
     #[test]

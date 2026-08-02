@@ -76,10 +76,27 @@ pub fn getoption(kw: &str) -> Option<String> {
     if !out.status.success() {
         return None;
     }
-    let s = String::from_utf8_lossy(&out.stdout);
-    let first = s.lines().next()?;
+    parse_getoption(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// The pure half of [`getoption`], so the shapes it has to survive are testable
+/// without a running compositor.
+fn parse_getoption(text: &str) -> Option<String> {
+    let first = text.lines().next()?;
+    // The FIRST colon: it separates the type label from the value, and a value
+    // may itself contain one (a font name, a path). Splitting on the last would
+    // return the tail of the value instead.
     let (_ty, val) = first.split_once(':')?;
-    Some(val.split_whitespace().next()?.to_string())
+    let val = val.split_whitespace().next()?;
+    // An unset string option reads back as the literal `[[EMPTY]]`, which is
+    // Hyprland's sentinel and not a value anyone means. Passed through verbatim it
+    // renders in a settings text field as "[[EMPTY]]" and — far worse — gets
+    // written straight back as the new value on the next Apply, so an unset
+    // keyboard variant becomes a variant literally named `[[EMPTY]]`.
+    if val == "[[EMPTY]]" {
+        return Some(String::new());
+    }
+    Some(val.to_string())
 }
 
 /// `hyprctl reload` — re-read the whole config (best-effort). Still valid under
@@ -104,19 +121,10 @@ fn lua_config_call(option: &str, value_literal: &str) -> String {
     format!("hl.config({inner})")
 }
 
+/// The live-apply half of a monitor change. Shares [`crate::managed::monitor_fields`]
+/// with the persisted half so the two cannot drift.
 fn lua_monitor_call(m: &crate::managed::Monitor) -> String {
-    let mut s = format!(
-        "hl.monitor({{ output = \"{}\", mode = \"{}\", position = \"{}\", scale = {}",
-        m.output,
-        m.mode,
-        m.position,
-        crate::managed::lua_value(&m.scale)
-    );
-    if !m.transform.is_empty() && m.transform != "0" {
-        s.push_str(&format!(", transform = {}", crate::managed::lua_value(&m.transform)));
-    }
-    s.push_str(" })");
-    s
+    format!("hl.monitor({{ {} }})", crate::managed::monitor_fields(m))
 }
 
 /// True when `out` is one of hyprctl's exit-0 refusals rather than a result.
@@ -150,6 +158,20 @@ mod tests {
     }
 
     #[test]
+    fn an_unset_string_option_reads_back_as_empty_not_as_a_sentinel() {
+        // `hyprctl getoption input:kb_variant` answers "str: [[EMPTY]]" when
+        // nothing is set. Treated as a value, that lands in a settings text field
+        // and is then written back as the variant's new name.
+        assert_eq!(parse_getoption("str: [[EMPTY]]"), Some(String::new()));
+        assert_eq!(parse_getoption("str: us"), Some("us".to_string()));
+        assert_eq!(parse_getoption("int: 12"), Some("12".to_string()));
+        assert_eq!(parse_getoption("float: 0.980000"), Some("0.980000".to_string()));
+        assert_eq!(parse_getoption("custom type: 5 5 5 5"), Some("5".to_string()));
+        // A value may contain a colon of its own; only the label's colon splits.
+        assert_eq!(parse_getoption("str: nvidia:drm"), Some("nvidia:drm".to_string()));
+    }
+
+    #[test]
     fn nests_an_option_path_into_a_config_call() {
         assert_eq!(
             lua_config_call("decoration:rounding", "14"),
@@ -179,13 +201,36 @@ mod tests {
             mode: "3440x1440@165".into(),
             position: "0x0".into(),
             scale: "1".into(),
-            transform: String::new(),
+            ..Default::default()
         };
         assert_eq!(
             lua_monitor_call(&m),
             "hl.monitor({ output = \"DP-1\", mode = \"3440x1440@165\", position = \"0x0\", scale = 1 })"
         );
-        let rotated = Monitor { transform: "1".into(), ..m };
+        let rotated = Monitor { transform: "1".into(), ..m.clone() };
         assert!(lua_monitor_call(&rotated).ends_with(", transform = 1 })"));
+    }
+
+    #[test]
+    fn builds_the_advanced_monitor_fields_probed_off_the_compositor() {
+        // These key names are not guesses: `hl.monitor` rejects an unknown field
+        // outright, and this exact set was accepted by a live Hyprland 0.56.1.
+        // `enabled` is deliberately absent — it is NOT a field; `disabled` is.
+        let m = Monitor {
+            output: "DP-3".into(),
+            mode: "2560x1440@165".into(),
+            position: "3440x0".into(),
+            scale: "1".into(),
+            transform: "1".into(),
+            vrr: "2".into(),
+            bitdepth: "10".into(),
+            mirror: "DP-1".into(),
+            disabled: true,
+        };
+        assert_eq!(
+            lua_monitor_call(&m),
+            "hl.monitor({ output = \"DP-3\", mode = \"2560x1440@165\", position = \"3440x0\", \
+             scale = 1, transform = 1, vrr = 2, bitdepth = 10, mirror = \"DP-1\", disabled = true })"
+        );
     }
 }

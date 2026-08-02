@@ -17,7 +17,7 @@
 //! contents is still backed up, because the installer promises the originals are
 //! recoverable.
 
-use crate::{atomic, cmd_keybind, managed, repo, term};
+use crate::{atomic, cmd_keybind, cmd_startup, managed, repo, term};
 use std::fs;
 use std::os::unix::fs as unixfs;
 use std::path::{Path, PathBuf};
@@ -137,6 +137,13 @@ pub fn run(opts: Opts) -> Result<(), String> {
                 "  {} {}",
                 term::green("+"),
                 term::dim("tezca/keybinds.lua (keybind overrides)")
+            );
+        }
+        if cmd_startup::seed()? {
+            println!(
+                "  {} {}",
+                term::green("+"),
+                term::dim("tezca/startup.lua (your startup apps)")
             );
         }
     }

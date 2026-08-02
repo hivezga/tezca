@@ -74,3 +74,17 @@ pub fn config_home() -> Result<PathBuf, String> {
         .ok_or_else(|| "neither $XDG_CONFIG_HOME nor $HOME is set".to_string())?;
     Ok(PathBuf::from(home).join(".config"))
 }
+
+/// `~/.cache` (honouring `$XDG_CACHE_HOME`). For state that is regenerable and
+/// must not survive a reboot as anything but a stale file — pid files, the DDC
+/// bus map.
+pub fn cache_home() -> Result<PathBuf, String> {
+    if let Some(x) = std::env::var_os("XDG_CACHE_HOME") {
+        if !x.is_empty() {
+            return Ok(PathBuf::from(x));
+        }
+    }
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| "neither $XDG_CACHE_HOME nor $HOME is set".to_string())?;
+    Ok(PathBuf::from(home).join(".cache"))
+}

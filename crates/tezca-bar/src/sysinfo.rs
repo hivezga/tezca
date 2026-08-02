@@ -103,10 +103,10 @@ pub fn net() -> Net {
     // Active wifi first (nmcli marks the connected AP with yes in ACTIVE).
     if let Some(out) = nmcli(&["-t", "-f", "ACTIVE,SIGNAL,SSID", "device", "wifi"]) {
         for line in out.lines() {
-            let mut f = line.split(':');
-            if f.next() == Some("yes") {
-                let signal = f.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                let ssid = f.collect::<Vec<_>>().join(":");
+            let f = split_terse(line);
+            if f.first().map(String::as_str) == Some("yes") {
+                let signal = f.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let ssid = f.get(2).cloned().unwrap_or_default();
                 let ip = primary_ip("wifi").unwrap_or_default();
                 return Net::Wifi { signal, ssid, ip };
             }
@@ -115,9 +115,9 @@ pub fn net() -> Net {
     // Then a connected wired device.
     if let Some(out) = nmcli(&["-t", "-f", "TYPE,STATE", "device", "status"]) {
         for line in out.lines() {
-            let mut f = line.split(':');
-            if f.next() == Some("ethernet") && f.next().map(|s| s.starts_with("connected")).unwrap_or(false)
-            {
+            let f = split_terse(line);
+            let connected = f.get(1).map(|s| s.starts_with("connected")).unwrap_or(false);
+            if f.first().map(String::as_str) == Some("ethernet") && connected {
                 let ip = primary_ip("ethernet").unwrap_or_default();
                 return Net::Ethernet { ip };
             }
@@ -126,16 +126,46 @@ pub fn net() -> Net {
     Net::Disconnected
 }
 
+/// Split one `nmcli -t` record into fields, undoing its escaping.
+///
+/// nmcli separates fields with `:` and escapes a `:` or `\` *inside* a value as
+/// `\:` / `\\`. This used to split on a bare `:` and rejoin the tail, which meant
+/// an SSID containing a colon rendered in the bar with a stray backslash — and
+/// any field after such a value was read out of the wrong column. The CLI's
+/// `cmd_net` has the same routine; the two crates share no library.
+fn split_terse(line: &str) -> Vec<String> {
+    let mut fields = vec![String::new()];
+    let mut escaped = false;
+    for ch in line.chars() {
+        if escaped {
+            fields.last_mut().expect("always non-empty").push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == ':' {
+            fields.push(String::new());
+        } else {
+            fields.last_mut().expect("always non-empty").push(ch);
+        }
+    }
+    if escaped {
+        fields.last_mut().expect("always non-empty").push('\\');
+    }
+    fields
+}
+
 /// First IPv4 address of the first connected device of `kind` (wifi|ethernet).
 fn primary_ip(kind: &str) -> Option<String> {
     let out = nmcli(&["-t", "-f", "DEVICE,TYPE,STATE", "device", "status"])?;
     let dev = out.lines().find_map(|l| {
-        let f: Vec<&str> = l.split(':').collect();
-        (f.len() >= 3 && f[1] == kind && f[2].starts_with("connected")).then(|| f[0].to_string())
+        let f = split_terse(l);
+        (f.len() >= 3 && f[1] == kind && f[2].starts_with("connected")).then(|| f[0].clone())
     })?;
     let show = nmcli(&["-t", "-f", "IP4.ADDRESS", "device", "show", &dev])?;
-    show.lines()
-        .find_map(|l| l.split_once(':').map(|(_, v)| v.split('/').next().unwrap_or(v).to_string()))
+    show.lines().find_map(|l| {
+        let f = split_terse(l);
+        f.get(1).map(|v| v.split('/').next().unwrap_or(v).to_string())
+    })
 }
 
 fn nmcli(args: &[&str]) -> Option<String> {
@@ -542,4 +572,20 @@ pub fn gamemode_on() -> bool {
     let Some(home) = std::env::var_os("HOME") else { return false };
     let p = Path::new(&home).join(".config/tezca/game.state");
     read_trim(&p).map(|s| s.contains("on")).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nmcli_terse_fields_survive_a_colon_inside_a_value() {
+        // The bug this replaced: splitting on a bare ':' left the SSID as
+        // "My\:Net" (rendered with the backslash) and, for any record with more
+        // fields after it, read every later column one position to the left.
+        assert_eq!(split_terse(r"yes:72:My\:Net"), vec!["yes", "72", "My:Net"]);
+        assert_eq!(split_terse("yes:72:Plain"), vec!["yes", "72", "Plain"]);
+        assert_eq!(split_terse(r"a\\b:c"), vec![r"a\b", "c"]);
+        assert_eq!(split_terse("ethernet:connected"), vec!["ethernet", "connected"]);
+    }
 }

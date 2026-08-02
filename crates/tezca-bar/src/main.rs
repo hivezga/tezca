@@ -8,6 +8,7 @@
 
 mod ai;
 mod bar;
+mod bluetooth;
 mod camera;
 mod config;
 mod custom;
@@ -18,6 +19,7 @@ mod nowplaying;
 mod notify;
 mod osd;
 mod popovers;
+mod session;
 mod sysinfo;
 mod theme;
 mod tray;
@@ -90,6 +92,20 @@ fn main() -> glib::ExitCode {
     // "Microphone idle" when nothing holds a live capture stream.
     if std::env::args().any(|a| a == "--mic-dump") {
         println!("{}", mic::poll().tooltip());
+        return glib::ExitCode::SUCCESS;
+    }
+
+    // `--bt-dump`: print the Bluetooth module's view — adapter present/powered,
+    // connected devices and their battery — without opening a window.
+    if std::env::args().any(|a| a == "--bt-dump") {
+        bluetooth::dump();
+        return glib::ExitCode::SUCCESS;
+    }
+
+    // `--session-dump`: print the keep-awake / night-light / recording state the
+    // bar would show, without opening a window.
+    if std::env::args().any(|a| a == "--session-dump") {
+        session::dump();
         return glib::ExitCode::SUCCESS;
     }
 

@@ -138,10 +138,16 @@ osd_timeout_ms = 1400
 #   gamemode    game-mode glyph (auto-hides)
 #   camera      camera-in-use privacy indicator (auto-hides; red when live)
 #   microphone  mic-in-use privacy indicator (auto-hides; gold when recording)
+#   recording   screen-recording indicator (auto-hides; red — catches any
+#               recorder, not only `tezca record`)
+#   caffeine    keep-awake; click to hold/release the idle inhibitor
+#   night       night light; shown only while the filter is on, click to toggle
 #   ai          AI provider usage (auto-hides; see the AI section above)
 #   tray        system tray / StatusNotifierItem icons (auto-hides)
 #   cpu mem gpu hardware metric sparklines (gpu auto-hides without a source)
-#   network volume brightness battery   controls (brightness/battery auto-hide)
+#   network     wifi/ethernet glyph → detail + radio toggle popover
+#   bluetooth   adapter + connected devices w/ battery (auto-hides with no adapter)
+#   volume brightness battery            controls (brightness/battery auto-hide)
 #   bell        notification bell
 #   clock       clock → calendar popover
 #   power       power / logout button
@@ -155,4 +161,4 @@ osd_timeout_ms = 1400
 # The defaults below reproduce the original built-in arrangement exactly.
 layout_left = mirror, sep, appname, sep, workspaces, submap
 layout_center = nowplaying
-layout_right = gamemode, camera, microphone, ai, tray, cpu, mem, gpu, sep, volume, brightness, battery, sep, bell, clock, power
+layout_right = gamemode, camera, microphone, recording, caffeine, night, ai, tray, cpu, mem, gpu, sep, network, bluetooth, volume, brightness, battery, sep, bell, clock, power

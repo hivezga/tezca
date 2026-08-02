@@ -14,7 +14,7 @@ use crate::config::{Config, Mod, Numerals, Shape, Slot};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
-use crate::{ai, camera, custom, hypr, mic, nowplaying, notify, osd, popovers, tray};
+use crate::{ai, bluetooth, camera, custom, hypr, mic, nowplaying, notify, osd, popovers, session, tray};
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
 use gtk4::prelude::*;
@@ -40,7 +40,13 @@ const G_BATT: &str = "\u{F0079}";
 const G_BATT_CHG: &str = "\u{F0084}";
 const G_AI: &str = "\u{F06A9}"; // nf-md-robot — the AI usage module
 const G_CAM: &str = "\u{F05A0}"; // nf-md-webcam — camera-in-use privacy indicator
+const G_BT: &str = "\u{F00AF}"; // nf-md-bluetooth
+const G_BT_OFF: &str = "\u{F00B2}"; // nf-md-bluetooth_off
+const G_BT_CONN: &str = "\u{F00B1}"; // nf-md-bluetooth_connect
 const G_MIC: &str = "\u{F036C}"; // nf-md-microphone — mic-in-use privacy indicator
+const G_REC: &str = "\u{F044B}"; // nf-md-record — screen recording in progress
+const G_CAFFEINE: &str = "\u{F0176}"; // nf-md-coffee — keep-awake held
+const G_NIGHT: &str = "\u{F0594}"; // nf-md-weather_night — night light active
 
 // ===========================================================================
 // Manager
@@ -75,6 +81,17 @@ pub struct Bar {
     /// True when the mic indicator is in some layout region — gates the `pactl`
     /// query the same way.
     has_mic: bool,
+    /// True when the Bluetooth module is placed — gates the `bluetoothctl` poll,
+    /// which is the most expensive of the three (it spawns a process per call).
+    has_bluetooth: bool,
+    /// Session-state modules (keep-awake / night light / recording). Each reads
+    /// a small file, so they share one gate per module.
+    has_caffeine: bool,
+    has_recording: bool,
+    /// The night-light state the schedule last settled on. `tezca night apply`
+    /// runs only when this changes, so a configured schedule costs one process at
+    /// the boundary rather than one every tick.
+    last_night_active: RefCell<Option<bool>>,
 }
 
 impl Bar {
@@ -102,6 +119,12 @@ impl Bar {
 
         let has_camera = cfg.uses_mod(Mod::Camera);
         let has_mic = cfg.uses_mod(Mod::Microphone);
+        let has_bluetooth = cfg.uses_mod(Mod::Bluetooth);
+        let has_caffeine = cfg.uses_mod(Mod::Caffeine);
+        // No `has_night`: the night state is read every tick regardless of
+        // placement, because the schedule must fire whether or not the glyph is
+        // on the bar. An unplaced widget is never parented, so it cannot show.
+        let has_recording = cfg.uses_mod(Mod::Recording);
         // Seed the OSD's baseline with the current volume so the user's very
         // first volume change flashes it. `pactl subscribe` emits nothing on
         // connect, so there's no spurious launch event to swallow.
@@ -126,6 +149,10 @@ impl Bar {
             last_brightness: RefCell::new(b0),
             has_camera,
             has_mic,
+            has_bluetooth,
+            has_caffeine,
+            has_recording,
+            last_night_active: RefCell::new(None),
         });
 
         bar.refresh_hypr();
@@ -134,6 +161,8 @@ impl Bar {
         bar.tick_mem();
         bar.tick_gpu();
         bar.tick_controls();
+        bar.tick_bluetooth();
+        bar.tick_session();
         bar.start_timers();
         bar
     }
@@ -165,6 +194,15 @@ impl Bar {
         every(self.cfg.gpu_interval, Box::new(|b| b.tick_gpu()), self);
         // Controls (audio/net/battery/brightness/bell/gamemode/now-playing).
         every(2, Box::new(|b| b.tick_controls()), self);
+        // Session state (keep-awake / night light / recording): small file reads,
+        // and the night-light schedule's clock.
+        every(2, Box::new(|b| b.tick_session()), self);
+        // Bluetooth gets its own, slower timer: each poll spawns bluetoothctl
+        // (twice more when something is connected), which is far too heavy for
+        // the 2-second cluster. Not started at all when the module is unplaced.
+        if self.has_bluetooth {
+            every(5, Box::new(|b| b.tick_bluetooth()), self);
+        }
 
         // Brightness OSD: there's no event source for a backlight the way `pactl
         // subscribe` gives one for volume, so poll the (one tiny) sysfs file
@@ -315,6 +353,51 @@ impl Bar {
             s.set_camera(&cam);
             s.set_mic(&microphone);
             s.set_nowplaying(np.as_ref());
+        }
+    }
+
+    /// Keep-awake / night light / recording — three small local-state reads,
+    /// each skipped when its module is not placed.
+    ///
+    /// This is also where the night-light *schedule* is enforced: hyprsunset has
+    /// no scheduler of its own, so the saved window is evaluated here and
+    /// `tezca night apply` runs only when the answer changes.
+    fn tick_session(&self) {
+        let caffeine = self.has_caffeine && session::caffeine_on();
+        let rec = if self.has_recording { session::recording() } else { Default::default() };
+        // Read unconditionally, unlike the other two: the *schedule* has to be
+        // enforced whether or not the glyph is on the bar. Requiring the module
+        // to be placed before a schedule worked would be a trap.
+        let night = session::night(session::minutes_now());
+
+        if night.configured {
+            let mut last = self.last_night_active.borrow_mut();
+            if *last != Some(night.active) {
+                // Skip the very first observation: at startup autostart.lua has
+                // already applied the right state, and re-applying would restart
+                // hyprsunset for nothing.
+                if last.is_some() {
+                    session::night_apply();
+                }
+                *last = Some(night.active);
+            }
+        }
+
+        for s in &self.surfaces {
+            s.set_caffeine(caffeine);
+            s.set_recording(&rec);
+            s.set_night(&night);
+        }
+    }
+
+    /// The 5-second Bluetooth poll. Only runs when the module is placed.
+    fn tick_bluetooth(&self) {
+        if !self.has_bluetooth {
+            return;
+        }
+        let bt = bluetooth::poll();
+        for s in &self.surfaces {
+            s.set_bluetooth(&bt);
         }
     }
 
@@ -514,6 +597,12 @@ struct Surface {
     net_ctl: Button,
     net_glyph: Label,
     net_val: Label,
+    bt_ctl: Button,
+    bt_glyph: Label,
+    bt_val: Label,
+    rec_box: GtkBox,
+    caffeine_box: GtkBox,
+    night_box: GtkBox,
 
     vol_glyph: Label,
     vol_val: Label,
@@ -675,6 +764,69 @@ impl Surface {
         mic_box.set_visible(false);
         mic_box.set_has_tooltip(true);
 
+        // Screen-recording indicator — the third privacy dot, beside camera and
+        // microphone. Red, and shown for ANY recorder (see session.rs), not only
+        // one that `tezca record` started.
+        let rec_box = GtkBox::new(Orientation::Horizontal, 0);
+        rec_box.add_css_class("recording");
+        rec_box.set_valign(Align::Center);
+        let rec_glyph = Label::new(Some(G_REC));
+        rec_glyph.add_css_class("glyph");
+        rec_box.append(&rec_glyph);
+        rec_box.set_visible(false);
+        rec_box.set_has_tooltip(true);
+
+        // Keep awake ("caffeine") — a click toggles the systemd idle inhibitor
+        // through the CLI, so the bar and `tezca idle inhibit` cannot disagree.
+        let caffeine_box = GtkBox::new(Orientation::Horizontal, 0);
+        caffeine_box.add_css_class("caffeine");
+        caffeine_box.set_valign(Align::Center);
+        let caffeine_glyph = Label::new(Some(G_CAFFEINE));
+        caffeine_glyph.add_css_class("glyph");
+        caffeine_box.append(&caffeine_glyph);
+        caffeine_box.set_visible(false);
+        caffeine_box.set_has_tooltip(true);
+        {
+            // One all-buttons GestureClick on a plain Box, not a Button: a
+            // GtkButton's built-in primary gesture swallows the others, which is
+            // the bug the tray items hit.
+            let click = gtk4::GestureClick::new();
+            click.set_button(0);
+            click.connect_pressed(|_, _, _, _| {
+                let _ = std::process::Command::new("tezca")
+                    .args(["idle", "inhibit", "toggle"])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
+            caffeine_box.add_controller(click);
+        }
+
+        // Night light — visible only while the filter is actually on (schedule
+        // included), so it reads as "this is why the screen is warm".
+        let night_box = GtkBox::new(Orientation::Horizontal, 0);
+        night_box.add_css_class("night");
+        night_box.set_valign(Align::Center);
+        let night_glyph = Label::new(Some(G_NIGHT));
+        night_glyph.add_css_class("glyph");
+        night_box.append(&night_glyph);
+        night_box.set_visible(false);
+        night_box.set_has_tooltip(true);
+        {
+            let click = gtk4::GestureClick::new();
+            click.set_button(0);
+            click.connect_pressed(|_, _, _, _| {
+                let _ = std::process::Command::new("tezca")
+                    .args(["night", "toggle"])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
+            night_box.add_controller(click);
+        }
+
         // AI provider usage — hidden until the poll thread reports something
         // worth showing (see ai.rs). Sits beside the tray because that is where
         // "ambient status from elsewhere" lives on this bar.
@@ -725,6 +877,14 @@ impl Surface {
         net_glyph.set_text(G_WIFI);
         let net_pop = popovers::network(&net_ctl, throughput.clone());
         net_ctl.connect_clicked(move |_| net_pop.popup());
+
+        // Bluetooth (button → device popover). Hidden until the first poll says
+        // there is an adapter, so a machine without one shows nothing at all.
+        let (bt_ctl, bt_glyph, bt_val) = control_button();
+        bt_glyph.set_text(G_BT);
+        bt_ctl.set_visible(false);
+        let bt_pop = popovers::bluetooth(&bt_ctl);
+        bt_ctl.connect_clicked(move |_| bt_pop.popup());
 
         // Volume (button → mixer popover).
         let (vol_ctl, vol_glyph, vol_val) = control_button();
@@ -826,6 +986,10 @@ impl Surface {
                     Mod::Mem => mem_metric.clone().upcast(),
                     Mod::Gpu => gpu_metric.clone().upcast(),
                     Mod::Network => net_ctl.clone().upcast(),
+                    Mod::Bluetooth => bt_ctl.clone().upcast(),
+                    Mod::Recording => rec_box.clone().upcast(),
+                    Mod::Caffeine => caffeine_box.clone().upcast(),
+                    Mod::NightLight => night_box.clone().upcast(),
                     Mod::Volume => vol_ctl.clone().upcast(),
                     Mod::Brightness => bri_ctl.clone().upcast(),
                     Mod::Battery => bat_ctl.clone().upcast(),
@@ -896,6 +1060,12 @@ impl Surface {
             net_ctl,
             net_glyph,
             net_val,
+            bt_ctl,
+            bt_glyph,
+            bt_val,
+            rec_box,
+            caffeine_box,
+            night_box,
             vol_glyph,
             vol_val,
             vol_ctl,
@@ -1104,6 +1274,61 @@ impl Surface {
     fn set_mic(&self, m: &mic::MicUse) {
         self.mic_box.set_visible(m.active);
         self.mic_box.set_tooltip_text(Some(&m.tooltip()));
+    }
+
+    /// Add or remove a CSS class from a widget in one call.
+    fn toggle_class(w: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
+        if on {
+            w.add_css_class(class);
+        } else {
+            w.remove_css_class(class);
+        }
+    }
+
+    /// Keep-awake: shown only while the inhibitor is held.
+    fn set_caffeine(&self, on: bool) {
+        self.caffeine_box.set_visible(on);
+        self.caffeine_box
+            .set_tooltip_text(Some("Keeping the session awake — click to release"));
+    }
+
+    /// Recording: the third privacy dot. Says so when it is not ours, because
+    /// clicking cannot stop a recorder this bar did not start.
+    fn set_recording(&self, r: &session::RecordState) {
+        self.rec_box.set_visible(r.active);
+        self.rec_box.set_tooltip_text(Some(if r.foreign {
+            "Screen recording in progress (started outside Tezca)"
+        } else {
+            "Recording the screen — `tezca record stop` to save"
+        }));
+    }
+
+    /// Night light: shown only while the filter is actually on.
+    fn set_night(&self, n: &session::NightState) {
+        self.night_box.set_visible(n.active);
+        self.night_box
+            .set_tooltip_text(Some(&format!("Night light on at {} K — click to turn off", n.temp)));
+    }
+
+    /// Bluetooth: hidden with no adapter, dim when off, accent when connected.
+    fn set_bluetooth(&self, b: &bluetooth::BtState) {
+        self.bt_ctl.set_visible(b.present);
+        if !b.present {
+            return;
+        }
+        let connected = !b.connected.is_empty();
+        self.bt_glyph.set_text(match (b.powered, connected) {
+            (false, _) => G_BT_OFF,
+            (true, false) => G_BT,
+            (true, true) => G_BT_CONN,
+        });
+        // The battery of a connected headset is the one number worth the space.
+        self.bt_val.set_text(&b.badge().unwrap_or_default());
+        self.bt_val.set_visible(b.badge().is_some());
+        Self::toggle_class(&self.bt_ctl, "active", connected);
+        Self::toggle_class(&self.bt_ctl, "off", !b.powered);
+        self.bt_ctl.set_has_tooltip(true);
+        self.bt_ctl.set_tooltip_text(Some(&b.tooltip()));
     }
 
     fn set_nowplaying(&self, np: Option<&nowplaying::NowPlaying>) {

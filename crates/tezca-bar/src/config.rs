@@ -59,12 +59,16 @@ pub enum Mod {
     GameMode,
     Camera,
     Microphone,
+    Recording,
+    Caffeine,
+    NightLight,
     Ai,
     Tray,
     Cpu,
     Mem,
     Gpu,
     Network,
+    Bluetooth,
     Volume,
     Brightness,
     Battery,
@@ -87,12 +91,16 @@ impl Mod {
             "gamemode" | "game" => Mod::GameMode,
             "camera" | "cam" | "webcam" => Mod::Camera,
             "microphone" | "mic" => Mod::Microphone,
+            "recording" | "record" | "screenrec" => Mod::Recording,
+            "caffeine" | "keepawake" | "keep-awake" | "inhibit" => Mod::Caffeine,
+            "night" | "nightlight" | "night-light" | "bluelight" => Mod::NightLight,
             "ai" => Mod::Ai,
             "tray" => Mod::Tray,
             "cpu" => Mod::Cpu,
             "mem" | "memory" | "ram" => Mod::Mem,
             "gpu" => Mod::Gpu,
             "network" | "net" | "wifi" => Mod::Network,
+            "bluetooth" | "bt" => Mod::Bluetooth,
             "volume" | "vol" | "audio" => Mod::Volume,
             "brightness" | "backlight" => Mod::Brightness,
             "battery" | "bat" => Mod::Battery,
@@ -150,7 +158,7 @@ fn default_layout_center() -> Vec<Slot> {
 }
 fn default_layout_right() -> Vec<Slot> {
     use Mod::*;
-    [GameMode, Camera, Microphone, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
+    [GameMode, Camera, Microphone, Recording, Caffeine, NightLight, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Bluetooth, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
         .into_iter()
         .map(Slot::Mod)
         .collect()
@@ -428,7 +436,7 @@ mod tests {
         use Mod::*;
         assert_eq!(
             c.layout_right,
-            [GameMode, Camera, Microphone, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
+            [GameMode, Camera, Microphone, Recording, Caffeine, NightLight, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Bluetooth, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
                 .into_iter()
                 .map(Slot::Mod)
                 .collect::<Vec<_>>()

@@ -189,6 +189,15 @@ button.ws.urgent {
 .control.muted {
     color: @tz_muted;
 }
+/* Bluetooth: dimmed when the adapter is off, accent when something is
+   connected — so "on but idle" and "actually in use" read differently at a
+   glance, which is the whole reason the module is worth its width. */
+.control.off {
+    color: @tz_faint;
+}
+.control.active {
+    color: @tz_accent;
+}
 .glyph {
     font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
 }
@@ -494,4 +503,38 @@ levelbar.mix block.filled {
 levelbar.mix block.empty {
     background: transparent;
     border: none;
+}
+
+/* --- Session indicators (recording · caffeine · night light) ------------- */
+/* Recording joins the camera/microphone privacy family: red and glowing, so
+   "something is capturing" reads the same way whatever the source. */
+.recording {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    padding: 0 8px;
+}
+.recording .glyph {
+    color: @tz_urgent;
+    text-shadow: 0 0 8px alpha(@tz_urgent, 0.55);
+}
+/* Keep-awake and night light are states you chose, not warnings — accent and
+   gold rather than the urgent red. */
+.caffeine {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    padding: 0 8px;
+}
+.caffeine .glyph {
+    color: @tz_accent;
+}
+.caffeine:hover .glyph {
+    text-shadow: 0 0 8px alpha(@tz_accent, 0.5);
+}
+.night {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    padding: 0 8px;
+}
+.night .glyph {
+    color: @tz_gold;
+}
+.night:hover .glyph {
+    text-shadow: 0 0 8px alpha(@tz_gold, 0.5);
 }

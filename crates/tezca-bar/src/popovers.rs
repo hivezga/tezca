@@ -5,7 +5,8 @@
 //! state is rebuilt in `connect_show`, so opening one always shows current data:
 //!   * clock  → calendar
 //!   * audio  → per-sink/source mixer
-//!   * network → SSID + connection detail
+//!   * network → SSID + connection detail, radio toggle
+//!   * bluetooth → connected devices + battery
 //!
 //! Plus the Tezca "mirror" system menu.
 
@@ -139,10 +140,9 @@ pub fn network(anchor: &impl IsA<gtk4::Widget>, tp: Rc<RefCell<Throughput>>) -> 
     let (pop, content) = glass(anchor);
     content.set_width_request(230);
     let content_c = content.clone();
+    let pop_c = pop.clone();
     pop.connect_show(move |_| {
-        while let Some(c) = content_c.first_child() {
-            content_c.remove(&c);
-        }
+        clear(&content_c);
         let t = tp.borrow();
         let (ssid, ip, signal, connected) = match sysinfo::net() {
             Net::Wifi { ssid, ip, signal } => (ssid, ip, Some(signal), true),
@@ -174,6 +174,127 @@ pub fn network(anchor: &impl IsA<gtk4::Widget>, tp: Rc<RefCell<Throughput>>) -> 
             rows.append(&mono_row("signal", &format!("{s}%"), true));
         }
         content_c.append(&rows);
+
+        // Actions. The popover deliberately stops short of joining a *new*
+        // secured network: that needs a password field, a scan that can take
+        // seconds, and somewhere to report "wrong password" — none of which
+        // belong in a layer-shell popover with no keyboard focus. It offers the
+        // two things that are one call away, and hands off for the rest.
+        let actions = GtkBox::new(Orientation::Horizontal, 6);
+        let radio_on = wifi_radio_on();
+        let toggle = Button::with_label(if radio_on { "Wi-Fi off" } else { "Wi-Fi on" });
+        toggle.add_css_class("pop-item");
+        toggle.set_hexpand(true);
+        {
+            let pop = pop_c.clone();
+            toggle.connect_clicked(move |_| {
+                sh(if radio_on { "tezca net radio off" } else { "tezca net radio on" });
+                pop.popdown();
+            });
+        }
+        let manage = Button::with_label("Networks…");
+        manage.add_css_class("pop-item");
+        {
+            let pop = pop_c.clone();
+            manage.connect_clicked(move |_| {
+                sh("tezca settings --page network");
+                pop.popdown();
+            });
+        }
+        actions.append(&toggle);
+        actions.append(&manage);
+        content_c.append(&actions);
+    });
+    pop
+}
+
+/// Whether NetworkManager reports the Wi-Fi radio as enabled.
+fn wifi_radio_on() -> bool {
+    Command::new("nmcli")
+        .args(["radio", "wifi"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "enabled")
+        .unwrap_or(false)
+}
+
+// ── Bluetooth ───────────────────────────────────────────────────────────────
+
+/// Connected devices with battery, plus a power toggle and a way into Settings.
+///
+/// Deliberately not a device manager: pairing needs a scan, a list that changes
+/// under you, and somewhere to report failure — all of which the Settings page
+/// does properly. This popover answers "what am I connected to, and how much
+/// battery does it have left", and hands off for anything more.
+pub fn bluetooth(anchor: &impl IsA<gtk4::Widget>) -> Popover {
+    let (pop, content) = glass(anchor);
+    content.set_width_request(230);
+    let content_c = content.clone();
+    let pop_c = pop.clone();
+    pop.connect_show(move |_| {
+        clear(&content_c);
+        let state = crate::bluetooth::poll();
+
+        let head = GtkBox::new(Orientation::Horizontal, 8);
+        let title = pop_title("Bluetooth");
+        title.set_hexpand(true);
+        head.append(&title);
+        if state.powered {
+            let chip = Label::new(Some("on"));
+            chip.add_css_class("chip-connected");
+            head.append(&chip);
+        }
+        content_c.append(&head);
+
+        if !state.powered {
+            let l = Label::new(Some("Turn Bluetooth on to connect a device."));
+            l.add_css_class("pop-caption");
+            l.set_wrap(true);
+            l.set_xalign(0.0);
+            content_c.append(&l);
+        } else if state.connected.is_empty() {
+            let l = Label::new(Some("Nothing connected."));
+            l.add_css_class("pop-caption");
+            l.set_xalign(0.0);
+            content_c.append(&l);
+        } else {
+            let rows = GtkBox::new(Orientation::Vertical, 7);
+            for d in &state.connected {
+                match d.battery {
+                    Some(b) => rows.append(&meter_row(&d.name, &format!("{b}%"), b as f64 / 100.0)),
+                    None => rows.append(&mono_row(&d.name, "connected", false)),
+                }
+            }
+            content_c.append(&rows);
+        }
+
+        let actions = GtkBox::new(Orientation::Horizontal, 6);
+        let toggle = Button::with_label(if state.powered { "Turn off" } else { "Turn on" });
+        toggle.add_css_class("pop-item");
+        toggle.set_hexpand(true);
+        {
+            let pop = pop_c.clone();
+            let on = state.powered;
+            toggle.connect_clicked(move |_| {
+                // Through the CLI, so the bar and the Settings page drive the
+                // same code path — and so this stays a one-liner.
+                sh(if on { "tezca bt power off" } else { "tezca bt power on" });
+                pop.popdown();
+            });
+        }
+        let manage = Button::with_label("Devices…");
+        manage.add_css_class("pop-item");
+        {
+            let pop = pop_c.clone();
+            manage.connect_clicked(move |_| {
+                sh("tezca settings --page network");
+                pop.popdown();
+            });
+        }
+        actions.append(&toggle);
+        actions.append(&manage);
+        content_c.append(&actions);
     });
     pop
 }

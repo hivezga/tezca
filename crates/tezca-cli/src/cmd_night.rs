@@ -203,6 +203,13 @@ fn set_temperature(kelvin: Option<u32>) -> Result<(), String> {
         return Ok(());
     }
 
+    // Nothing is listening and nothing is wanted: there is no filter to remove,
+    // so starting a daemon purely to tell it "do nothing" would leave a resident
+    // process at every login for no reason.
+    if kelvin.is_none() {
+        return Ok(());
+    }
+
     // Nothing listening: start a daemon in the wanted state. Detached, with its
     // stdio nulled — it outlives us, and a caller capturing our output would
     // otherwise block waiting for a pipe the daemon never closes.

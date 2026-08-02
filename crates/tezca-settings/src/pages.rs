@@ -2,9 +2,9 @@
 //! the `tezca` CLI, so the GUI and the keyboard/CLI paths drive identical code.
 //!
 //! Convention across controls: set the widget's value FIRST, then connect its
-//! handler — so populating a control never fires an apply. Pages that can be
-//! "reset" (Desktop) rebuild their rows the same way, so no signal-blocking is
-//! needed anywhere.
+//! handler — so populating a control never fires an apply. Sections that can be
+//! "reset" (Appearance ▸ Windows & motion) rebuild their rows the same way, so
+//! no signal-blocking is needed anywhere.
 
 use crate::{arrange, backend, keybinds};
 use gtk4::gdk;
@@ -119,6 +119,34 @@ pub fn appearance(window: &Window) -> Widget {
     page.append(&row);
     page.append(&hint(
         "This wallpaper drives the whole palette (matugen). For a different picture per screen, use the Displays tab.",
+    ));
+
+    // --- Windows & motion ---------------------------------------------------
+    // Gaps, blur and animation curves used to be their own Desktop page. They
+    // belong here: you reach for them while looking at a theme, and a page you
+    // only visit to change one number is a page you never find.
+    page.append(&section_header("Windows & motion"));
+    let motion = Box::new(Orientation::Vertical, 0);
+    populate_desktop(&motion);
+    page.append(&motion);
+
+    let reset = Button::with_label("Reset to Tezca defaults");
+    reset.add_css_class("tz-action");
+    reset.set_halign(Align::Start);
+    {
+        let motion = motion.clone();
+        reset.connect_clicked(move |_| {
+            // Synchronous so the reload lands before we re-read the values.
+            let _ = backend::tezca_result(&["hypr", "reset"]);
+            while let Some(child) = motion.first_child() {
+                motion.remove(&child);
+            }
+            populate_desktop(&motion);
+        });
+    }
+    page.append(&reset);
+    page.append(&hint(
+        "These apply instantly and persist across reload/relogin (~/.config/tezca/overrides.lua). Reset clears them.",
     ));
 
     scrolled(&page)
@@ -1272,10 +1300,177 @@ pub fn bar() -> Widget {
         "The glass pill that flashes when you change the volume (or a laptop's brightness). The camera and microphone privacy indicators are modules — add them under Modules below.",
     ));
 
+    // --- Weather ------------------------------------------------------------
+    // The one setting on this page you cannot express as a number: a location.
+    // Typing coordinates by hand is nobody's idea of a control panel, so the
+    // search lives here and writes them for you.
+    page.append(&section_header("Weather"));
+    let weather_on = Switch::new();
+    weather_on.set_valign(Align::Center);
+    weather_on.set_active(get("weather_enabled").as_deref() == Some("true"));
+    page.append(&control_row("Show the weather module", &weather_on));
+
+    let place_row = Box::new(Orientation::Horizontal, 8);
+    let place = Label::new(None);
+    place.set_halign(Align::Start);
+    place.set_hexpand(true);
+    place.set_xalign(0.0);
+    place.add_css_class("tz-hint");
+    let refresh_place = {
+        let place = place.clone();
+        Rc::new(move || {
+            let cfg = backend::bar_config();
+            let v = |k: &str| {
+                cfg.iter().find(|(key, _)| key == k).map(|(_, val)| val.clone()).unwrap_or_default()
+            };
+            let (lat, lon, name) = (v("weather_lat"), v("weather_lon"), v("weather_place"));
+            place.set_text(&if lat.is_empty() || lon.is_empty() {
+                "No location set — search for one below.".to_string()
+            } else if name.is_empty() {
+                format!("{lat}, {lon}")
+            } else {
+                format!("{name}  ·  {lat}, {lon}")
+            });
+        })
+    };
+    refresh_place();
+    place_row.append(&place);
+    page.append(&place_row);
+
+    let search_row = Box::new(Orientation::Horizontal, 8);
+    let search = Entry::new();
+    search.set_placeholder_text(Some("Town or city…"));
+    search.set_hexpand(true);
+    let find = small_btn("Search");
+    let here = small_btn("Use my IP");
+    search_row.append(&search);
+    search_row.append(&find);
+    search_row.append(&here);
+    page.append(&search_row);
+
+    let results = Box::new(Orientation::Vertical, 4);
+    results.add_css_class("tz-applist");
+    results.set_visible(false);
+    page.append(&results);
+    page.append(&hint(
+        "“Use my IP” is the only thing in Tezca that tells a third party where you are without being told — your IP goes out, a city comes back. It is never done automatically, and on a VPN it will place you somewhere you are not, so check the answer before saving it.",
+    ));
+
+    // Both buttons feed the same result list; picking a row writes the
+    // coordinates and switches the module on.
+    let show_results = {
+        let results = results.clone();
+        let refresh_place = refresh_place.clone();
+        Rc::new(move |places: Vec<(String, String, String)>| {
+            while let Some(c) = results.first_child() {
+                results.remove(&c);
+            }
+            for (label, lat, lon) in places {
+                let row = Box::new(Orientation::Horizontal, 8);
+                row.add_css_class("tz-pinrow");
+                let l = Label::new(Some(&label));
+                l.set_halign(Align::Start);
+                l.set_hexpand(true);
+                l.set_xalign(0.0);
+                let coords = Label::new(Some(&format!("{lat}, {lon}")));
+                coords.add_css_class("tz-key2");
+                let use_it = small_btn("Use");
+                {
+                    let (lat, lon, label) = (lat.clone(), lon.clone(), label.clone());
+                    let results = results.clone();
+                    let refresh_place = refresh_place.clone();
+                    use_it.connect_clicked(move |_| {
+                        let _ =
+                            backend::tezca_result(&["bar", "weather", "set", &lat, &lon, &label]);
+                        results.set_visible(false);
+                        refresh_place();
+                    });
+                }
+                row.append(&l);
+                row.append(&coords);
+                row.append(&use_it);
+                results.append(&row);
+            }
+            results.set_visible(results.first_child().is_some());
+        })
+    };
+
+    {
+        let (search, show_results) = (search.clone(), show_results.clone());
+        find.connect_clicked(move |_| {
+            let q = search.text().to_string();
+            if q.trim().is_empty() {
+                return;
+            }
+            let show = show_results.clone();
+            // Off the main thread: a geocode is a network round-trip, and the
+            // window must not freeze for it.
+            backend::run_async(&backend::bar_bin(), &["--weather-search", &q], move |r| {
+                show(parse_place_lines(&r.stdout));
+            });
+        });
+    }
+    {
+        let show_results = show_results.clone();
+        here.connect_clicked(move |_| {
+            let show = show_results.clone();
+            backend::run_async(&backend::bar_bin(), &["--weather-locate"], move |r| {
+                show(parse_place_lines(&r.stdout));
+            });
+        });
+    }
+    {
+        let weather_on = weather_on.clone();
+        weather_on.clone().connect_state_set(move |_, on| {
+            backend::tezca(&["bar", "set", "weather_enabled", bool_str(on).as_str()]);
+            glib::Propagation::Proceed
+        });
+        let _ = &weather_on;
+    }
+
+    // --- Local AI -----------------------------------------------------------
+    page.append(&section_header("Local AI"));
+    let llm_on = Switch::new();
+    llm_on.set_valign(Align::Center);
+    llm_on.set_active(get("llm_enabled").as_deref() == Some("true"));
+    page.append(&control_row("Show the local-model module", &llm_on));
+
+    const BACKENDS: [&str; 3] = ["auto", "llamacpp", "ollama"];
+    let backend =
+        DropDown::from_strings(&["Detect automatically", "llama.cpp (llama serve)", "Ollama"]);
+    let cur_backend = get("llm_backend").unwrap_or_else(|| "auto".into());
+    if let Some(i) = BACKENDS.iter().position(|b| *b == cur_backend) {
+        backend.set_selected(i as u32);
+    }
+    page.append(&control_row("Server", &backend));
+    let llm_port = spin_from("llm_port", 0.0, 65535.0, 1.0, 0, &get);
+    page.append(&control_row("Port (0 = the server's default)", &llm_port));
+    page.append(&hint(
+        "Talks to 127.0.0.1 and nothing else — the host is fixed in the source, not here, so your prompts cannot be pointed at a remote server by editing config. SUPER+I opens the chat panel. Ollama reports how much of a model sits on the GPU; llama.cpp does not publish that, so the module shows nothing there rather than guessing.",
+    ));
+
+    // --- Right cluster ------------------------------------------------------
+    page.append(&section_header("Right cluster"));
+    const CLUTTER: [&str; 4] = ["all", "grouped", "hover", "tiers"];
+    let clutter = DropDown::from_strings(&[
+        "Show everything",
+        "Group indicators and metrics",
+        "Fade the ambient ones until hover",
+        "Drop the third-tier modules",
+    ]);
+    let cur_clutter = get("clutter").unwrap_or_else(|| "all".into());
+    if let Some(i) = CLUTTER.iter().position(|s| *s == cur_clutter) {
+        clutter.set_selected(i as u32);
+    }
+    page.append(&control_row("When it gets crowded", &clutter));
+    page.append(&hint(
+        "Grouping folds camera/microphone/recording into one “N capturing” chip and CPU/MEM/GPU into one “SYS” chip — click either to open it. Fading only changes opacity, so nothing moves under the pointer. Dropping removes keep-awake, night light, tray, GPU and brightness from the layout.",
+    ));
+
     // --- Modules ------------------------------------------------------------
     page.append(&section_header("Modules"));
     page.append(&hint(
-        "Choose which modules each region of the bar shows, and their order. Reorder with ↑ ↓, remove with ✕, or add one below. “Separator” inserts a divider. On a narrow (compact) monitor the App name is dropped automatically.",
+        "Choose which modules each region of the bar shows, and their order. Drag a row to reorder it or move it to another region; ↑ ↓ do the same from the keyboard, ✕ removes, and the menu below adds. “Separator” inserts a divider. On a narrow (compact) monitor the App name is dropped automatically.",
     ));
     // The Add menu offers the built-ins plus any custom exec modules discovered
     // in ~/.config/tezca-bar/modules (see the hint below).
@@ -1288,12 +1483,17 @@ pub fn bar() -> Widget {
     const DEF_CENTER: &str = "nowplaying";
     const DEF_RIGHT: &str =
         "gamemode, camera, microphone, recording, caffeine, night, ai, tray, cpu, mem, gpu, sep, network, bluetooth, volume, brightness, battery, sep, bell, clock, power";
+    let board: ModuleBoard = Rc::new(RefCell::new(HashMap::new()));
     let (left_w, left_ids) =
-        module_region("Left", seed_modules(get("layout_left"), DEF_LEFT), defs.clone());
-    let (center_w, center_ids) =
-        module_region("Center", seed_modules(get("layout_center"), DEF_CENTER), defs.clone());
+        module_region("Left", seed_modules(get("layout_left"), DEF_LEFT), defs.clone(), &board);
+    let (center_w, center_ids) = module_region(
+        "Center",
+        seed_modules(get("layout_center"), DEF_CENTER),
+        defs.clone(),
+        &board,
+    );
     let (right_w, right_ids) =
-        module_region("Right", seed_modules(get("layout_right"), DEF_RIGHT), defs.clone());
+        module_region("Right", seed_modules(get("layout_right"), DEF_RIGHT), defs.clone(), &board);
     let modules_row = Box::new(Orientation::Horizontal, 16);
     modules_row.add_css_class("tz-modcols");
     left_w.set_hexpand(true);
@@ -1317,7 +1517,9 @@ pub fn bar() -> Widget {
             (cpu_iv.clone(), mem_iv.clone(), gpu_iv.clone(), net_iv.clone(), compact.clone());
         let (numerals, hide_empty, compact_ws, assign_rows) =
             (numerals.clone(), hide_empty.clone(), compact_ws.clone(), assign_rows.clone());
-        let (osd_enabled, osd_timeout) = (osd_enabled.clone(), osd_timeout.clone());
+        let (osd_enabled, osd_timeout, clutter) =
+            (osd_enabled.clone(), osd_timeout.clone(), clutter.clone());
+        let (llm_on, backend, llm_port) = (llm_on.clone(), backend.clone(), llm_port.clone());
         let (left_ids, center_ids, right_ids) =
             (left_ids.clone(), center_ids.clone(), right_ids.clone());
         apply.connect_clicked(move |_| {
@@ -1345,6 +1547,16 @@ pub fn bar() -> Widget {
                 ("compact_width".into(), (compact.value() as i64).to_string()),
                 ("osd_enabled".into(), bool_str(osd_enabled.is_active())),
                 ("osd_timeout_ms".into(), (osd_timeout.value() as i64).to_string()),
+                (
+                    "clutter".into(),
+                    CLUTTER.get(clutter.selected() as usize).copied().unwrap_or("all").into(),
+                ),
+                ("llm_enabled".into(), bool_str(llm_on.is_active())),
+                (
+                    "llm_backend".into(),
+                    BACKENDS.get(backend.selected() as usize).copied().unwrap_or("auto").into(),
+                ),
+                ("llm_port".into(), (llm_port.value() as i64).to_string()),
             ];
             for (name, dd, entry) in assign_rows.iter() {
                 kvs.push((format!("workspaces.{name}"), ws_spec_value(dd, entry)));
@@ -1475,10 +1687,28 @@ fn seed_modules(current: Option<String>, default: &str) -> Vec<String> {
 /// plus an "Add" dropdown. Returns the widget to append and a shared handle on
 /// the ordered id list to read back at Apply time. Rows are fully rebuilt on
 /// every edit, so the per-row captured indices are always current.
+/// One region's live list plus the closure that repaints it.
+///
+/// Shared through [`ModuleBoard`] so a row dragged out of Left can be removed
+/// from Left's list and both columns redrawn from Right's drop handler.
+#[derive(Clone)]
+struct ModuleRegion {
+    ids: Rc<RefCell<Vec<String>>>,
+    render: Rc<dyn Fn()>,
+}
+
+/// Every module region, keyed by its heading. Filled as the regions are built.
+type ModuleBoard = Rc<RefCell<HashMap<String, ModuleRegion>>>;
+
+/// The drag payload: `"Left\u{1}3"` — which column a row came from, and where in
+/// it. A private separator keeps this unambiguous whatever a heading is called.
+const DND_SEP: char = '\u{1}';
+
 fn module_region(
-    title: &str,
+    title: &'static str,
     ids: Vec<String>,
     defs: Rc<Vec<(String, String)>>,
+    board: &ModuleBoard,
 ) -> (Box, Rc<RefCell<Vec<String>>>) {
     let wrap = Box::new(Orientation::Vertical, 4);
     wrap.add_css_class("tz-modregion");
@@ -1508,9 +1738,31 @@ fn module_region(
             }
             let ids = state.borrow().clone();
             let len = ids.len();
+            if ids.is_empty() {
+                // A region with nothing in it still has to be a target you can
+                // aim at, or modules can only ever leave it.
+                let empty = Label::new(Some("drop here"));
+                empty.add_css_class("tz-moddrop");
+                list.append(&empty);
+            }
             for (i, id) in ids.iter().enumerate() {
                 let row = Box::new(Orientation::Horizontal, 6);
                 row.add_css_class("tz-modrow");
+
+                // Dragging carries the row's origin, so the drop handler can
+                // take it out of whichever column it came from.
+                let src = gtk4::DragSource::new();
+                src.set_actions(gdk::DragAction::MOVE);
+                let payload = format!("{title}{DND_SEP}{i}");
+                src.connect_prepare(move |_, _, _| {
+                    Some(gdk::ContentProvider::for_value(&payload.to_value()))
+                });
+                row.add_controller(src);
+
+                let grip = Label::new(Some("⠿"));
+                grip.add_css_class("tz-modgrip");
+                row.append(&grip);
+
                 let name = Label::new(Some(&label_for(id, &defs)));
                 name.set_halign(Align::Start);
                 name.set_hexpand(true);
@@ -1557,7 +1809,68 @@ fn module_region(
         *render.borrow_mut() = Some(f);
     }
     if let Some(f) = render.borrow().clone() {
+        board
+            .borrow_mut()
+            .insert(title.to_string(), ModuleRegion { ids: state.clone(), render: f.clone() });
         f();
+    }
+
+    // --- drop target ---------------------------------------------------------
+    // Accepts a row from any region, including this one — a same-column drop is
+    // a reorder, which is the cheaper half of the same operation.
+    {
+        let state = state.clone();
+        let render_ref = render.clone();
+        let board = board.clone();
+        let list_ref = list.clone();
+        let target = gtk4::DropTarget::new(String::static_type(), gdk::DragAction::MOVE);
+        target.connect_drop(move |_, value, _x, y| {
+            let Ok(payload) = value.get::<String>() else { return false };
+            let Some((from, idx)) = payload.split_once(DND_SEP) else { return false };
+            let Ok(src_idx) = idx.parse::<usize>() else { return false };
+            let at = insert_index(&list_ref, y);
+
+            let here = render_ref.borrow().clone();
+            if from == title {
+                let mut v = state.borrow_mut();
+                if src_idx >= v.len() {
+                    return false;
+                }
+                let item = v.remove(src_idx);
+                // The removal shifted everything after it down by one, so a
+                // drop below the row's old home lands one slot too far.
+                let at = if at > src_idx { at - 1 } else { at };
+                let at = at.min(v.len());
+                v.insert(at, item);
+                drop(v);
+                if let Some(f) = here {
+                    f();
+                }
+                return true;
+            }
+
+            // Clone the source region out before touching it: its render
+            // closure re-enters the board, which we must not still be borrowing.
+            let Some(src) = board.borrow().get(from).cloned() else { return false };
+            let item = {
+                let mut sv = src.ids.borrow_mut();
+                if src_idx >= sv.len() {
+                    return false;
+                }
+                sv.remove(src_idx)
+            };
+            {
+                let mut v = state.borrow_mut();
+                let at = at.min(v.len());
+                v.insert(at, item);
+            }
+            (src.render)();
+            if let Some(f) = here {
+                f();
+            }
+            true
+        });
+        list.add_controller(target);
     }
 
     // Add row: pick any module (built-in or a discovered custom one). Duplicates
@@ -1587,6 +1900,35 @@ fn module_region(
     wrap.append(&add_row);
 
     (wrap, state)
+}
+
+/// Which slot a drop at `y` lands in: the number of rows whose midpoint it
+/// passed. Measuring the live rows rather than assuming a row height keeps this
+/// right when a long module name wraps.
+fn insert_index(list: &Box, y: f64) -> usize {
+    let mut n = 0;
+    let mut child = list.first_child();
+    while let Some(w) = child {
+        // The empty-region placeholder is not a slot.
+        if !w.has_css_class("tz-moddrop") {
+            let a = w.allocation();
+            if y >= f64::from(a.y()) + f64::from(a.height()) / 2.0 {
+                n += 1;
+            }
+        }
+        child = w.next_sibling();
+    }
+    n
+}
+
+/// `label\tlat\tlon` lines from `tezca-bar --weather-search` into triples.
+fn parse_place_lines(out: &str) -> Vec<(String, String, String)> {
+    out.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            Some((f.next()?.to_string(), f.next()?.to_string(), f.next()?.to_string()))
+        })
+        .collect()
 }
 
 fn bool_str(on: bool) -> String {
@@ -1763,33 +2105,11 @@ fn save_pinned(state: &Rc<RefCell<Vec<String>>>) {
 // Desktop — live Hyprland look & feel (persisted)
 // ===========================================================================
 
-pub fn desktop() -> Widget {
-    let page = page_box();
-    page.append(&section_header("Look & feel"));
-    let container = Box::new(Orientation::Vertical, 0);
-    populate_desktop(&container);
-    page.append(&container);
-
-    page.append(&section_header("Reset"));
-    let reset = Button::with_label("Reset to Tezca defaults");
-    reset.add_css_class("tz-action");
-    {
-        let c = container.clone();
-        reset.connect_clicked(move |_| {
-            // Synchronous so the reload lands before we re-read the values.
-            let _ = backend::tezca_result(&["hypr", "reset"]);
-            while let Some(child) = c.first_child() {
-                c.remove(&child);
-            }
-            populate_desktop(&c);
-        });
-    }
-    page.append(&reset);
-    page.append(&hint("Changes apply instantly and persist across reload/relogin (~/.config/tezca/overrides.lua). Reset clears them."));
-
-    scrolled(&page)
-}
-
+/// The window/motion rows shared by Appearance ▸ Windows & motion.
+///
+/// Kept as its own function because the Reset button rebuilds it: values are set
+/// before handlers are connected, so a rebuild re-reads Hyprland rather than
+/// firing an apply per row.
 fn populate_desktop(c: &Box) {
     c.append(&control_row("Inner gaps", &spin_opt("general:gaps_in", 0.0, 40.0, 1.0, 0)));
     c.append(&control_row("Outer gaps", &spin_opt("general:gaps_out", 0.0, 60.0, 1.0, 0)));

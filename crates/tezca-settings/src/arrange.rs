@@ -132,6 +132,26 @@ impl State {
             .map(|(r, _)| (r.name.clone(), r.x, r.y))
             .collect()
     }
+
+    fn any_overlap(&self) -> bool {
+        self.rects
+            .iter()
+            .enumerate()
+            .any(|(i, r)| self.rects.iter().enumerate().any(|(j, o)| j != i && r.overlaps(o)))
+    }
+
+    /// One line answering "is what I see on screen what the compositor is
+    /// doing?" — the question the canvas otherwise leaves open, since a dragged
+    /// rectangle looks identical whether or not it has been applied.
+    fn status(&self) -> String {
+        if self.any_overlap() {
+            return "⚠ two screens overlap".to_string();
+        }
+        match self.changed().len() {
+            0 => "layout matches the compositor".to_string(),
+            n => format!("{n} moved · not applied"),
+        }
+    }
 }
 
 /// Build the arrangement section: the canvas plus its actions.
@@ -147,6 +167,31 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
     }));
 
     let wrap = Box::new(Orientation::Vertical, 8);
+
+    let status = gtk4::Label::new(None);
+    status.add_css_class("tz-arrange-status");
+    status.set_halign(Align::Start);
+    status.set_xalign(0.0);
+    status.set_hexpand(true);
+
+    // Called after every mutation, next to the redraw it accompanies. The draw
+    // handler cannot do this itself — it holds `state` mutably while it runs.
+    let sync: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let status = status.clone();
+        Rc::new(move || {
+            let st = state.borrow();
+            let text = st.status();
+            let overlap = st.any_overlap();
+            drop(st);
+            status.set_text(&text);
+            if overlap {
+                status.add_css_class("tz-warn");
+            } else {
+                status.remove_css_class("tz-warn");
+            }
+        })
+    };
 
     let area = DrawingArea::new();
     area.add_css_class("tz-arrange");
@@ -196,6 +241,7 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
     {
         let state = state.clone();
         let area_ref = area.clone();
+        let sync = sync.clone();
         drag.connect_drag_update(move |_, dx, dy| {
             let mut st = state.borrow_mut();
             let Some((i, sx, sy)) = st.dragging else { return };
@@ -208,6 +254,7 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
             st.rects[i].y = y;
             drop(st);
             area_ref.queue_draw();
+            sync();
         });
     }
     {
@@ -224,6 +271,7 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
     {
         let state = state.clone();
         let area_ref = area.clone();
+        let sync = sync.clone();
         keys.connect_key_pressed(move |_, key, _, modifier| {
             use gtk4::gdk::Key;
             let step = if modifier.contains(gtk4::gdk::ModifierType::SHIFT_MASK) { 10 } else { 1 };
@@ -240,6 +288,7 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
             st.rects[i].y += dy;
             drop(st);
             area_ref.queue_draw();
+            sync();
             gtk4::glib::Propagation::Stop
         });
     }
@@ -250,18 +299,19 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
 
     // --- actions ------------------------------------------------------------
     let actions = Box::new(Orientation::Horizontal, 6);
-    actions.set_halign(Align::End);
 
     let tidy = Button::with_label("Tidy up");
     tidy.add_css_class("tz-small");
     {
         let state = state.clone();
         let area_ref = area.clone();
+        let sync = sync.clone();
         tidy.connect_clicked(move |_| {
             let mut st = state.borrow_mut();
             tidy_up(&mut st.rects);
             drop(st);
             area_ref.queue_draw();
+            sync();
         });
     }
 
@@ -270,6 +320,7 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
     {
         let state = state.clone();
         let area_ref = area.clone();
+        let sync = sync.clone();
         revert.connect_clicked(move |_| {
             let mut st = state.borrow_mut();
             let original = st.original.clone();
@@ -279,6 +330,7 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
             }
             drop(st);
             area_ref.queue_draw();
+            sync();
         });
     }
 
@@ -294,11 +346,13 @@ pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
         });
     }
 
+    actions.append(&status);
     actions.append(&tidy);
     actions.append(&revert);
     actions.append(&apply);
     wrap.append(&actions);
 
+    sync();
     wrap
 }
 

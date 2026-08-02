@@ -4,8 +4,10 @@
 
 use gtk4::gio;
 use gtk4::glib;
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::rc::Rc;
 
 /// Absolute path to the `tezca` binary — prefer ~/.local/bin (where install.sh
 /// puts it; not always on a GUI process's PATH), else fall back to PATH lookup.
@@ -17,6 +19,101 @@ pub fn tezca_bin() -> String {
         }
     }
     "tezca".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// CLI echo
+// ---------------------------------------------------------------------------
+
+/// What became of the command the echo footer is showing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum EchoState {
+    /// Spawned detached — we deliberately never learn the outcome, so the
+    /// footer must not claim one.
+    Sent,
+    /// Running off the main thread. A second echo follows with the verdict.
+    Running,
+    Applied,
+    Failed,
+}
+
+/// One line for the CLI-echo footer.
+#[derive(Clone)]
+pub struct Echo {
+    /// The command as a user could retype it, e.g. `tezca bar set height 40`.
+    pub line: String,
+    pub state: EchoState,
+    /// The CLI's own error text, when it failed.
+    pub detail: String,
+}
+
+type EchoSink = Rc<dyn Fn(Echo)>;
+
+thread_local! {
+    static ECHO_SINK: RefCell<Option<EchoSink>> = const { RefCell::new(None) };
+}
+
+/// Route every *mutating* command this module runs to `f` — the footer that
+/// shows you which `tezca` invocation your click just made.
+///
+/// Only the action paths report. [`tezca_out`] and [`output`] are pure reads and
+/// would otherwise bury the change you actually made under a stream of
+/// `display list --machine`.
+///
+/// Thread-local by design: the sink touches widgets, so only the GTK main
+/// thread may hold one. [`capture`] running on the `gio` pool finds no sink and
+/// silently skips — which is what we want, since the wrapper that dispatched it
+/// echoes from the main thread on both sides of the await.
+pub fn set_echo_sink<F: Fn(Echo) + 'static>(f: F) {
+    let f: EchoSink = Rc::new(f);
+    ECHO_SINK.with(|s| *s.borrow_mut() = Some(f));
+}
+
+fn echo(cmd: &str, args: &[&str], state: EchoState, detail: &str) {
+    // Clone the handle out before calling: a sink that itself runs a command
+    // would otherwise re-enter the RefCell while it is still borrowed.
+    let sink = ECHO_SINK.with(|s| s.borrow().clone());
+    let Some(sink) = sink else { return };
+    sink(Echo { line: command_line(cmd, args), state, detail: detail.to_string() });
+}
+
+fn echo_result(cmd: &str, args: &[&str], r: &CmdResult) {
+    if r.ok() {
+        echo(cmd, args, EchoState::Applied, "");
+    } else {
+        echo(cmd, args, EchoState::Failed, &r.message());
+    }
+}
+
+/// `/home/u/.local/bin/tezca display keep` → `tezca display keep`.
+fn command_line(cmd: &str, args: &[&str]) -> String {
+    let mut s = cmd.rsplit('/').next().unwrap_or(cmd).to_string();
+    for a in args {
+        s.push(' ');
+        // Keep a value containing spaces readable as the one argument it is —
+        // `clock_format %a %d %b` would otherwise look like three.
+        if a.contains(' ') {
+            s.push('"');
+            s.push_str(a);
+            s.push('"');
+        } else {
+            s.push_str(a);
+        }
+    }
+    s
+}
+
+/// Absolute path to `tezca-bar`, next to the `tezca` binary.
+///
+/// The bar owns the only HTTP code and the only host allowlist in this project,
+/// so the panel's place search drives it rather than opening a second network
+/// path of its own.
+pub fn bar_bin() -> String {
+    let t = tezca_bin();
+    match t.rsplit_once('/') {
+        Some((dir, _)) => format!("{dir}/tezca-bar"),
+        None => "tezca-bar".to_string(),
+    }
 }
 
 /// Spawn `tezca <args>` detached, ignoring output (theme set, game toggle, …).
@@ -31,12 +128,18 @@ pub fn tezca_out(args: &[&str]) -> Option<String> {
 
 /// Spawn an arbitrary command detached (hyprctl, scripts, wlogout, hyprlock, …).
 pub fn spawn(cmd: &str, args: &[&str]) {
-    let _ = Command::new(cmd)
+    let r = Command::new(cmd)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
+    // A detached child tells us only whether it *started*. "Sent" is the
+    // strongest honest claim; the footer says exactly that.
+    match r {
+        Ok(_) => echo(cmd, args, EchoState::Sent, ""),
+        Err(e) => echo(cmd, args, EchoState::Failed, &e.to_string()),
+    }
 }
 
 /// Capture trimmed stdout of an arbitrary command (None on failure).
@@ -171,14 +274,18 @@ pub fn tezca_result(args: &[&str]) -> CmdResult {
 
 /// Run any command synchronously, capturing everything we might want to report.
 pub fn capture(cmd: &str, args: &[&str]) -> CmdResult {
-    match Command::new(cmd).args(args).output() {
+    let r = match Command::new(cmd).args(args).output() {
         Ok(o) => CmdResult {
             code: o.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&o.stdout).trim().to_string(),
             stderr: String::from_utf8_lossy(&o.stderr).trim().to_string(),
         },
         Err(e) => CmdResult { code: -1, stdout: String::new(), stderr: e.to_string() },
-    }
+    };
+    // No-op on the `gio` pool, where no sink is installed — `run_async` echoes
+    // for those from the main thread instead.
+    echo_result(cmd, args, &r);
+    r
 }
 
 /// Run a command **off the GTK main thread**, then hand the result back on it.
@@ -200,21 +307,32 @@ where
 {
     let cmd = cmd.to_string();
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        echo(&cmd, &refs, EchoState::Running, "");
+    }
     glib::spawn_future_local(async move {
-        let handle = gio::spawn_blocking(move || {
-            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            capture(&cmd, &refs)
-        });
-        match handle.await {
-            Ok(r) => on_done(r),
+        let worker = {
+            let cmd = cmd.clone();
+            let args = args.clone();
+            gio::spawn_blocking(move || {
+                let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+                capture(&cmd, &refs)
+            })
+        };
+        let r = match worker.await {
+            Ok(r) => r,
             // The worker panicked. Report it rather than dropping the callback,
             // or the UI sits on "Scanning…" forever.
-            Err(_) => on_done(CmdResult {
+            Err(_) => CmdResult {
                 code: -1,
                 stdout: String::new(),
                 stderr: "the background task panicked".to_string(),
-            }),
-        }
+            },
+        };
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        echo_result(&cmd, &refs, &r);
+        on_done(r);
     });
 }
 
@@ -238,19 +356,31 @@ where
 {
     let cmd = tezca_bin();
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        echo(&cmd, &refs, EchoState::Running, "");
+    }
     glib::spawn_future_local(async move {
-        let handle = gio::spawn_blocking(move || {
-            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            capture_stdin(&cmd, &refs, &input)
-        });
-        match handle.await {
-            Ok(r) => on_done(r),
-            Err(_) => on_done(CmdResult {
+        let worker = {
+            let cmd = cmd.clone();
+            let args = args.clone();
+            // `input` is the secret; it goes down the pipe and is never echoed.
+            gio::spawn_blocking(move || {
+                let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+                capture_stdin(&cmd, &refs, &input)
+            })
+        };
+        let r = match worker.await {
+            Ok(r) => r,
+            Err(_) => CmdResult {
                 code: -1,
                 stdout: String::new(),
                 stderr: "the background task panicked".to_string(),
-            }),
-        }
+            },
+        };
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        echo_result(&cmd, &refs, &r);
+        on_done(r);
     });
 }
 
@@ -491,4 +621,47 @@ fn config_pairs(args: &[&str]) -> Vec<(String, String)> {
 /// looks like.
 pub fn hypr_get(opt: &str) -> Option<String> {
     tezca_out(&["hypr", "get", opt]).filter(|v| v != "[[EMPTY]]")
+}
+
+// ---------------------------------------------------------------------------
+// Session identity — the sidebar footer card
+// ---------------------------------------------------------------------------
+
+/// What this machine is, in one card: `("quetzalcoatl", "Hyprland 0.51.1 · 3 displays")`.
+///
+/// Every field is best-effort and degrades to something true rather than to a
+/// placeholder: no compositor answer means the version is simply left out, not
+/// guessed at.
+pub fn session_summary() -> (String, String) {
+    let host = std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "this machine".to_string());
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(v) = hyprland_version() {
+        parts.push(format!("Hyprland {v}"));
+    }
+    let n = monitors().len();
+    if n > 0 {
+        parts.push(format!("{n} display{}", if n == 1 { "" } else { "s" }));
+    }
+    (host, parts.join(" · "))
+}
+
+/// The compositor's version string, e.g. `0.51.1`.
+///
+/// `hyprctl version` prints a multi-line banner whose exact shape has changed
+/// across releases; the one stable thing in it is a `vMAJOR.MINOR…` tag, so we
+/// look for that rather than for a fixed line or field position.
+fn hyprland_version() -> Option<String> {
+    let out = output("hyprctl", &["version"])?;
+    out.split(|c: char| c.is_whitespace() || c == ',')
+        .find_map(|tok| {
+            let v = tok.trim_start_matches('v');
+            (v != tok && v.starts_with(|c: char| c.is_ascii_digit()))
+                .then(|| v.trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.').to_string())
+        })
+        .filter(|v| !v.is_empty())
 }

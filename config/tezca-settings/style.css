@@ -467,3 +467,192 @@ button.tz-statusclose:hover { color: @tz_text; }
     font-size: 64px;
     font-weight: 700;
 }
+
+/* --- Sidebar group headings ---------------------------------------------
+ *
+ * Twelve entries is past the point where a flat list reads as a list; the
+ * headings turn it into three short ones you can scan without reading.
+ */
+.tz-navgroup {
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: @tz_faint;
+    padding: 14px 12px 6px 12px;
+}
+
+/* --- Sidebar footer: which machine this is ------------------------------ */
+.tz-session {
+    border-top: 1px solid alpha(@tz_muted, 0.14);
+    padding: 12px 14px;
+}
+.tz-session-dot {
+    min-width: 6px;
+    min-height: 6px;
+    border-radius: 6px;
+    background-color: @tz_accent;
+}
+.tz-session-host {
+    font-size: 9.5pt;
+    font-weight: 600;
+    color: @tz_subtext;
+}
+.tz-session-meta {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 8.5pt;
+    color: @tz_faint;
+}
+
+/* --- Header omnibox ------------------------------------------------------
+ *
+ * A button that reads as a field: it opens the palette rather than accepting
+ * text, so it must not look like somewhere you can start typing in place.
+ */
+button.tz-omni {
+    background-color: alpha(@tz_base, 0.55);
+    border: 1px solid alpha(@tz_muted, 0.18);
+    border-radius: 10px;
+    padding: 4px 10px;
+    min-height: 30px;
+    box-shadow: none;
+}
+button.tz-omni:hover {
+    border-color: alpha(@tz_accent, 0.45);
+    background-color: alpha(@tz_base, 0.7);
+}
+button.tz-omni label {
+    color: @tz_muted;
+    font-weight: 400;
+    font-size: 10pt;
+}
+.tz-omni-icon {
+    color: @tz_muted;
+    -gtk-icon-size: 14px;
+}
+button.tz-omni .tz-omni-key {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 8pt;
+    color: @tz_faint;
+    border: 1px solid alpha(@tz_muted, 0.2);
+    border-radius: 5px;
+    padding: 2px 6px;
+}
+
+/* --- Command palette (Ctrl+K) ------------------------------------------- */
+.tz-palette-scrim {
+    background-color: alpha(@tz_base, 0.62);
+}
+.tz-palette {
+    background-color: alpha(@tz_surface, 0.98);
+    border: 1px solid alpha(@tz_muted, 0.26);
+    border-radius: 14px;
+    padding: 6px;
+}
+entry.tz-palette-entry {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid alpha(@tz_muted, 0.16);
+    border-radius: 0;
+    box-shadow: none;
+    color: @tz_text;
+    font-size: 12pt;
+    padding: 10px 8px;
+    margin-bottom: 4px;
+}
+entry.tz-palette-entry:focus {
+    box-shadow: none;
+    border-bottom-color: alpha(@tz_accent, 0.5);
+}
+.tz-palette-list {
+    background: transparent;
+}
+.tz-palette-list > row.tz-palette-row {
+    border-radius: 9px;
+    padding: 8px 10px;
+    margin: 1px 2px;
+}
+.tz-palette-list > row.tz-palette-row:selected {
+    background-color: alpha(@tz_accent, 0.16);
+}
+.tz-palette-page {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 8.5pt;
+    color: @tz_faint;
+}
+.tz-palette-label {
+    font-size: 10.5pt;
+    color: @tz_text;
+}
+.tz-palette-hint {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 8.5pt;
+    color: @tz_muted;
+}
+.tz-palette-foot {
+    border-top: 1px solid alpha(@tz_muted, 0.14);
+    padding: 8px 10px 4px 10px;
+}
+.tz-palette-tip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 8pt;
+    color: @tz_faint;
+}
+
+/* --- CLI echo footer -----------------------------------------------------
+ *
+ * The panel is a front end for the `tezca` CLI, and this is where it says so:
+ * every click prints the invocation it just made, so the GUI teaches the
+ * command rather than hiding it.
+ */
+.tz-echo {
+    background-color: alpha(@tz_surface, 0.55);
+    border-top: 1px solid alpha(@tz_muted, 0.16);
+    padding: 6px 16px;
+    min-height: 28px;
+}
+.tz-echo-tag {
+    font-size: 7.5pt;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: @tz_faint;
+}
+.tz-echo-cmd {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9pt;
+    color: @tz_accent;
+}
+.tz-echo-state {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 8.5pt;
+    color: @tz_faint;
+}
+.tz-echo-state.ok { color: @tz_accent; }
+.tz-echo-state.err { color: @tz_urgent; }
+.tz-echo-state.busy { color: @tz_muted; }
+.tz-echo-state.sent { color: @tz_faint; }
+
+/* --- Displays: arrangement status --------------------------------------- */
+.tz-arrange-status {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 8.5pt;
+    color: @tz_faint;
+}
+.tz-arrange-status.tz-warn {
+    color: @tz_urgent;
+    font-weight: 600;
+}
+
+/* --- Bar module editor: drag affordances -------------------------------- */
+/* Beats `.tz-modrow > label`, which is the more specific selector. */
+.tz-modrow > label.tz-modgrip {
+    color: @tz_faint;
+    font-size: 10pt;
+}
+.tz-moddrop {
+    color: @tz_faint;
+    font-size: 9pt;
+    padding: 10px 0;
+    border: 1px dashed alpha(@tz_muted, 0.3);
+    border-radius: 8px;
+}

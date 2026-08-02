@@ -434,3 +434,36 @@ button.tz-statusclose {
     color: @tz_muted;
 }
 button.tz-statusclose:hover { color: @tz_text; }
+
+/* --- Displays: arrangement canvas ------------------------------------------
+ *
+ * The monitors themselves are painted in arrange.rs, which resolves @tz_surface,
+ * @tz_accent and friends from this same stylesheet — so a theme switch repaints
+ * the canvas with everything else. Only the well they sit in is styled here.
+ */
+.tz-arrange {
+    background-color: alpha(@tz_base, 0.55);
+    border: 1px solid alpha(@tz_faint, 0.55);
+    border-radius: 10px;
+}
+.tz-arrange:focus-visible {
+    border-color: alpha(@tz_accent, 0.6);
+    box-shadow: 0 0 0 3px alpha(@tz_accent, 0.18);
+}
+
+/* --- Displays: identify overlay --------------------------------------------
+ *
+ * One of these is drawn centred on each physical screen. Deliberately large: it
+ * is read from across a desk, at a glance, in the two seconds it is up.
+ */
+.tz-identify-frame {
+    background-color: alpha(@tz_base, 0.88);
+    border: 2px solid @tz_accent;
+    border-radius: 18px;
+    padding: 28px 56px;
+}
+.tz-identify {
+    color: @tz_text;
+    font-size: 64px;
+    font-weight: 700;
+}

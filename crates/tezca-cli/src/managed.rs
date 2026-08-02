@@ -56,8 +56,8 @@ const HEADER: &str = "\
 -- survive only if they keep the shape below, and will be reformatted.
 --
 -- This is DATA, not config code. It must stay a bare `return { … }` table:
--- option keys spelled exactly as `hyprctl getoption` spells them, and an
--- optional `monitors` array. hyprland.lua feeds it through
+-- option keys spelled exactly as `hyprctl getoption` spells them, plus optional
+-- `monitors` and `workspaces` arrays. hyprland.lua feeds it through
 -- conf.d/util.lua:apply_overrides, which validates each entry and drops only the
 -- ones Hyprland rejects — so a stale key cannot cost you the session.
 --
@@ -93,12 +93,32 @@ pub struct Monitor {
     pub disabled: bool,
 }
 
+/// One `hl.workspace_rule` entry: which monitor a workspace lives on.
+///
+/// The shipped semantic sets live in `conf.d/monitors.lua` (DESIGN.md §11) and
+/// stay there. An entry here is a machine-local *rebinding* of one workspace,
+/// written when you move a workspace to another monitor from the Displays page —
+/// applied after the fragment, so it wins for that workspace and leaves the rest
+/// of the shipped layout alone.
+///
+/// Field names were probed the same way [`Monitor`]'s were: `hl.workspace_rule`
+/// rejects an unknown field outright rather than ignoring it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WorkspaceRule {
+    pub workspace: String,
+    pub monitor: String,
+    /// Emitted only when true — `default = false` is not the same as absent to
+    /// Hyprland, and absent is what an unrebound workspace should look like.
+    pub default: bool,
+}
+
 /// The whole generated store, in memory.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Store {
     /// (option path, Lua value literal), insertion-ordered for a stable file.
     options: Vec<(String, String)>,
     monitors: Vec<Monitor>,
+    workspaces: Vec<WorkspaceRule>,
 }
 
 fn path() -> Result<PathBuf, String> {
@@ -201,16 +221,46 @@ pub fn set_monitor(m: Monitor) -> Result<(), String> {
     write(&store)
 }
 
+/// Every persisted workspace rebinding, in file order.
+pub fn workspace_rules() -> Vec<WorkspaceRule> {
+    read().map(|s| s.workspaces).unwrap_or_default()
+}
+
+/// Upsert one workspace rebinding, keyed by workspace id.
+pub fn set_workspace_rule(r: WorkspaceRule) -> Result<(), String> {
+    if [&r.workspace, &r.monitor].iter().any(|f| f.contains(['\n', '\r', '"', '\\'])) {
+        return Err(format!("refusing to write a malformed workspace override: {r:?}"));
+    }
+    if r.workspace.is_empty() {
+        return Err("a workspace override needs a workspace id".into());
+    }
+    let mut store = read()?;
+    match store.workspaces.iter_mut().find(|e| e.workspace == r.workspace) {
+        Some(slot) => *slot = r,
+        None => store.workspaces.push(r),
+    }
+    write(&store)
+}
+
+/// Total entries across all three sections, for change detection.
+fn len(store: &Store) -> usize {
+    store.options.len() + store.monitors.len() + store.workspaces.len()
+}
+
 /// Remove the override with the given key (no-op if absent). `monitor:<NAME>`
-/// addresses a monitor entry; anything else is an option path.
+/// addresses a monitor entry, `workspace:<ID>` a workspace rebinding; anything
+/// else is an option path.
 pub fn remove(key: &str) -> Result<(), String> {
     let mut store = read()?;
-    let before = store.options.len() + store.monitors.len();
-    match key.strip_prefix("monitor:") {
-        Some(name) => store.monitors.retain(|m| m.output != name),
-        None => store.options.retain(|(k, _)| k != key),
+    let before = len(&store);
+    if let Some(name) = key.strip_prefix("monitor:") {
+        store.monitors.retain(|m| m.output != name);
+    } else if let Some(id) = key.strip_prefix("workspace:") {
+        store.workspaces.retain(|w| w.workspace != id);
+    } else {
+        store.options.retain(|(k, _)| k != key);
     }
-    if store.options.len() + store.monitors.len() == before {
+    if len(&store) == before {
         return Ok(());
     }
     write(&store)
@@ -222,10 +272,12 @@ pub fn remove_where(pred: impl Fn(&str) -> bool) -> Result<(), String> {
     let mut store = read()?;
     store.options.retain(|(k, _)| !pred(k));
     store.monitors.retain(|m| !pred(&format!("monitor:{}", m.output)));
+    store.workspaces.retain(|w| !pred(&format!("workspace:{}", w.workspace)));
     write(&store)
 }
 
-/// The keys currently persisted, options first then `monitor:<NAME>` entries.
+/// The keys currently persisted: options, then `monitor:<NAME>`, then
+/// `workspace:<ID>` entries.
 pub fn keys() -> Vec<String> {
     let store = read().unwrap_or_default();
     store
@@ -233,6 +285,7 @@ pub fn keys() -> Vec<String> {
         .iter()
         .map(|(k, _)| k.clone())
         .chain(store.monitors.iter().map(|m| format!("monitor:{}", m.output)))
+        .chain(store.workspaces.iter().map(|w| format!("workspace:{}", w.workspace)))
         .collect()
 }
 
@@ -313,6 +366,19 @@ pub(crate) fn monitor_fields(m: &Monitor) -> String {
     s
 }
 
+/// The `hl.workspace_rule` field list for `r`, without the enclosing braces.
+///
+/// Shared with the live-apply snippet for the same reason [`monitor_fields`] is:
+/// the rebinding applied now and the one applied at the next reload have to be
+/// spelled identically, or reloading would visibly move a workspace.
+pub(crate) fn workspace_fields(r: &WorkspaceRule) -> String {
+    let mut s = format!("workspace = \"{}\", monitor = \"{}\"", r.workspace, r.monitor);
+    if r.default {
+        s.push_str(", default = true");
+    }
+    s
+}
+
 /// Recover the value a caller originally passed from its Lua literal.
 fn unlua_value(lit: &str) -> String {
     let t = lit.trim();
@@ -348,6 +414,17 @@ fn render(store: &Store) -> String {
         s.push_str("    },\n");
     }
 
+    if !store.workspaces.is_empty() {
+        if !store.options.is_empty() || !store.monitors.is_empty() {
+            s.push('\n');
+        }
+        s.push_str("    workspaces = {\n");
+        for w in &store.workspaces {
+            s.push_str(&format!("        {{ {} }},\n", workspace_fields(w)));
+        }
+        s.push_str("    },\n");
+    }
+
     s.push_str("}\n");
     s
 }
@@ -358,8 +435,15 @@ fn render(store: &Store) -> String {
 /// ever sees are ones we wrote, so the grammar it must accept is exactly the one
 /// above. Anything it does not recognise is ignored rather than guessed at.
 fn parse(text: &str) -> Result<Store, String> {
+    #[derive(PartialEq)]
+    enum Section {
+        None,
+        Monitors,
+        Workspaces,
+    }
+
     let mut store = Store::default();
-    let mut in_monitors = false;
+    let mut section = Section::None;
 
     for raw in text.lines() {
         let line = raw.trim();
@@ -367,16 +451,33 @@ fn parse(text: &str) -> Result<Store, String> {
             continue;
         }
         if line.starts_with("monitors") {
-            in_monitors = true;
+            section = Section::Monitors;
             continue;
         }
-        if in_monitors {
+        if line.starts_with("workspaces") {
+            section = Section::Workspaces;
+            continue;
+        }
+        if section != Section::None {
+            // The section's own closing brace. The outer table's final `}` also
+            // lands here on a well-formed file, where it is harmless: the last
+            // section has already been closed and this branch is not reached.
             if line.starts_with('}') {
-                in_monitors = false;
+                section = Section::None;
                 continue;
             }
-            if let Some(m) = parse_monitor_entry(line) {
-                store.monitors.push(m);
+            match section {
+                Section::Monitors => {
+                    if let Some(m) = parse_monitor_entry(line) {
+                        store.monitors.push(m);
+                    }
+                }
+                Section::Workspaces => {
+                    if let Some(w) = parse_workspace_entry(line) {
+                        store.workspaces.push(w);
+                    }
+                }
+                Section::None => unreachable!(),
             }
             continue;
         }
@@ -415,6 +516,23 @@ pub(crate) fn parse_monitor_entry(line: &str) -> Option<Monitor> {
         }
     }
     (!m.output.is_empty()).then_some(m)
+}
+
+/// Parse one rendered `{ workspace = …, monitor = …[, default = true] }` entry.
+pub(crate) fn parse_workspace_entry(line: &str) -> Option<WorkspaceRule> {
+    let inner = line.trim().trim_start_matches('{').trim_end_matches(',').trim_end_matches('}');
+    let mut r = WorkspaceRule::default();
+    for field in inner.split(',') {
+        let Some((k, v)) = field.split_once('=') else { continue };
+        let v = unlua_value(v.trim());
+        match k.trim() {
+            "workspace" => r.workspace = v,
+            "monitor" => r.monitor = v,
+            "default" => r.default = v == "true",
+            _ => {}
+        }
+    }
+    (!r.workspace.is_empty()).then_some(r)
 }
 
 // --- migration off the hyprlang block ---------------------------------------
@@ -540,7 +658,7 @@ mod tests {
             mirror: "DP-1".into(),
             disabled: true,
         };
-        let store = Store { options: vec![], monitors: vec![m.clone()] };
+        let store = Store { monitors: vec![m.clone()], ..Default::default() };
         assert_eq!(parse(&render(&store)).unwrap(), store);
         // …and rewriting stays a fixed point with the new fields present.
         assert_eq!(render(&parse(&render(&store)).unwrap()), render(&store));
@@ -568,10 +686,50 @@ mod tests {
                 ("general:col.active_border".into(), "\"rgba(3FB8AFff)\"".into()),
             ],
             monitors: vec![mon("DP-1", "3440x1440@165")],
+            ..Default::default()
         };
         let text = render(&store);
         assert!(text.contains("return {"));
         assert_eq!(parse(&text).unwrap(), store);
+    }
+
+    #[test]
+    fn a_workspace_rebinding_round_trips_through_the_file() {
+        let store = Store {
+            options: vec![("decoration:rounding".into(), "14".into())],
+            monitors: vec![mon("DP-1", "3440x1440@165")],
+            workspaces: vec![
+                WorkspaceRule { workspace: "1".into(), monitor: "DP-1".into(), default: true },
+                WorkspaceRule { workspace: "4".into(), monitor: "DP-2".into(), default: false },
+            ],
+        };
+        let text = render(&store);
+        assert_eq!(parse(&text).unwrap(), store);
+        assert_eq!(render(&parse(&text).unwrap()), text);
+    }
+
+    #[test]
+    fn an_unrebound_workspace_omits_default_rather_than_writing_false() {
+        // `default = false` is not the same as absent to Hyprland: writing it
+        // would claim "this workspace is explicitly not the default", which is a
+        // different statement from leaving the shipped §11 layout to decide.
+        let r = WorkspaceRule { workspace: "4".into(), monitor: "DP-2".into(), default: false };
+        assert_eq!(workspace_fields(&r), r#"workspace = "4", monitor = "DP-2""#);
+    }
+
+    #[test]
+    fn a_file_with_no_workspaces_section_still_reads_as_before() {
+        // The section is additive: an overrides.lua written by the previous
+        // version has to keep parsing, and upgrading must not rewrite it.
+        let old = "\nreturn {\n    monitors = {\n        \
+                   { output = \"DP-1\", mode = \"3440x1440@165\", position = \"0x0\", scale = 1 },\n\
+                   \x20   },\n}\n";
+        let store = parse(old).unwrap();
+        assert!(store.workspaces.is_empty());
+        assert_eq!(
+            render(&store),
+            render(&Store { monitors: store.monitors.clone(), ..Default::default() })
+        );
     }
 
     #[test]
@@ -607,8 +765,10 @@ mod tests {
 
     #[test]
     fn re_setting_a_key_replaces_its_entry_instead_of_appending() {
-        let mut store =
-            Store { options: vec![("decoration:rounding".into(), "12".into())], monitors: vec![] };
+        let mut store = Store {
+            options: vec![("decoration:rounding".into(), "12".into())],
+            ..Default::default()
+        };
         let key = "decoration:rounding";
         match store.options.iter_mut().find(|(k, _)| k == key) {
             Some(slot) => slot.1 = "20".into(),

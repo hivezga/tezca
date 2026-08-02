@@ -241,19 +241,87 @@ pub fn profile_name(v: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// A connector name as accepted on the command line (`DP-1`, `HDMI-A-1`, `eDP-1`).
+/// A monitor selector as accepted on the command line: a connector name
+/// (`DP-1`, `HDMI-A-1`, `eDP-1`) or a `desc:` form (`desc:LG Electronics LG
+/// ULTRAGEAR 304MXTC6X433`).
+///
+/// The `desc:` form is what "remember by description" persists, so settings
+/// follow a monitor across ports instead of being stranded when it moves. Its
+/// payload is a vendor string, not a connector, so the character rule below is
+/// deliberately looser — but not unbounded, see [`monitor_desc`].
 pub fn monitor_name(v: &str) -> Result<(), String> {
     let n = v.trim();
     if n.is_empty() {
         return Err("monitor name cannot be empty".to_string());
     }
+    if let Some(desc) = n.strip_prefix("desc:") {
+        return monitor_desc(desc);
+    }
     if let Some(bad) = n.chars().find(|c| !(c.is_ascii_alphanumeric() || *c == '-' || *c == '_')) {
         return Err(format!(
             "invalid character {bad:?} in monitor name {n:?} — connectors are letters, \
-             digits, '-' and '_' (e.g. DP-1, HDMI-A-1)"
+             digits, '-' and '_' (e.g. DP-1, HDMI-A-1), or use desc:<description>"
         ));
     }
     Ok(())
+}
+
+/// The payload of a `desc:` monitor selector.
+///
+/// Descriptions are free-form vendor strings with spaces in them, so most of
+/// `monitor_name`'s rule does not apply. Four characters are still refused:
+///
+///   * `"` and `\` would break out of the generated `output = "…"` literal;
+///   * a newline would inject a second line into the table;
+///   * a comma would split the entry, because `managed::parse_monitor_entry`
+///     reads a rendered monitor by splitting its fields on `,`. Nothing stops a
+///     vendor shipping a description with a comma in it, so this is refused up
+///     front with a real message rather than silently mangled on the next read.
+pub fn monitor_desc(v: &str) -> Result<(), String> {
+    let d = v.trim();
+    if d.is_empty() {
+        return Err("desc: needs a description after it".to_string());
+    }
+    if let Some(bad) = d.chars().find(|c| ",\"\\\n\r".contains(*c)) {
+        return Err(format!(
+            "invalid character {bad:?} in monitor description {d:?} — a description \
+             cannot contain a comma, quote, backslash or newline; use the connector \
+             name for this monitor instead"
+        ));
+    }
+    if d.chars().any(|c| c.is_control()) {
+        return Err(format!("control character in monitor description {d:?}"));
+    }
+    Ok(())
+}
+
+/// A workspace id as accepted for a rebinding: a positive integer, or one of
+/// Hyprland's named forms (`special:magic`, `name:foo`).
+pub fn workspace_id(v: &str) -> Result<(), String> {
+    let w = v.trim();
+    if w.is_empty() {
+        return Err("workspace id cannot be empty".to_string());
+    }
+    if w.chars().all(|c| c.is_ascii_digit()) {
+        return if w.trim_start_matches('0').is_empty() {
+            Err("workspace ids start at 1".to_string())
+        } else {
+            Ok(())
+        };
+    }
+    if let Some(rest) = w.strip_prefix("special:").or_else(|| w.strip_prefix("name:")) {
+        if rest.is_empty() {
+            return Err(format!("{w:?} needs a name after the prefix"));
+        }
+        if let Some(bad) = rest.chars().find(|c| !(c.is_ascii_alphanumeric() || "-_".contains(*c)))
+        {
+            return Err(format!("invalid character {bad:?} in workspace name {rest:?}"));
+        }
+        return Ok(());
+    }
+    Err(format!(
+        "invalid workspace id {w:?} — use a number (1, 2, …), special:<name> or name:<name>"
+    ))
 }
 
 // --- network ---------------------------------------------------------------
@@ -555,6 +623,39 @@ mod tests {
     fn accepts_real_connector_names() {
         for n in ["DP-1", "DP-3", "HDMI-A-1", "eDP-1", "DVI-D-1"] {
             assert!(monitor_name(n).is_ok(), "{n:?} should be a valid connector");
+        }
+    }
+
+    #[test]
+    fn accepts_the_descriptions_this_machine_actually_reports() {
+        // Straight out of `hyprctl monitors -j` on the dev box.
+        for d in [
+            "desc:Xiaomi Corporation Mi monitor 5505810021466",
+            "desc:ASUSTek COMPUTER INC ASUS VG32V 0x0001FBAA",
+            "desc:LG Electronics LG ULTRAGEAR 304MXTC6X433",
+        ] {
+            assert!(monitor_name(d).is_ok(), "{d:?} should be a valid desc selector");
+        }
+    }
+
+    #[test]
+    fn rejects_a_description_that_would_survive_writing_but_not_reading_back() {
+        // A comma renders into valid Lua, so this cannot be caught at write time
+        // — it corrupts on the next parse, when the entry is split on ','.
+        assert!(monitor_name("desc:Acme Corp, Ltd. Monitor").is_err());
+        assert!(monitor_name("desc:Acme \"X\"").is_err());
+        assert!(monitor_name("desc:").is_err());
+        // …and the connector rule still rejects what it always did.
+        assert!(monitor_name("DP-1, 1x1, 0x0, 1").is_err());
+    }
+
+    #[test]
+    fn workspace_ids_cover_the_numeric_and_named_forms() {
+        for w in ["1", "10", "special:magic", "name:mail"] {
+            assert!(workspace_id(w).is_ok(), "{w:?} should be a valid workspace id");
+        }
+        for w in ["", "0", "00", "-1", "1.5", "special:", "1, monitor:DP-1", "name:a b"] {
+            assert!(workspace_id(w).is_err(), "{w:?} should be rejected");
         }
     }
 }

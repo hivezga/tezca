@@ -62,6 +62,20 @@ pub fn set_monitor(m: &crate::managed::Monitor) -> Result<(), String> {
     eval(&lua_monitor_call(m))
 }
 
+/// Apply one workspace rebinding live.
+pub fn set_workspace_rule(r: &crate::managed::WorkspaceRule) -> Result<(), String> {
+    eval(&lua_workspace_call(r))
+}
+
+/// Run a dispatcher: `hyprctl dispatch <cmd>`.
+///
+/// For the actions that are not configuration at all — `dpms`, for one, which
+/// Hyprland exposes only as a dispatcher and so cannot be persisted the way a
+/// monitor field can.
+pub fn dispatch(cmd: &str) -> Result<(), String> {
+    hyprctl(&["dispatch", cmd]).map(|_| ())
+}
+
 /// Read the current value of an option as a normalized scalar. Handles every
 /// `hyprctl getoption` shape (int / float / custom "a b c d" / str) by taking
 /// the first whitespace token of the value after the leading `type:` label.
@@ -125,6 +139,13 @@ fn lua_config_call(option: &str, value_literal: &str) -> String {
 /// with the persisted half so the two cannot drift.
 fn lua_monitor_call(m: &crate::managed::Monitor) -> String {
     format!("hl.monitor({{ {} }})", crate::managed::monitor_fields(m))
+}
+
+/// The live-apply half of a workspace rebinding, sharing
+/// [`crate::managed::workspace_fields`] with the persisted half for the same
+/// reason [`lua_monitor_call`] shares its builder.
+fn lua_workspace_call(r: &crate::managed::WorkspaceRule) -> String {
+    format!("hl.workspace_rule({{ {} }})", crate::managed::workspace_fields(r))
 }
 
 /// True when `out` is one of hyprctl's exit-0 refusals rather than a result.

@@ -11,6 +11,7 @@
 //! `--page <appearance|displays|bar|dock|desktop|network|startup|sound|power|
 //! input|keybinds|gaming|system>` opens straight to a tab.
 
+mod arrange;
 mod backend;
 mod css;
 mod keybinds;

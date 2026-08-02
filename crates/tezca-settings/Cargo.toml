@@ -19,3 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 gtk4 = { version = "0.11", features = ["v4_10"] }
+# Only for the Displays page's "Identify" overlay: a label drawn on each physical
+# screen has to sit above everything, which under Wayland means the overlay layer
+# rather than a window the compositor is free to place wherever it likes.
+gtk4-layer-shell = "0.8"

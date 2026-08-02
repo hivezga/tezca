@@ -6,7 +6,7 @@
 //! "reset" (Desktop) rebuild their rows the same way, so no signal-blocking is
 //! needed anywhere.
 
-use crate::{backend, keybinds};
+use crate::{arrange, backend, keybinds};
 use gtk4::gdk;
 use gtk4::gio;
 use gtk4::gio::prelude::AppInfoExt;
@@ -18,6 +18,7 @@ use gtk4::{
     Switch, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -188,6 +189,118 @@ fn table_labels<'a>(table: &[(&'a str, &str)]) -> Vec<&'a str> {
     table.iter().map(|(l, _)| *l).collect()
 }
 
+fn refs(v: &[String]) -> Vec<&str> {
+    v.iter().map(String::as_str).collect()
+}
+
+/// Look a monitor's override up under whichever key it is filed under.
+///
+/// An entry keyed `desc:LG Electronics …` is the same monitor as `DP-3`, so a
+/// page that only ever asked for the connector would show "VRR: inherit" for a
+/// desc-keyed monitor that has VRR set — and switch it off on the next Apply.
+fn mon_override(cfg: &[(String, String)], m: &backend::Monitor, field: &str) -> Option<String> {
+    backend::override_for(cfg, &m.name, field).or_else(|| {
+        let desc = m.desc.trim();
+        (!desc.is_empty())
+            .then(|| backend::override_for(cfg, &format!("desc:{desc}"), field))
+            .flatten()
+    })
+}
+
+/// Whether this monitor's override is filed by description rather than connector.
+/// A property of the store, not of anything the compositor reports.
+fn is_desc_keyed(cfg: &[(String, String)], m: &backend::Monitor) -> bool {
+    let desc = m.desc.trim();
+    !desc.is_empty() && backend::override_for(cfg, &format!("desc:{desc}"), "mode").is_some()
+}
+
+/// Workspace ids currently rebound to `m`, in numeric order.
+///
+/// Only *rebindings* appear here — a workspace still following the shipped §11
+/// layout has no entry in the store and so is not listed. That is deliberate:
+/// the box shows what has been overridden, and emptying it means "stop
+/// overriding", not "unbind everything".
+fn bound_workspaces(cfg: &[(String, String)], m: &backend::Monitor) -> Vec<String> {
+    let desc = m.desc.trim();
+    let desc_key = (!desc.is_empty()).then(|| format!("desc:{desc}"));
+    let mut ids: Vec<String> = cfg
+        .iter()
+        .filter_map(|(k, v)| {
+            let rest = k.strip_prefix("workspace:")?;
+            let id = rest.strip_suffix(".monitor")?;
+            let matches = v == &m.name || desc_key.as_deref().is_some_and(|d| v == d);
+            matches.then(|| id.to_string())
+        })
+        .collect();
+    ids.sort_by_key(|id| id.parse::<i64>().unwrap_or(i64::MAX));
+    ids
+}
+
+/// Reconcile the Workspaces box against what was bound when the page was drawn:
+/// bind what was added, and hand back what was removed.
+fn sync_workspaces(monitor: &str, was: &[String], now: &str) -> Result<(), String> {
+    let now: Vec<String> = now.split_whitespace().map(str::to_string).collect();
+
+    for id in now.iter().filter(|id| !was.contains(id)) {
+        let r = backend::tezca_result(&["display", "workspace", id, monitor]);
+        if !r.ok() {
+            return Err(r.message());
+        }
+    }
+    for id in was.iter().filter(|id| !now.contains(id)) {
+        let r = backend::tezca_result(&["display", "workspace", id, "--reset"]);
+        if !r.ok() {
+            return Err(r.message());
+        }
+    }
+    Ok(())
+}
+
+/// Split the compositor's flat `WxH@R` mode list into the two controls the page
+/// shows: resolutions in the order reported (highest first), and the refresh
+/// rates each one offers.
+///
+/// An output that reports nothing — which is what a disabled one does — still
+/// gets a usable pair, so it can be switched back on.
+fn split_modes(modes: &[String]) -> (Vec<String>, HashMap<String, Vec<String>>) {
+    let mut order: Vec<String> = Vec::new();
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    for mode in modes {
+        let Some((res, rate)) = mode.split_once('@') else { continue };
+        let (res, rate) = (res.trim().to_string(), rate.trim().to_string());
+        if !map.contains_key(&res) {
+            order.push(res.clone());
+        }
+        let list = map.entry(res).or_default();
+        if !list.contains(&rate) {
+            list.push(rate);
+        }
+    }
+    if order.is_empty() {
+        order.push("preferred".to_string());
+        map.insert("preferred".to_string(), vec!["auto".to_string()]);
+    }
+    (order, map)
+}
+
+/// Display labels for a resolution's rates: `165.00` → `165 Hz`, `143.97` →
+/// `143.97 Hz`. The raw value is kept in the map and used when applying, so what
+/// reaches Hyprland is still exactly what it reported.
+fn rate_labels(rates: &HashMap<String, Vec<String>>, res: &str) -> Vec<String> {
+    rates
+        .get(res)
+        .map(|v| {
+            v.iter()
+                .map(|r| match r.parse::<f64>() {
+                    Ok(n) if (n - n.round()).abs() < 0.005 => format!("{} Hz", n.round() as i64),
+                    Ok(_) => format!("{} Hz", r.trim_end_matches('0').trim_end_matches('.')),
+                    Err(_) => r.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The full `display set` flag list that reproduces `m` exactly.
 ///
 /// Used as the *undo* for a change: every field is spelled out, so reverting
@@ -195,8 +308,8 @@ fn table_labels<'a>(table: &[(&'a str, &str)]) -> Vec<&'a str> {
 /// bit depth come from the override store (`cfg`), because the compositor cannot
 /// report either faithfully — see `backend::Monitor`.
 fn spec_args(m: &backend::Monitor, cfg: &[(String, String)]) -> Vec<String> {
-    let vrr = backend::override_for(cfg, &m.name, "vrr").unwrap_or_default();
-    let bitdepth = backend::override_for(cfg, &m.name, "bitdepth").unwrap_or_default();
+    let vrr = mon_override(cfg, m, "vrr").unwrap_or_default();
+    let bitdepth = mon_override(cfg, m, "bitdepth").unwrap_or_default();
     let mirror = if m.mirror.is_empty() { "off".to_string() } else { m.mirror.clone() };
     vec![
         "--mode".into(),
@@ -245,16 +358,61 @@ fn apply_display_confirmed(
     if res.stdout.lines().any(|l| l.contains("did not take")) {
         status.warn(&res.message());
     }
-    confirm_or_revert(window, status, monitor, revert, rebuild);
+    confirm_or_revert(window, status, monitor, vec![(monitor.to_string(), revert)], rebuild);
+}
+
+/// Apply a whole arrangement — every monitor the canvas moved — behind a single
+/// confirm-or-revert.
+///
+/// Positions are interdependent: moving one monitor is only meaningful relative
+/// to the others, so the layout is one decision and gets one dialog. Applying
+/// each drop as it happened would put a countdown on screen per monitor, and
+/// reverting one of them would leave the rest of the layout half-applied.
+fn apply_layout_confirmed(
+    window: &Window,
+    status: &Status,
+    mons: &[backend::Monitor],
+    moved: Vec<(String, i32, i32)>,
+    rebuild: &RenderCell,
+) {
+    let mut reverts: Vec<(String, Vec<String>)> = Vec::new();
+    for (name, x, y) in &moved {
+        let Some(before) = mons.iter().find(|m| m.name == *name) else { continue };
+        reverts.push((name.clone(), vec!["--pos".into(), before.pos.clone()]));
+
+        let res = backend::tezca_result(&["display", "set", name, "--pos", &format!("{x}x{y}")]);
+        if !res.ok() {
+            status.err(&res.message());
+            // Undo what already landed, so a rejected third monitor cannot leave
+            // the first two somewhere the user never agreed to.
+            for (n, args) in &reverts {
+                let mut argv: Vec<String> = vec!["display".into(), "set".into(), n.clone()];
+                argv.extend(args.clone());
+                let _ = backend::tezca_result(&argv.iter().map(String::as_str).collect::<Vec<_>>());
+            }
+            redraw(rebuild);
+            return;
+        }
+    }
+    if reverts.is_empty() {
+        return;
+    }
+    let subject = if reverts.len() == 1 {
+        reverts[0].0.clone()
+    } else {
+        format!("{} monitors", reverts.len())
+    };
+    confirm_or_revert(window, status, &subject, reverts, rebuild);
 }
 
 const REVERT_SECONDS: u32 = 15;
 
+/// `reverts` is `(monitor, `display set` flags)` for every monitor that changed.
 fn confirm_or_revert(
     window: &Window,
     status: &Status,
-    monitor: &str,
-    revert: Vec<String>,
+    subject: &str,
+    reverts: Vec<(String, Vec<String>)>,
     rebuild: &RenderCell,
 ) {
     let dialog = Window::builder()
@@ -272,7 +430,7 @@ fn confirm_or_revert(
     b.set_margin_start(20);
     b.set_margin_end(20);
 
-    let title = Label::new(Some(&format!("Keep the new settings for {monitor}?")));
+    let title = Label::new(Some(&format!("Keep the new settings for {subject}?")));
     title.add_css_class("tz-h2");
     title.set_halign(Align::Start);
     let count = Label::new(Some(&format!("Reverting in {REVERT_SECONDS} seconds…")));
@@ -303,20 +461,26 @@ fn confirm_or_revert(
         let status = status.clone();
         let dialog = dialog.clone();
         let rebuild = rebuild.clone();
-        let monitor = monitor.to_string();
         Rc::new(move || {
             if settled.replace(true) {
                 return;
             }
-            let mut args: Vec<String> = vec!["display".into(), "set".into(), monitor.clone()];
-            args.extend(revert.clone());
-            let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-            let r = backend::tezca_result(&argv);
+            // Every monitor is put back, even if one of them fails: a partial
+            // revert is the state this dialog exists to prevent.
+            let mut failed: Vec<String> = Vec::new();
+            for (monitor, revert) in &reverts {
+                let mut args: Vec<String> = vec!["display".into(), "set".into(), monitor.clone()];
+                args.extend(revert.clone());
+                let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+                if !backend::tezca_result(&argv).ok() {
+                    failed.push(monitor.clone());
+                }
+            }
             dialog.close();
-            if r.ok() {
+            if failed.is_empty() {
                 status.warn("Reverted to the previous display settings.");
             } else {
-                status.err(&format!("Could not revert: {}", r.message()));
+                status.err(&format!("Could not revert: {}", failed.join(", ")));
             }
             redraw(&rebuild);
         })
@@ -365,6 +529,73 @@ fn confirm_or_revert(
     });
 
     dialog.present();
+}
+
+/// How long the identify overlay stays up. Long enough to look up from the
+/// keyboard, short enough not to become something you have to dismiss.
+const IDENTIFY_MS: u64 = 2500;
+
+/// "Identify" — flash each monitor's connector name on that physical monitor.
+///
+/// The canvas can only ever tell you *a* rectangle is DP-3; it cannot tell you
+/// which panel on your desk that is. nwg-displays solves this the same way, and
+/// on a three-monitor desk it is the difference between arranging confidently
+/// and arranging by trial and error.
+fn identify_row(c: &Box, window: &Window, status: &Status) {
+    let row = Box::new(Orientation::Horizontal, 6);
+    row.set_halign(Align::End);
+    let btn = small_btn("Identify displays");
+    {
+        let win = window.clone();
+        let st = status.clone();
+        btn.connect_clicked(move |_| match identify(&win) {
+            0 => st.warn("No monitors to identify."),
+            n => st.ok(&format!("Labelled {n} display{}.", if n == 1 { "" } else { "s" })),
+        });
+    }
+    row.append(&btn);
+    c.append(&row);
+}
+
+/// Put a label on every connected screen, and take them all down again after
+/// [`IDENTIFY_MS`]. Returns how many were labelled.
+fn identify(parent: &Window) -> usize {
+    use gtk4_layer_shell::{Layer, LayerShell};
+
+    let Some(display) = gdk::Display::default() else { return 0 };
+    let app = parent.application();
+    let monitors = display.monitors();
+    let mut shown = 0;
+
+    for i in 0..monitors.n_items() {
+        let Some(monitor) = monitors.item(i).and_downcast::<gdk::Monitor>() else { continue };
+        let name = monitor.connector().unwrap_or_else(|| "?".into());
+
+        let label = Label::new(Some(&name));
+        label.add_css_class("tz-identify");
+        let frame = Box::new(Orientation::Vertical, 0);
+        frame.add_css_class("tz-identify-frame");
+        frame.append(&label);
+
+        let overlay = Window::builder().child(&frame).build();
+        if let Some(app) = app.as_ref() {
+            overlay.set_application(Some(app));
+        }
+        overlay.init_layer_shell();
+        overlay.set_monitor(Some(&monitor));
+        overlay.set_layer(Layer::Overlay);
+        overlay.set_namespace(Some("tezca-identify"));
+        // No anchors: the compositor centres an unanchored layer surface, which
+        // is exactly where a "this is DP-3" label belongs. Keyboard focus is
+        // never requested, so this cannot steal input from the settings window.
+        overlay.present();
+        shown += 1;
+
+        glib::timeout_add_local_once(Duration::from_millis(IDENTIFY_MS), move || {
+            overlay.close();
+        });
+    }
+    shown
 }
 
 /// Saved layouts: "both screens" vs "just the ultrawide" is one click, not four.
@@ -550,6 +781,23 @@ fn populate_displays(c: &Box, window: &Window, status: &Status, rebuild: &Render
     let cfg = backend::display_config();
     let walls = backend::wallpaper_targets();
 
+    // Arrangement first: it is the thing you came to this page to change, and
+    // every per-monitor card below it reads as detail once the layout is right.
+    if mons.len() > 1 {
+        c.append(&section_header("Arrangement"));
+        let commit: arrange::Commit = {
+            let win = window.clone();
+            let st = status.clone();
+            let rb = rebuild.clone();
+            let snapshot = mons.clone();
+            Rc::new(move |moved| {
+                apply_layout_confirmed(&win, &st, &snapshot, moved, &rb);
+            })
+        };
+        c.append(&arrange::canvas(&mons, commit));
+        identify_row(c, window, status);
+    }
+
     profiles_section(c, status, rebuild);
     night_section(c, status);
 
@@ -559,17 +807,43 @@ fn populate_displays(c: &Box, window: &Window, status: &Status, rebuild: &Render
         c.append(&hint(&m.desc));
 
         // --- Mode + scale ---------------------------------------------------
-        // A disabled output can report no modes at all; keep the control usable
+        // Resolution and refresh are two controls, not one WxH@R list: this
+        // machine's ultrawide advertises 40-odd modes, and picking "3440x1440"
+        // then "165" reads far shorter than scrolling one flat list per monitor.
+        // A disabled output can report no modes at all; keep the controls usable
         // so it can be switched back on.
-        let modes: Vec<String> =
-            if m.modes.is_empty() { vec!["preferred".to_string()] } else { m.modes.clone() };
-        let mode_refs: Vec<&str> = modes.iter().map(String::as_str).collect();
-        let dd = DropDown::from_strings(&mode_refs);
-        let current = format!("{}@{}", m.res, m.rate);
-        if let Some(i) = modes.iter().position(|x| *x == current) {
-            dd.set_selected(i as u32);
+        let (resolutions, rates) = split_modes(&m.modes);
+        let res_refs: Vec<&str> = resolutions.iter().map(String::as_str).collect();
+        let res_dd = DropDown::from_strings(&res_refs);
+        if let Some(i) = resolutions.iter().position(|r| *r == m.res) {
+            res_dd.set_selected(i as u32);
         }
-        c.append(&control_row("Resolution & refresh", &dd));
+        c.append(&control_row("Resolution", &res_dd));
+
+        let current_res = resolutions.get(res_dd.selected() as usize).cloned().unwrap_or_default();
+        let labels = rate_labels(&rates, &current_res);
+        let rate_dd = DropDown::from_strings(&refs(&labels));
+        if let Some(list) = rates.get(&current_res) {
+            if let Some(i) = list.iter().position(|r| *r == m.rate) {
+                rate_dd.set_selected(i as u32);
+            }
+        }
+        c.append(&control_row("Refresh rate", &rate_dd));
+
+        // Repopulating the rates has to happen on selection change, because the
+        // two lists are not independent: 1920x1080 on this panel offers rates
+        // 3440x1440 does not.
+        {
+            let rates = rates.clone();
+            let resolutions = resolutions.clone();
+            let rate_dd = rate_dd.clone();
+            res_dd.connect_selected_notify(move |dd| {
+                let Some(res) = resolutions.get(dd.selected() as usize) else { return };
+                let labels = rate_labels(&rates, res);
+                rate_dd.set_model(Some(&gtk4::StringList::new(&refs(&labels))));
+                rate_dd.set_selected(0);
+            });
+        }
 
         let scale = SpinButton::with_range(0.5, 3.0, 0.05);
         scale.set_digits(2);
@@ -593,17 +867,40 @@ fn populate_displays(c: &Box, window: &Window, status: &Status, rebuild: &Render
         enabled.set_active(!m.disabled);
         advbox.append(&control_row("Enabled", &enabled));
 
+        // A mode the panel does not advertise. EDIDs lie in both directions, so
+        // an explicit override is the only way to reach a mode the compositor
+        // will happily drive but never listed. Blank means "use the dropdowns".
+        let custom = Entry::new();
+        custom.set_placeholder_text(Some("e.g. 3440x1440@144 — overrides the pickers"));
+        custom.set_hexpand(true);
+        if let Some(stored) = mon_override(&cfg, m, "mode") {
+            // Only surface it when it is genuinely not one of the offered modes,
+            // otherwise every monitor would show a pre-filled custom box.
+            if !m.modes.contains(&stored) {
+                custom.set_text(&stored);
+            }
+        }
+        advbox.append(&control_row("Custom mode", &custom));
+
+        // Which key the override is filed under. Off = the connector (DP-1), on =
+        // the panel's description, which follows it to another port.
+        let by_desc = Switch::new();
+        by_desc.set_valign(Align::Center);
+        by_desc.set_active(is_desc_keyed(&cfg, m));
+        by_desc.set_sensitive(!m.desc.is_empty());
+        if m.desc.is_empty() {
+            by_desc.set_tooltip_text(Some("This output reports no description to remember it by."));
+        }
+        advbox.append(&control_row("Remember by description", &by_desc));
+
         let vrr = DropDown::from_strings(&table_labels(VRR_MODES));
-        vrr.set_selected(table_index(
-            VRR_MODES,
-            &backend::override_for(&cfg, &m.name, "vrr").unwrap_or_default(),
-        ));
+        vrr.set_selected(table_index(VRR_MODES, &mon_override(&cfg, m, "vrr").unwrap_or_default()));
         advbox.append(&control_row("Adaptive sync (VRR)", &vrr));
 
         let depth = DropDown::from_strings(&table_labels(BITDEPTHS));
         depth.set_selected(table_index(
             BITDEPTHS,
-            &backend::override_for(&cfg, &m.name, "bitdepth").unwrap_or_default(),
+            &mon_override(&cfg, m, "bitdepth").unwrap_or_default(),
         ));
         advbox.append(&control_row("Colour depth", &depth));
 
@@ -638,31 +935,65 @@ fn populate_displays(c: &Box, window: &Window, status: &Status, rebuild: &Render
         posrow.append(&pos_y);
         advbox.append(&control_row("Position (x, y)", &posrow));
 
+        // All four sides, not just "right of": the CLI has supported --left-of,
+        // --above and --below since it had --right-of, and a page that offers one
+        // of the four makes the other three look impossible.
         if mons.len() > 1 {
-            let place = Box::new(Orientation::Horizontal, 6);
-            place.set_halign(Align::End);
-            for other in mons.iter().filter(|o| o.name != m.name) {
-                let btn = small_btn(&format!("Right of {}", other.name));
-                let name = m.name.clone();
-                let anchor = other.name.clone();
-                let st = status.clone();
-                let rb = rebuild.clone();
-                let win = window.clone();
-                let revert = spec_args(m, &cfg);
-                btn.connect_clicked(move |_| {
-                    apply_display_confirmed(
-                        &win,
-                        &st,
-                        &name,
-                        vec!["--right-of".to_string(), anchor.clone()],
-                        revert.clone(),
-                        &rb,
-                    );
-                });
-                place.append(&btn);
+            for (label, flag) in [
+                ("Right of", "--right-of"),
+                ("Left of", "--left-of"),
+                ("Above", "--above"),
+                ("Below", "--below"),
+            ] {
+                let place = Box::new(Orientation::Horizontal, 6);
+                place.set_halign(Align::End);
+                for other in mons.iter().filter(|o| o.name != m.name) {
+                    let btn = small_btn(&format!("{label} {}", other.name));
+                    let name = m.name.clone();
+                    let anchor = other.name.clone();
+                    let st = status.clone();
+                    let rb = rebuild.clone();
+                    let win = window.clone();
+                    let revert = spec_args(m, &cfg);
+                    btn.connect_clicked(move |_| {
+                        apply_display_confirmed(
+                            &win,
+                            &st,
+                            &name,
+                            vec![flag.to_string(), anchor.clone()],
+                            revert.clone(),
+                            &rb,
+                        );
+                    });
+                    place.append(&btn);
+                }
+                advbox.append(&place);
             }
-            advbox.append(&place);
         }
+
+        // Workspaces bound to this monitor. The shipped semantic sets live in
+        // conf.d/monitors.lua (DESIGN.md §11); anything typed here is a
+        // machine-local rebinding layered on top, and clearing the box puts the
+        // shipped binding back.
+        let ws = Entry::new();
+        ws.set_hexpand(true);
+        ws.set_placeholder_text(Some("e.g. 1 3 5 7 9 — blank leaves the shipped layout"));
+        ws.set_text(&bound_workspaces(&cfg, m).join(" "));
+        advbox.append(&control_row("Workspaces", &ws));
+
+        let dpms_row = Box::new(Orientation::Horizontal, 6);
+        dpms_row.set_halign(Align::End);
+        for state in ["off", "on"] {
+            let btn = small_btn(&format!("Blank {state}").replace("Blank on", "Wake"));
+            let name = m.name.clone();
+            let st = status.clone();
+            btn.connect_clicked(move |_| {
+                let r = backend::tezca_result(&["display", "dpms", &name, state]);
+                st.report(&r, &format!("{name} dpms {state}."));
+            });
+            dpms_row.append(&btn);
+        }
+        advbox.append(&control_row("Screen blanking", &dpms_row));
 
         adv.set_child(Some(&advbox));
         c.append(&adv);
@@ -672,9 +1003,11 @@ fn populate_displays(c: &Box, window: &Window, status: &Status, rebuild: &Render
         apply.add_css_class("tz-action");
         {
             let name = m.name.clone();
-            let modes = modes.clone();
-            let (dd, scale, orient, vrr, depth, mirror, enabled) = (
-                dd.clone(),
+            let (resolutions, rates) = (resolutions.clone(), rates.clone());
+            let (res_dd, rate_dd, custom, by_desc, ws) =
+                (res_dd.clone(), rate_dd.clone(), custom.clone(), by_desc.clone(), ws.clone());
+            let was_bound = bound_workspaces(&cfg, m);
+            let (scale, orient, vrr, depth, mirror, enabled) = (
                 scale.clone(),
                 orient.clone(),
                 vrr.clone(),
@@ -689,10 +1022,41 @@ fn populate_displays(c: &Box, window: &Window, status: &Status, rebuild: &Render
             let rb = rebuild.clone();
             let win = window.clone();
             apply.connect_clicked(move |_| {
-                let mode = modes.get(dd.selected() as usize).cloned().unwrap_or_default();
-                let change = vec![
+                // A custom mode wins outright — that is what typing one means.
+                let typed = custom.text().trim().to_string();
+                let mode = if typed.is_empty() {
+                    let res =
+                        resolutions.get(res_dd.selected() as usize).cloned().unwrap_or_default();
+                    let rate = rates
+                        .get(&res)
+                        .and_then(|v| v.get(rate_dd.selected() as usize))
+                        .cloned()
+                        .unwrap_or_default();
+                    if rate.is_empty() {
+                        res
+                    } else {
+                        format!("{res}@{rate}")
+                    }
+                } else {
+                    typed
+                };
+
+                // Workspace rebindings are applied before the monitor change, so
+                // a workspace lands on the output as it is about to be
+                // reconfigured rather than during the switch.
+                if let Err(e) = sync_workspaces(&name, &was_bound, &ws.text()) {
+                    st.err(&e);
+                    return;
+                }
+
+                let mut change = vec![
                     "--mode".to_string(),
                     mode,
+                    if by_desc.is_active() {
+                        "--by-desc".to_string()
+                    } else {
+                        "--by-connector".to_string()
+                    },
                     "--scale".to_string(),
                     format!("{:.2}", scale.value()),
                     "--pos".to_string(),
@@ -708,8 +1072,12 @@ fn populate_displays(c: &Box, window: &Window, status: &Status, rebuild: &Render
                     BITDEPTHS[depth.selected() as usize].1.to_string(),
                     "--mirror".to_string(),
                     mirror_vals.get(mirror.selected() as usize).cloned().unwrap_or_default(),
-                    if enabled.is_active() { "--on".to_string() } else { "--off".to_string() },
                 ];
+                change.push(if enabled.is_active() {
+                    "--on".to_string()
+                } else {
+                    "--off".to_string()
+                });
                 apply_display_confirmed(&win, &st, &name, change, revert.clone(), &rb);
             });
         }

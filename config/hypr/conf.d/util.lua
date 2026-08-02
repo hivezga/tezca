@@ -84,8 +84,9 @@ function M.nest(flat)
     return out
 end
 
---- Apply a flat dotted-key override table: config keys through `hl.config`,
---- and the `monitors` array (owned by `tezca display`) through `hl.monitor`.
+--- Apply a flat dotted-key override table: config keys through `hl.config`, the
+--- `monitors` array (owned by `tezca display`) through `hl.monitor`, and the
+--- `workspaces` array through `hl.workspace_rule`.
 ---
 --- Anything the compositor rejects is reported and skipped rather than allowed
 --- to abort the config — a stale key left behind by a Hyprland upgrade must not
@@ -105,10 +106,21 @@ function M.apply_overrides(overrides)
         end
     end
 
+    -- After the monitors, so a workspace can be bound to an output this very
+    -- table just brought up. Rebindings only: the shipped semantic sets in
+    -- monitors.lua stay authoritative for every workspace not named here.
+    for _, spec in ipairs(overrides.workspaces or {}) do
+        local ok, err = pcall(hl.workspace_rule, spec)
+        if not ok then
+            io.stderr:write("tezca: bad workspace override for "
+                .. tostring(spec.workspace) .. ": " .. tostring(err) .. "\n")
+        end
+    end
+
     local flat = {}
     local any = false
     for key, value in pairs(overrides) do
-        if key ~= "monitors" then
+        if key ~= "monitors" and key ~= "workspaces" then
             flat[key] = value
             any = true
         end

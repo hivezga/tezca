@@ -159,12 +159,14 @@ pub fn run(args: &[&str]) -> i32 {
         Some("config") => cmd_config(),
         Some("profile") => cmd_profile(&args[1..]),
         Some("brightness") | Some("bri") => cmd_brightness(&args[1..]),
+        Some("workspace") | Some("ws") => cmd_workspace(&args[1..]),
+        Some("dpms") => cmd_dpms(&args[1..]),
         Some("-h") | Some("--help") => {
             print_help();
             Ok(())
         }
         Some(other) => Err(format!(
-            "unknown display subcommand: {other}\n  try: list · set <name> … · reset <name> · config · profile … · brightness <name> [0-100]"
+            "unknown display subcommand: {other}\n  try: list · set <name> … · reset <name> · config · profile … · brightness <name> [0-100] · workspace <id> <name> · dpms <name> on|off"
         )),
     };
     match r {
@@ -252,6 +254,13 @@ fn cmd_config() -> Result<(), String> {
         println!("monitor:{name}.mirror = {}", m.mirror);
         println!("monitor:{name}.disabled = {}", m.disabled);
     }
+    // The Displays page needs these to show which monitor a workspace is bound
+    // to, and to tell a rebinding apart from the shipped §11 default.
+    for w in managed::workspace_rules() {
+        let id = &w.workspace;
+        println!("workspace:{id}.monitor = {}", w.monitor);
+        println!("workspace:{id}.default = {}", w.default);
+    }
     Ok(())
 }
 
@@ -274,7 +283,18 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
     // Anything already persisted wins over the live reading for the two fields
     // the compositor cannot report faithfully — otherwise `set --scale 1.25` on a
     // fullscreen-only-VRR monitor would quietly demote it to plain "on".
-    let stored = managed::monitors().into_iter().find(|m| m.output == name);
+    //
+    // An entry may be filed under either key (see `--by-desc`), and the caller
+    // names the monitor by connector either way, so look for both.
+    let persisted = managed::monitors();
+    let by_desc_key = desc_key(cur);
+    let stored = persisted
+        .iter()
+        .find(|m| m.output == name || by_desc_key.as_deref().is_some_and(|d| m.output == d))
+        .cloned();
+    // Default to however this monitor is already filed, so a plain `set --scale`
+    // does not silently move it between keys.
+    let mut by_desc = stored.as_ref().is_some_and(|m| m.output.starts_with("desc:"));
 
     // Start from the current values so unspecified fields are preserved verbatim.
     let mut mode = format!("{}@{}", cur.res, cur.rate);
@@ -293,6 +313,25 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
             "--mode" => {
                 mode = it.next().ok_or("--mode needs a value like 3440x1440@165")?.to_string()
             }
+            // Resolution and refresh are separate controls on the Displays page,
+            // because picking "3440x1440" and then "165 Hz" is a far shorter
+            // list to read than one flat WxH@R dropdown per monitor. Each edits
+            // its half of the mode and leaves the other alone.
+            "--resolution" => {
+                let v = it.next().ok_or("--resolution needs a value like 3440x1440")?;
+                let rate = mode.split_once('@').map(|(_, r)| r.to_string());
+                mode = match rate {
+                    Some(r) => format!("{v}@{r}"),
+                    None => v.to_string(),
+                };
+            }
+            "--refresh" => {
+                let v = it.next().ok_or("--refresh needs a value like 165")?;
+                let res = mode.split_once('@').map(|(r, _)| r).unwrap_or(&mode).to_string();
+                mode = format!("{res}@{v}");
+            }
+            "--by-desc" => by_desc = true,
+            "--by-connector" => by_desc = false,
             "--scale" => scale = it.next().ok_or("--scale needs a value")?.to_string(),
             "--pos" => pos = it.next().ok_or("--pos needs a value like 0x0")?.to_string(),
             "--transform" => transform = it.next().ok_or("--transform needs 0-7")?.to_string(),
@@ -348,8 +387,20 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
         }
     }
 
+    // Which key this monitor gets filed under. `desc:` follows the panel across
+    // ports; the connector name follows the port. Validated here because it is
+    // interpolated into the generated Lua exactly like the fields above.
+    let key = if by_desc {
+        desc_key(cur).ok_or_else(|| {
+            format!("'{name}' reports no description, so it cannot be remembered by one")
+        })?
+    } else {
+        name.to_string()
+    };
+    validate::monitor_name(&key)?;
+
     let m = managed::Monitor {
-        output: name.to_string(),
+        output: key.clone(),
         mode: mode.clone(),
         position: pos.clone(),
         scale: scale.clone(),
@@ -361,9 +412,19 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
     };
 
     hypr::set_monitor(&m).map_err(|e| format!("hyprctl eval monitor: {e}"))?;
+    // Drop the entry under the key we are *not* using. Leaving it behind would
+    // put two `hl.monitor` calls for one panel in the file, and the later one
+    // would silently win — so flipping the toggle would appear to do nothing.
+    let stale = if by_desc { Some(name.to_string()) } else { desc_key(cur) };
+    if let Some(stale) = stale.filter(|s| *s != key) {
+        managed::remove(&format!("monitor:{stale}"))?;
+    }
     managed::set_monitor(m)?;
 
-    let mut spec = format!("{name},{mode},{pos},{scale}");
+    // Echo the key the entry was actually filed under, not the connector it was
+    // addressed by: after `--by-desc` those differ, and the whole point of the
+    // flag is that you can see which one is in the file.
+    let mut spec = format!("{key},{mode},{pos},{scale}");
     for (label, v) in [("transform", &transform), ("vrr", &vrr), ("bitdepth", &bitdepth)] {
         let is_default_transform = label == "transform" && v == "0";
         if !v.is_empty() && !is_default_transform {
@@ -392,6 +453,104 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
             }
         }
     }
+    Ok(())
+}
+
+/// The `desc:` store key for a monitor, or `None` if it reports no description.
+///
+/// Verified against Hyprland 0.56.1: `hl.monitor{ output = "desc:…" }` is
+/// accepted and matches the panel whatever port it is on. Descriptions that
+/// cannot round-trip through the generated file are refused by
+/// [`validate::monitor_name`], not silently dropped here.
+fn desc_key(m: &Monitor) -> Option<String> {
+    let d = m.desc.trim();
+    (!d.is_empty()).then(|| format!("desc:{d}"))
+}
+
+/// `tezca display workspace <id> <monitor> [--default] [--reset]`
+///
+/// Rebinds one workspace to one monitor. The shipped semantic sets in
+/// `conf.d/monitors.lua` (DESIGN.md §11) stay authoritative for everything not
+/// named here — this writes a single-workspace override applied after them.
+fn cmd_workspace(args: &[&str]) -> Result<(), String> {
+    let id = args
+        .first()
+        .filter(|a| !a.starts_with('-'))
+        .copied()
+        .ok_or("usage: tezca display workspace <id> <monitor> [--default] | <id> --reset")?;
+    validate::workspace_id(id)?;
+
+    if args[1..].contains(&"--reset") {
+        managed::remove(&format!("workspace:{id}"))?;
+        println!("  {} workspace {id} back to the shipped layout", term::green("✓"));
+        return reload_workspaces();
+    }
+
+    let target = args
+        .get(1)
+        .filter(|a| !a.starts_with('-'))
+        .copied()
+        .ok_or("usage: tezca display workspace <id> <monitor> [--default]")?;
+    let default = args[2..].contains(&"--default");
+
+    // Resolve to whatever key the monitor's own override uses, so a workspace
+    // bound to a desc-keyed panel keeps following it across ports too.
+    let mons = monitors()?;
+    let cur = find(&mons, target).ok_or_else(|| format!("no monitor named '{target}'"))?;
+    let stored = managed::monitors();
+    let desc = desc_key(cur);
+    let key = match desc.as_deref() {
+        Some(d) if stored.iter().any(|m| m.output == d) => d.to_string(),
+        _ => cur.name.clone(),
+    };
+    validate::monitor_name(&key)?;
+
+    let r = managed::WorkspaceRule { workspace: id.to_string(), monitor: key.clone(), default };
+    hypr::set_workspace_rule(&r).map_err(|e| format!("hyprctl eval workspace_rule: {e}"))?;
+    managed::set_workspace_rule(r)?;
+
+    let suffix = if default { "  (default)" } else { "" };
+    println!("  {} workspace {id} → {}{}", term::green("✓"), term::dim(&key), term::dim(suffix));
+    Ok(())
+}
+
+/// Workspace rules only take effect for workspaces that do not exist yet, so a
+/// removal needs a reload to be visible. Say so rather than appearing to no-op.
+fn reload_workspaces() -> Result<(), String> {
+    println!(
+        "  {} run `hyprctl reload` (or relog) to pick the shipped binding back up",
+        term::dim("·")
+    );
+    Ok(())
+}
+
+/// `tezca display dpms <monitor> on|off`
+///
+/// A runtime action, not a saved setting: Hyprland has no `dpms` field on
+/// `hl.monitor` (unlike sway's output config), so there is nothing to persist.
+/// Blanking survives only until something wakes the output.
+fn cmd_dpms(args: &[&str]) -> Result<(), String> {
+    let name = args.first().copied().ok_or("usage: tezca display dpms <monitor> on|off")?;
+    let state = args.get(1).copied().ok_or("usage: tezca display dpms <monitor> on|off")?;
+    if state != "on" && state != "off" {
+        return Err(format!("dpms takes 'on' or 'off', not {state:?}"));
+    }
+    validate::monitor_name(name)?;
+
+    let mons = monitors()?;
+    find(&mons, name).ok_or_else(|| format!("no monitor named '{name}'"))?;
+    // Blanking the last live output leaves no way back but a TTY, the same
+    // hazard `set --off` guards against.
+    if state == "off" && !mons.iter().any(|m| m.name != name && !m.disabled) {
+        return Err(format!(
+            "refusing to blank '{name}': it is the only enabled monitor, and there would be \
+             no display left to wake it from"
+        ));
+    }
+
+    hypr::dispatch(&format!("dpms {state} {name}"))
+        .map_err(|e| format!("hyprctl dispatch dpms: {e}"))?;
+    println!("  {} {name} dpms {state}", term::green("✓"));
     Ok(())
 }
 
@@ -460,6 +619,13 @@ fn cmd_reset(args: &[&str]) -> Result<(), String> {
     validate::monitor_name(name)?;
     managed::remove(&format!("monitor:{name}"))?;
     if hypr::in_session() {
+        // A monitor filed under `desc:` is the same monitor: "reset DP-1" has to
+        // clear it either way, or the override would survive its own reset.
+        // Needs a live session because only the compositor knows the mapping
+        // from connector name to description.
+        if let Some(key) = monitors().ok().and_then(|ms| find(&ms, name).and_then(desc_key)) {
+            managed::remove(&format!("monitor:{key}"))?;
+        }
         hypr::reload()?;
     }
     println!("  {} reset {name} to the shipped config", term::green("✓"));
@@ -849,10 +1015,20 @@ fn print_help() {
     println!("  {}               the persisted per-monitor overrides", term::cyan("config"));
     println!("  {}     save/apply/list/rm a monitor layout", term::cyan("profile <sub> [name]"));
     println!("  {}   read / set DDC/CI brightness (0-100)", term::cyan("brightness <name> [val]"));
+    println!(
+        "  {}  bind a workspace to a monitor ({})",
+        term::cyan("workspace <id> <name>"),
+        term::dim("--reset to unbind")
+    );
+    println!("  {}      blank / wake an output (not persisted)", term::cyan("dpms <name> on|off"));
     println!();
     println!("{}", term::bold("SET FLAGS"));
     for (f, d) in [
         ("--mode WxH@R", "resolution + refresh rate"),
+        ("--resolution WxH", "resolution only, keeping the refresh rate"),
+        ("--refresh R", "refresh rate only, keeping the resolution"),
+        ("--by-desc", "remember by monitor description, not connector"),
+        ("--by-connector", "remember by connector name (the default)"),
         ("--scale S", "fractional scale, or 'auto'"),
         ("--pos XxY", "logical position"),
         ("--transform 0-7", "rotation / flip"),

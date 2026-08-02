@@ -46,10 +46,21 @@
 //! body rather than a single dispatcher. It is listed (its combo is on one line)
 //! but cannot be rebound, because this line-oriented reader cannot reproduce the
 //! body into the override layer.
+//!
+//! ## Upgrading from the hyprlang override layer
+//!
+//! Before the Lua cutover this layer was `~/.config/tezca/keybinds.conf`, holding
+//! hyprlang `unbind`/`bind` pairs. [`migrate_legacy`] carries one into
+//! `keybinds.lua` on first run. It cannot be a copy: entries are keyed by a line
+//! number in a shipped map that was itself rewritten (the two disagree — `CTRL, Q`
+//! is line 16 of `keybinds.conf` and line 23 of `keybinds.lua`), and dispatchers
+//! changed shape (`exec, foo` → `hl.dsp.exec_cmd("foo")`). So entries are placed
+//! by the combo they recorded in `was=`, and anything that cannot be re-expressed
+//! faithfully is reported rather than guessed at.
 
 use crate::{atomic, hypr, repo, term, validate};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Header for the generated override file. The whole file is generated, so this
 /// points hand edits at `conf.d/local.lua` instead.
@@ -95,14 +106,26 @@ fn backup_path() -> Result<PathBuf, String> {
 /// fresh install. Returns whether it created anything. Called by `tezca link`.
 pub fn seed() -> Result<bool, String> {
     let p = override_path()?;
-    if p.exists() {
-        return Ok(false);
-    }
-    atomic::write(&p, OVERRIDE_HEADER)?;
-    Ok(true)
+    let created = if p.exists() {
+        false
+    } else {
+        atomic::write(&p, OVERRIDE_HEADER)?;
+        true
+    };
+    // `tezca link` is the upgrade path, so this is where a pre-Lua override file
+    // gets carried over. Runs after the seed, since the migration keys off
+    // whether the Lua layer holds any *entries*, not whether the file exists.
+    migrate_legacy()?;
+    Ok(created)
 }
 
 pub fn run(args: &[&str]) -> i32 {
+    // Before anything reads the override layer. Reported but not fatal: a
+    // malformed pre-Lua file should not cost you `list`, which needs only the
+    // shipped map.
+    if let Err(e) = migrate_legacy() {
+        eprintln!("  {} could not migrate the pre-Lua keybind overrides: {e}", term::yellow("!"));
+    }
     let r = match args.first().copied() {
         None | Some("list") => cmd_list(args.get(1..).unwrap_or(&[])),
         Some("rebind") => return cmd_rebind(&args[1..]),
@@ -452,6 +475,271 @@ fn warn_stale(stale: &[Ovr]) {
             format_combo(&o.was_mods, &o.was_key)
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Migrating the pre-Lua override layer
+// ---------------------------------------------------------------------------
+
+/// Appended to the pre-Lua override file once its entries have been carried over,
+/// so a later `keybind reset` cannot resurrect them.
+///
+/// A marker rather than emptying the file, which is what `managed.rs` does to the
+/// old option store. The hyprlang tree is still shipped as a rollback (rename
+/// `hyprland.lua` and relog — see its header), and `hyprland.conf` still sources
+/// this file, so blanking it would mean rolling back silently lost your rebinds.
+/// It is a comment, so neither hyprlang nor [`parse_legacy_overrides`] sees it.
+const MIGRATED_MARKER: &str = "# migrated to ~/.config/tezca/keybinds.lua by `tezca keybind`";
+
+/// The pre-Lua override layer. Read once by [`migrate_legacy`]; never rewritten
+/// beyond appending [`MIGRATED_MARKER`].
+fn legacy_override_path() -> Result<PathBuf, String> {
+    Ok(repo::config_home()?.join("tezca").join("keybinds.conf"))
+}
+
+/// The pre-Lua shipped map, still in the repo as the hyprlang rollback.
+fn legacy_base_path() -> Result<PathBuf, String> {
+    Ok(repo::config_home()?.join("hypr").join("conf.d").join("keybinds.conf"))
+}
+
+/// One entry of the pre-Lua override layer.
+#[derive(Clone, Debug, PartialEq)]
+struct LegacyOvr {
+    /// Line in the *pre-Lua* shipped map. Used only to look that map up when
+    /// deciding whether the action had been customised — never carried over as
+    /// the new entry's line, because the two maps disagree about numbering
+    /// (`CTRL, Q` is line 16 of keybinds.conf and line 23 of keybinds.lua).
+    line: usize,
+    was_mods: String,
+    was_key: String,
+    mods: String,
+    key: String,
+    /// Hyprlang dispatcher plus arguments, e.g. `exec, uwsm app -- brave`.
+    action: String,
+    desc: String,
+}
+
+/// `# @42 was=$mod|W` — the pre-Lua entry header (hyprlang comments start `#`).
+fn parse_legacy_ovr_header(line: &str) -> Option<(usize, String, String)> {
+    let rest = line.trim().strip_prefix("# @")?;
+    let (num, was) = rest.split_once(" was=")?;
+    let n: usize = num.trim().parse().ok()?;
+    let (mods, key) = was.split_once('|')?;
+    Some((n, mods.trim().replace("$mod", "SUPER"), key.trim().to_string()))
+}
+
+/// Parse a hyprlang `bind[flags] = MODS, KEY, dispatcher…  # desc` line into
+/// (mods, key, action, desc). None if the line is not a bind.
+///
+/// Splitting the description off at the first `#` is what the pre-Lua writer and
+/// reader both did, so it round-trips the files that actually exist — at the cost
+/// of truncating an action containing a literal `#`. That flaw is inherited on
+/// purpose: reproducing the old reader is what makes this migration faithful.
+fn parse_legacy_bind(raw: &str) -> Option<(String, String, String, String)> {
+    let line = raw.trim();
+    if !line.starts_with("bind") {
+        return None;
+    }
+    let eq = line.find('=')?;
+    let flags = line[..eq].trim();
+    if !flags.chars().all(|c| c.is_ascii_lowercase()) {
+        return None; // e.g. a "bindings" prose comment, not a real bind keyword
+    }
+    let body = &line[eq + 1..];
+    let (before, desc) = match body.split_once('#') {
+        Some((b, d)) => (b, d.trim().to_string()),
+        None => (body, String::new()),
+    };
+    let mut it = before.splitn(3, ',');
+    let mods = it.next().unwrap_or("").trim().replace("$mod", "SUPER");
+    let key = it.next().unwrap_or("").trim().to_string();
+    let action = it.next().unwrap_or("").trim().to_string();
+    Some((mods, key, action, desc))
+}
+
+/// Parse the pre-Lua override layer out of already-read text.
+fn parse_legacy_overrides(text: &str) -> Vec<LegacyOvr> {
+    let mut out = Vec::new();
+    let mut pending: Option<(usize, String, String)> = None;
+    for raw in text.lines() {
+        if let Some(h) = parse_legacy_ovr_header(raw) {
+            pending = Some(h);
+            continue;
+        }
+        let Some((line, was_mods, was_key)) = pending.clone() else { continue };
+        if let Some((mods, key, action, desc)) = parse_legacy_bind(raw) {
+            out.push(LegacyOvr { line, was_mods, was_key, mods, key, action, desc });
+            pending = None;
+        }
+    }
+    out
+}
+
+/// Quote a command as a Lua string literal, following the shipped map's own
+/// convention: a plain `"…"`, or a `[[…]]` long bracket when the command carries
+/// a quote or a backslash — widened to `[=[…]=]` and so on if it also contains
+/// the closing sequence.
+fn lua_string(s: &str) -> String {
+    if !s.contains('"') && !s.contains('\\') {
+        return format!("\"{s}\"");
+    }
+    let mut eqs = String::new();
+    while s.contains(&format!("]{eqs}]")) {
+        eqs.push('=');
+    }
+    format!("[{eqs}[{s}]{eqs}]")
+}
+
+/// Did this entry change what the bind *does*, rather than only which keys run
+/// it? Answerable only while the pre-Lua shipped map is still on disk; when it is
+/// gone the answer is "assume not", which is what `rebind` — the command that
+/// wrote nearly all of these — would have produced anyway.
+fn legacy_action_was_customised(e: &LegacyOvr, legacy_shipped: &str) -> bool {
+    let Some(line) = legacy_shipped.lines().nth(e.line.saturating_sub(1)) else { return false };
+    match parse_legacy_bind(line) {
+        // Only trust the comparison if that line still holds the bind the entry
+        // recorded; otherwise the old map moved under it too and proves nothing.
+        Some((mods, key, action, _)) => {
+            same_combo(&mods, &key, &e.was_mods, &e.was_key) && action != e.action
+        }
+        None => false,
+    }
+}
+
+/// Translate one pre-Lua entry against the current shipped map.
+///
+/// `Ok(None)` means the entry would only restate what the shipped map already
+/// says, so it is dropped rather than written back out.
+fn migrate_entry(
+    e: &LegacyOvr,
+    shipped: &[Bind],
+    legacy_shipped: &str,
+) -> Result<Option<Ovr>, String> {
+    let combo = format_combo(&display_mods(&e.was_mods), &e.was_key);
+
+    // Placed by combo, never by the stored line number: that number indexes a
+    // file this build no longer reads, and the two maps do not agree on it, so
+    // carrying it across would rebind whatever now happens to sit on that line.
+    let mut hits = shipped.iter().filter(|b| same_combo(&b.mods, &b.key, &e.was_mods, &e.was_key));
+    let target = hits
+        .next()
+        .ok_or_else(|| format!("{combo} is no longer in the shipped map — rebind it from Settings"))?
+        .clone();
+    if hits.next().is_some() {
+        return Err(format!(
+            "{combo} now matches more than one shipped bind, so there is no single \
+             bind to move — rebind it from Settings"
+        ));
+    }
+    reject_hold_bind(&target)?;
+    validate::keybind_mods(&e.mods)?;
+    validate::keybind_key(&e.key)?;
+
+    let action = match e.action.strip_prefix("exec,") {
+        // Faithful whichever command wrote the entry: the Lua map spells every
+        // exec bind exactly this way, so this reproduces a `set-action` that
+        // changed which app a key launches just as well as a plain rebind.
+        Some(cmd) => format!("hl.dsp.exec_cmd({})", lua_string(cmd.trim())),
+        // Any other hyprlang dispatcher (`killactive`, `movefocus, l`, …) has no
+        // mechanical Lua equivalent — the shapes differ per dispatcher. Taking
+        // what the Lua map now binds at this combo is exactly right for a rebind;
+        // it is only wrong for a `set-action` onto a non-exec dispatcher, and
+        // that is the case worth reporting rather than guessing at.
+        None => {
+            if legacy_action_was_customised(e, legacy_shipped) {
+                eprintln!(
+                    "  {} {combo} had a customised action ({}) with no mechanical Lua \
+                     equivalent — it now runs the shipped action again; re-apply it \
+                     from Settings",
+                    term::yellow("!"),
+                    e.action
+                );
+            }
+            target.action.clone()
+        }
+    };
+
+    let ovr = Ovr {
+        line: target.line,
+        was_mods: target.mods.clone(),
+        was_key: target.key.clone(),
+        opts: target.opts.clone(),
+        mods: display_mods(&e.mods),
+        key: normalize_key(&e.key),
+        action,
+        desc: if e.desc.is_empty() { target.desc.clone() } else { e.desc.clone() },
+    };
+    Ok((!restates_shipped(&ovr, &target)).then_some(ovr))
+}
+
+/// Record that the pre-Lua file has been consumed, leaving its contents intact.
+fn mark_legacy_migrated(p: &Path, text: &str) -> Result<(), String> {
+    let mut out = text.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(MIGRATED_MARKER);
+    out.push('\n');
+    atomic::write(p, &out)
+}
+
+/// Carry the pre-Lua override layer into `keybinds.lua`.
+///
+/// Idempotent and cheap: normally one `stat` and one small read. Runs before
+/// every command and from `tezca link`, so upgrading needs no explicit step.
+///
+/// Deliberately more than `managed.rs`'s block copy, because both halves of the
+/// entry changed shape in the cutover: an entry is *placed* by the combo it
+/// recorded rather than by its line number, and its dispatcher is re-expressed
+/// where that can be done faithfully and reported where it cannot.
+fn migrate_legacy() -> Result<(), String> {
+    // The Lua layer already carries overrides, so it is authoritative — and this
+    // is also what stops a `keybind reset` from being undone by a re-migration.
+    if !load_overrides()?.is_empty() {
+        return Ok(());
+    }
+    let legacy_p = legacy_override_path()?;
+    let Ok(legacy_text) = fs::read_to_string(&legacy_p) else { return Ok(()) };
+    if legacy_text.contains(MIGRATED_MARKER) {
+        return Ok(());
+    }
+    let entries = parse_legacy_overrides(&legacy_text);
+    if entries.is_empty() {
+        return Ok(()); // a header-only file (never rebound) — leave it alone
+    }
+
+    let base =
+        fs::read_to_string(base_path()?).map_err(|e| format!("cannot read keybinds.lua: {e}"))?;
+    let shipped = apply_overrides(&base, &[]).0;
+    // Absent on a clone that dropped the hyprlang rollback; only costs the
+    // rebind-vs-set-action distinction, so an empty string is a fine fallback.
+    let legacy_shipped = fs::read_to_string(legacy_base_path()?).unwrap_or_default();
+
+    let mut carried = Vec::new();
+    for e in &entries {
+        match migrate_entry(e, &shipped, &legacy_shipped) {
+            Ok(Some(o)) => carried.push(o),
+            Ok(None) => {}
+            Err(why) => eprintln!("  {} {why}", term::yellow("skipped:")),
+        }
+    }
+
+    if !carried.is_empty() {
+        save_overrides(&carried)?;
+        eprintln!(
+            "  {} carried {} keybinding override(s) from {} → {}",
+            term::dim("migrated:"),
+            carried.len(),
+            legacy_p.display(),
+            override_path()?.display()
+        );
+        if hypr::in_session() {
+            let _ = hypr::reload();
+        }
+    }
+    // Marked even when nothing survived translation: every entry was reported
+    // above, and re-reporting on every command would be noise, not news.
+    mark_legacy_migrated(&legacy_p, &legacy_text)
 }
 
 // ---------------------------------------------------------------------------
@@ -845,8 +1133,8 @@ fn same_combo(mods_a: &str, key_a: &str, mods_b: &str, key_b: &str) -> bool {
 
 fn print_help() {
     println!("{}", term::header("tezca keybind"));
-    println!("{}", term::dim("  changes go to ~/.config/tezca/keybinds.conf;"));
-    println!("{}", term::dim("  the shipped conf.d/keybinds.conf is never modified"));
+    println!("{}", term::dim("  changes go to ~/.config/tezca/keybinds.lua;"));
+    println!("{}", term::dim("  the shipped conf.d/keybinds.lua is never modified"));
     println!();
     println!(
         "  {}                    list effective binds (* = overridden)",
@@ -1105,6 +1393,167 @@ hl.bind(mod .. " + U", hl.dsp.exec_cmd("undocumented-no-desc"))
         assert_eq!(normalize_key("w"), "W");
         assert_eq!(normalize_key("Left"), "left");
         assert_eq!(normalize_key("XF86AudioMute"), "XF86AudioMute");
+    }
+
+    // --- migrating the pre-Lua override layer ------------------------------
+
+    /// The pre-Lua shipped map, trimmed to the same binds as `BASE` — but
+    /// deliberately at *different line numbers* (an extra comment up top, and no
+    /// multi-line ALT+Tab), which is the whole reason the migration cannot carry
+    /// a line number across. `$mod, W` is line 5 here and line 4 in `BASE`.
+    const LEGACY_BASE: &str = r#"
+# ==== Windows ====
+# a section note with no counterpart in the Lua map
+bind  = CTRL, Q,          killactive                    # close focused window
+bind  = $mod, W,          exec, uwsm app -- brave       # Browser
+binde = $mod, C,          exec, code                    # Editor
+bindm = $mod, Z,          movewindow                    # hold to move
+# ---- Media ----
+bindl = , XF86AudioMute,  exec, wpctl set-mute @DEFAULT_SINK@ toggle  # Mute
+bind  = $mod, T,          exec, alacritty               # Terminal
+"#;
+
+    fn legacy_entry(header: &str, bind: &str) -> LegacyOvr {
+        let text = format!("{header}\n{bind}\n");
+        parse_legacy_overrides(&text).into_iter().next().expect("one entry")
+    }
+
+    fn migrated(header: &str, bind: &str) -> Result<Option<Ovr>, String> {
+        migrate_entry(&legacy_entry(header, bind), &base_binds(), LEGACY_BASE)
+    }
+
+    #[test]
+    fn parses_a_pre_lua_entry_and_expands_the_mod_variable() {
+        let e = legacy_entry("# @5 was=$mod|W", "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser");
+        assert_eq!(e.line, 5);
+        // `$mod` has to become SUPER on both halves, or the combo will not match
+        // the Lua map (which spells every registered combo out in full).
+        assert_eq!((e.was_mods.as_str(), e.was_key.as_str()), ("SUPER", "W"));
+        assert_eq!((e.mods.as_str(), e.key.as_str()), ("SUPER SHIFT", "B"));
+        assert_eq!(e.action, "exec, uwsm app -- brave");
+        assert_eq!(e.desc, "Browser");
+    }
+
+    #[test]
+    fn a_migrated_entry_is_placed_by_its_combo_not_its_line_number() {
+        // The entry records line 5 (where $mod+W lives in the hyprlang map). In
+        // the Lua map that line is the *Editor* bind — carrying the number over
+        // would silently rebind the wrong key, which is the bug this guards.
+        let o = migrated("# @5 was=$mod|W", "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser")
+            .unwrap()
+            .expect("a real override");
+        assert_eq!(o.line, 4, "must land on the Lua map's $mod+W, not on line 5");
+        assert_eq!((o.was_mods.as_str(), o.was_key.as_str()), ("SUPER", "W"));
+        assert_eq!((o.mods.as_str(), o.key.as_str()), ("SUPER SHIFT", "B"));
+    }
+
+    #[test]
+    fn an_exec_dispatcher_is_re_expressed_as_a_lua_call() {
+        let o = migrated("# @5 was=$mod|W", "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser")
+            .unwrap()
+            .unwrap();
+        assert_eq!(o.action, r#"hl.dsp.exec_cmd("uwsm app -- brave")"#);
+    }
+
+    #[test]
+    fn an_exec_set_action_survives_even_though_the_dispatcher_changed_shape() {
+        // The pre-Lua map ran `alacritty` on $mod+T; this entry had been pointed
+        // at something else. `exec` translates faithfully, so the customisation
+        // must come through rather than snapping back to the shipped command.
+        let o = migrated("# @10 was=$mod|T", "bind = $mod, T, exec, uwsm app -- kitty  # Terminal")
+            .unwrap()
+            .expect("a set-action is not a no-op");
+        assert_eq!(o.line, 13, "the Lua map's terminal bind");
+        assert_eq!(o.action, r#"hl.dsp.exec_cmd("uwsm app -- kitty")"#);
+    }
+
+    #[test]
+    fn a_non_exec_rebind_adopts_whatever_the_lua_map_now_dispatches() {
+        // A plain rebind never touched the action, so the Lua map's own call is
+        // the correct one — no hyprlang→Lua dispatcher table needed.
+        let o = migrated("# @4 was=CTRL|Q", "bind = CTRL SHIFT, Q, killactive  # close focused window")
+            .unwrap()
+            .expect("the combo moved");
+        assert_eq!(o.line, 3);
+        assert_eq!(o.action, "hl.dsp.window.close()");
+        assert_eq!((o.mods.as_str(), o.key.as_str()), ("CTRL SHIFT", "Q"));
+    }
+
+    #[test]
+    fn a_customised_non_exec_action_is_detected_so_it_can_be_reported() {
+        // Shipped line 4 is `killactive`; this entry says `fullscreen, 0`. That
+        // is a set-action onto a dispatcher with no mechanical translation — the
+        // one case the migration has to admit it cannot carry.
+        let e = legacy_entry("# @4 was=CTRL|Q", "bind = CTRL, Q, fullscreen, 0  # close focused window");
+        assert!(legacy_action_was_customised(&e, LEGACY_BASE));
+
+        // A plain rebind must NOT be flagged, or every migration warns.
+        let plain = legacy_entry("# @4 was=CTRL|Q", "bind = CTRL SHIFT, Q, killactive  # close focused window");
+        assert!(!legacy_action_was_customised(&plain, LEGACY_BASE));
+
+        // Without the old shipped map there is nothing to compare against, and
+        // "assume it was a rebind" is the quiet answer.
+        assert!(!legacy_action_was_customised(&e, ""));
+    }
+
+    #[test]
+    fn entries_that_cannot_be_reproduced_are_refused_rather_than_guessed_at() {
+        // A combo that no longer exists in the shipped map.
+        let e = migrated("# @4 was=CTRL|Y", "bind = CTRL SHIFT, Y, killactive  # gone").unwrap_err();
+        assert!(e.contains("no longer in the shipped map"), "{e}");
+
+        // A hold-bind: `hl.unbind` cannot release one, so an override would leave
+        // both bindings live.
+        let e = migrated("# @7 was=$mod|Z", "bindm = $mod SHIFT, Z, movewindow  # hold to move")
+            .unwrap_err();
+        assert!(e.contains("hold-bind"), "{e}");
+
+        // A hand-edited old file is still untrusted input, and it reaches the
+        // generated Lua verbatim — so it goes through the same validator as the
+        // live path rather than being trusted for having been on disk.
+        let e = migrated("# @5 was=$mod|W", "bind = $mod, W;rm -rf ~, exec, x  # Browser")
+            .unwrap_err();
+        assert!(e.contains("invalid character"), "{e}");
+    }
+
+    #[test]
+    fn an_entry_that_restates_the_shipped_bind_is_dropped() {
+        // Migrating a file whose entry now says exactly what the Lua map says
+        // must leave a clean override layer, not a no-op entry.
+        let o = migrated("# @5 was=$mod|W", "bind = $mod, W, exec, uwsm app -- brave  # Browser").unwrap();
+        assert!(o.is_none(), "a no-op override should not be carried over");
+    }
+
+    #[test]
+    fn commands_are_quoted_as_lua_strings_the_way_the_shipped_map_does() {
+        assert_eq!(lua_string("walker -m files"), r#""walker -m files""#);
+        // A quote in the command forces the long-bracket form — exactly what the
+        // shipped map uses for the cliphist-wipe bind.
+        assert_eq!(
+            lua_string(r#"sh -c 'cliphist wipe && notify-send Tezca "cleared"'"#),
+            r#"[[sh -c 'cliphist wipe && notify-send Tezca "cleared"']]"#
+        );
+        // …widened when the command itself contains the closing sequence.
+        assert_eq!(lua_string(r#"echo "a]]b""#), r#"[=[echo "a]]b"]=]"#);
+    }
+
+    #[test]
+    fn the_migration_marker_is_inert_to_both_readers() {
+        // hyprlang ignores it as a comment, and it must not parse as an entry —
+        // otherwise marking the file would corrupt what it is marking.
+        assert!(MIGRATED_MARKER.starts_with('#'));
+        assert!(parse_legacy_overrides(MIGRATED_MARKER).is_empty());
+        assert!(parse_legacy_bind(MIGRATED_MARKER).is_none());
+        assert!(parse_legacy_ovr_header(MIGRATED_MARKER).is_none());
+    }
+
+    #[test]
+    fn a_header_only_pre_lua_file_carries_nothing() {
+        // The shape on a machine that never rebound anything: the migration must
+        // no-op rather than write an empty layer or report a migration.
+        let header = "# ~/.config/tezca/keybinds.conf — generated by `tezca keybind`.\n\
+                      #\n# Sourced by hyprland.conf AFTER conf.d/keybinds.conf.\n";
+        assert!(parse_legacy_overrides(header).is_empty());
     }
 
     #[test]

@@ -153,7 +153,12 @@ fn cmd_config() -> Result<(), String> {
         if let Some((k, v)) = t.split_once('=') {
             let k = k.trim();
             if k.starts_with(WS_ASSIGN_PREFIX) {
-                let v = v.split('#').next().unwrap_or("").trim().trim_matches(|c| c == '"' || c == '\'');
+                let v = v
+                    .split('#')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches(|c| c == '"' || c == '\'');
                 println!("{k} = {v}");
             }
         }
@@ -187,7 +192,10 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
     if running() {
         let _ = cmd_restart();
     } else {
-        println!("  {} saved (bar not running — starts with your settings next time)", term::green("✓"));
+        println!(
+            "  {} saved (bar not running — starts with your settings next time)",
+            term::green("✓")
+        );
     }
     Ok(())
 }
@@ -244,9 +252,7 @@ fn set_line(lines: &mut Vec<String>, key: &str, value: &str) {
 /// `exec-once` this is moot, but `tezca bar start` from a shell needs it.
 fn spawn() -> Result<(), String> {
     if !util::has(BIN) {
-        return Err(format!(
-            "{BIN} not found on PATH — build + install it (install.sh) first"
-        ));
+        return Err(format!("{BIN} not found on PATH — build + install it (install.sh) first"));
     }
     let has_setsid = util::has("setsid");
     let has_uwsm = util::has("uwsm");
@@ -277,11 +283,7 @@ fn spawn() -> Result<(), String> {
 }
 
 fn running() -> bool {
-    Command::new("pkill")
-        .args(["-0", "-x", BIN])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    Command::new("pkill").args(["-0", "-x", BIN]).status().map(|s| s.success()).unwrap_or(false)
 }
 
 fn pkill(args: &[&str]) {
@@ -295,7 +297,10 @@ fn print_help() {
     println!();
     println!("  {}                  is the bar running?", term::cyan("status"));
     println!("  {}  lifecycle", term::cyan("start · stop · restart"));
-    println!("  {}                  hide/show it (SIGUSR1 — the ALT+Right-Ctrl bind)", term::cyan("toggle"));
+    println!(
+        "  {}                  hide/show it (SIGUSR1 — the ALT+Right-Ctrl bind)",
+        term::cyan("toggle")
+    );
     println!("  {}                  print the effective configuration", term::cyan("config"));
     println!("  {}      edit ~/.config/tezca-bar/config.toml", term::cyan("set <key> <value>…"));
     println!();

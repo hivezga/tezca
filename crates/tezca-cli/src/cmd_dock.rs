@@ -162,7 +162,10 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
     if running() {
         let _ = cmd_restart();
     } else {
-        println!("  {} saved (dock not running — starts with your settings next time)", term::green("✓"));
+        println!(
+            "  {} saved (dock not running — starts with your settings next time)",
+            term::green("✓")
+        );
     }
     Ok(())
 }
@@ -242,9 +245,7 @@ fn set_line(lines: &mut Vec<String>, key: &str, value: &str) {
 /// this CLI process either way.
 fn spawn() -> Result<(), String> {
     if !util::has(BIN) {
-        return Err(format!(
-            "{BIN} not found on PATH — build + install it (install.sh) first"
-        ));
+        return Err(format!("{BIN} not found on PATH — build + install it (install.sh) first"));
     }
     // Detach the child's stdio. A long-lived process that inherits our stdout keeps
     // the write end of any pipe open, so `tezca dock restart | tee log` (or any
@@ -262,11 +263,7 @@ fn spawn() -> Result<(), String> {
 }
 
 fn running() -> bool {
-    Command::new("pkill")
-        .args(["-0", "-x", BIN])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    Command::new("pkill").args(["-0", "-x", BIN]).status().map(|s| s.success()).unwrap_or(false)
 }
 
 fn pkill(args: &[&str]) {

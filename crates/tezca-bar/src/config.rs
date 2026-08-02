@@ -158,10 +158,13 @@ fn default_layout_center() -> Vec<Slot> {
 }
 fn default_layout_right() -> Vec<Slot> {
     use Mod::*;
-    [GameMode, Camera, Microphone, Recording, Caffeine, NightLight, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Bluetooth, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
-        .into_iter()
-        .map(Slot::Mod)
-        .collect()
+    [
+        GameMode, Camera, Microphone, Recording, Caffeine, NightLight, Ai, Tray, Cpu, Mem, Gpu,
+        Sep, Network, Bluetooth, Volume, Brightness, Battery, Sep, Bell, Clock, Power,
+    ]
+    .into_iter()
+    .map(Slot::Mod)
+    .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -278,7 +281,8 @@ impl Config {
             // Strip a trailing `# comment` (matching `tezca bar config`'s reader)
             // before quotes, so inline-documented values parse correctly.
             let k = k.trim();
-            let v = v.split('#').next().unwrap_or("").trim().trim_matches(|c| c == '"' || c == '\'');
+            let v =
+                v.split('#').next().unwrap_or("").trim().trim_matches(|c| c == '"' || c == '\'');
             match k {
                 "shape" => {
                     if let Some(s) = Shape::parse(v) {
@@ -299,7 +303,9 @@ impl Config {
                         self.numerals = n;
                     }
                 }
-                "workspace_hide_empty" | "hide_empty_workspaces" => set_bool(&mut self.hide_empty, v),
+                "workspace_hide_empty" | "hide_empty_workspaces" => {
+                    set_bool(&mut self.hide_empty, v)
+                }
                 "workspace_compact" | "compact_workspaces" => set_bool(&mut self.compact, v),
                 // --- AI usage module -------------------------------------
                 "ai_enabled" => set_bool(&mut self.ai.enabled, v),
@@ -390,7 +396,8 @@ fn parse_ws_spec(v: &str) -> Option<Vec<i32>> {
                     }
                 }
             }
-            let ids: Vec<i32> = s.split(',').filter_map(|p| p.trim().parse().ok()).filter(|n| *n > 0).collect();
+            let ids: Vec<i32> =
+                s.split(',').filter_map(|p| p.trim().parse().ok()).filter(|n| *n > 0).collect();
             (!ids.is_empty()).then_some(ids)
         }
     }
@@ -436,10 +443,13 @@ mod tests {
         use Mod::*;
         assert_eq!(
             c.layout_right,
-            [GameMode, Camera, Microphone, Recording, Caffeine, NightLight, Ai, Tray, Cpu, Mem, Gpu, Sep, Network, Bluetooth, Volume, Brightness, Battery, Sep, Bell, Clock, Power]
-                .into_iter()
-                .map(Slot::Mod)
-                .collect::<Vec<_>>()
+            [
+                GameMode, Camera, Microphone, Recording, Caffeine, NightLight, Ai, Tray, Cpu, Mem,
+                Gpu, Sep, Network, Bluetooth, Volume, Brightness, Battery, Sep, Bell, Clock, Power
+            ]
+            .into_iter()
+            .map(Slot::Mod)
+            .collect::<Vec<_>>()
         );
     }
 

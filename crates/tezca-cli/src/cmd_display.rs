@@ -283,13 +283,16 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
     let mut transform = cur.transform.clone();
     let mut vrr = stored.as_ref().map(|m| m.vrr.clone()).unwrap_or_default();
     let mut bitdepth = stored.as_ref().map(|m| m.bitdepth.clone()).unwrap_or_default();
-    let mut mirror = stored.as_ref().map(|m| m.mirror.clone()).unwrap_or_else(|| cur.mirror.clone());
+    let mut mirror =
+        stored.as_ref().map(|m| m.mirror.clone()).unwrap_or_else(|| cur.mirror.clone());
     let mut disabled = cur.disabled;
 
     let mut it = args[1..].iter().copied();
     while let Some(a) = it.next() {
         match a {
-            "--mode" => mode = it.next().ok_or("--mode needs a value like 3440x1440@165")?.to_string(),
+            "--mode" => {
+                mode = it.next().ok_or("--mode needs a value like 3440x1440@165")?.to_string()
+            }
             "--scale" => scale = it.next().ok_or("--scale needs a value")?.to_string(),
             "--pos" => pos = it.next().ok_or("--pos needs a value like 0x0")?.to_string(),
             "--transform" => transform = it.next().ok_or("--transform needs 0-7")?.to_string(),
@@ -409,7 +412,12 @@ fn vrr_value(v: &str) -> Result<String, String> {
 
 /// Position `name` beside `anchor`, in Hyprland's *logical* coordinate space
 /// (i.e. pixels divided by scale — a 3440 px monitor at scale 1.25 is 2752 wide).
-fn place_relative(mons: &[Monitor], name: &str, anchor: &str, side: &str) -> Result<String, String> {
+fn place_relative(
+    mons: &[Monitor],
+    name: &str,
+    anchor: &str,
+    side: &str,
+) -> Result<String, String> {
     if anchor == name {
         return Err(format!("cannot place '{name}' relative to itself"));
     }
@@ -689,7 +697,10 @@ mod profiles {
 
 fn cmd_brightness(args: &[&str]) -> Result<(), String> {
     if !util::has("ddcutil") {
-        return Err("ddcutil not found — install it for external-monitor brightness (`paru -S ddcutil`)".into());
+        return Err(
+            "ddcutil not found — install it for external-monitor brightness (`paru -S ddcutil`)"
+                .into(),
+        );
     }
     // `brightness` / `brightness list` → print NAME=VALUE for every DDC monitor.
     if args.is_empty() || args[0] == "list" {
@@ -790,11 +801,7 @@ fn parse_ddc_detect(text: &str) -> Vec<(String, u32)> {
             bus = None;
         } else if let Some(rest) = l.strip_prefix("I2C bus:") {
             // "/dev/i2c-3" → 3
-            bus = rest
-                .trim()
-                .rsplit('-')
-                .next()
-                .and_then(|n| n.trim().parse().ok());
+            bus = rest.trim().rsplit('-').next().and_then(|n| n.trim().parse().ok());
         } else if let Some(rest) = l.strip_prefix("DRM connector:") {
             // "card1-DP-1" → "DP-1"
             if let Some(b) = bus {
@@ -826,12 +833,18 @@ fn cache_path() -> Result<PathBuf, String> {
     Ok(base.join("tezca").join("ddc.map"))
 }
 
-
 fn print_help() {
     println!("{}", term::header("tezca display"));
     println!();
-    println!("  {}                 list monitors + available modes ({})", term::cyan("list"), term::dim("--all for disabled"));
-    println!("  {}  set mode/scale/position (live + persisted)", term::cyan("set <name> --mode WxH@R"));
+    println!(
+        "  {}                 list monitors + available modes ({})",
+        term::cyan("list"),
+        term::dim("--all for disabled")
+    );
+    println!(
+        "  {}  set mode/scale/position (live + persisted)",
+        term::cyan("set <name> --mode WxH@R")
+    );
     println!("  {}          revert a monitor to the shipped config", term::cyan("reset <name>"));
     println!("  {}               the persisted per-monitor overrides", term::cyan("config"));
     println!("  {}     save/apply/list/rm a monitor layout", term::cyan("profile <sub> [name]"));

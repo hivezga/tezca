@@ -14,7 +14,9 @@ use crate::config::{Config, Mod, Numerals, Shape, Slot};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
-use crate::{ai, bluetooth, camera, custom, hypr, mic, nowplaying, notify, osd, popovers, session, tray};
+use crate::{
+    ai, bluetooth, camera, custom, hypr, mic, notify, nowplaying, osd, popovers, session, tray,
+};
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
 use gtk4::prelude::*;
@@ -113,7 +115,15 @@ impl Bar {
         for i in 0..monitors.n_items() {
             let Some(obj) = monitors.item(i) else { continue };
             let Ok(monitor) = obj.downcast::<gdk::Monitor>() else { continue };
-            let s = Surface::build(app, &monitor, &cfg, &shared, throughput.clone(), ai_state.clone(), customs);
+            let s = Surface::build(
+                app,
+                &monitor,
+                &cfg,
+                &shared,
+                throughput.clone(),
+                ai_state.clone(),
+                customs,
+            );
             surfaces.push(s);
         }
 
@@ -506,7 +516,8 @@ impl Bar {
         }
 
         let menu = self.tray_menus.borrow().get(&item.key).cloned();
-        let pop = menu.map(|root| popovers::tray_menu(&row, &root, &item.key, self.tray_cmd.clone()));
+        let pop =
+            menu.map(|root| popovers::tray_menu(&row, &root, &item.key, self.tray_cmd.clone()));
 
         let click = gtk4::GestureClick::new();
         click.set_button(0); // every button; branch in the handler
@@ -970,7 +981,9 @@ impl Surface {
         let resolve = |slot: &Slot| -> Option<gtk4::Widget> {
             use gtk4::prelude::Cast;
             Some(match slot {
-                Slot::Custom(name) => return custom_cells.get(name).map(|c| c.container.clone().upcast()),
+                Slot::Custom(name) => {
+                    return custom_cells.get(name).map(|c| c.container.clone().upcast())
+                }
                 Slot::Mod(m) => match m {
                     Mod::Mirror => mirror_btn.clone().upcast(),
                     Mod::Appname => app_label.clone().upcast(),
@@ -1122,7 +1135,13 @@ impl Surface {
         let mayan = self.numerals == Numerals::Mayan;
         if ids.is_empty() {
             // Never show an empty cluster.
-            self.ws_box.append(&ws_button(active, &ws_label(active, self.numerals), true, false, mayan));
+            self.ws_box.append(&ws_button(
+                active,
+                &ws_label(active, self.numerals),
+                true,
+                false,
+                mayan,
+            ));
             return;
         }
         for id in ids {
@@ -1288,8 +1307,7 @@ impl Surface {
     /// Keep-awake: shown only while the inhibitor is held.
     fn set_caffeine(&self, on: bool) {
         self.caffeine_box.set_visible(on);
-        self.caffeine_box
-            .set_tooltip_text(Some("Keeping the session awake — click to release"));
+        self.caffeine_box.set_tooltip_text(Some("Keeping the session awake — click to release"));
     }
 
     /// Recording: the third privacy dot. Says so when it is not ours, because
@@ -1618,7 +1636,9 @@ fn ws_label(id: i32, numerals: Numerals) -> String {
 /// Needs a covering font (Noto Sans Mayan Numerals); see `button.ws.mayan`.
 fn mayan(n: i32) -> String {
     match n {
-        0..=19 => char::from_u32(0x1D2E0 + n as u32).map(String::from).unwrap_or_else(|| n.to_string()),
+        0..=19 => {
+            char::from_u32(0x1D2E0 + n as u32).map(String::from).unwrap_or_else(|| n.to_string())
+        }
         _ => n.to_string(),
     }
 }

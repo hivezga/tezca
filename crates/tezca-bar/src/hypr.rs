@@ -183,8 +183,9 @@ pub fn subscribe(tx: async_channel::Sender<Event>) {
                 "workspace" | "workspacev2" | "createworkspace" | "createworkspacev2"
                 | "destroyworkspace" | "destroyworkspacev2" | "focusedmon" | "openwindow"
                 | "closewindow" | "movewindow" | "movewindowv2" | "activewindow"
-                | "activewindowv2" | "windowtitle" | "windowtitlev2" | "fullscreen"
-                | "urgent" => Some(Event::Refresh),
+                | "activewindowv2" | "windowtitle" | "windowtitlev2" | "fullscreen" | "urgent" => {
+                    Some(Event::Refresh)
+                }
                 _ => None,
             };
             if let Some(ev) = ev {

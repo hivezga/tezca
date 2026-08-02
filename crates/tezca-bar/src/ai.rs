@@ -463,15 +463,11 @@ pub fn spawn(cfg: AiConfig, tx: async_channel::Sender<Snapshot>) {
                 // Reload each round: a `--ai-dump` in another process may have
                 // recorded an attempt or earned a 429 since we last looked.
                 let mut holds = Holds::load();
-                let mut snap = Snapshot {
-                    providers: Vec::new(),
-                    updated: now_unix(),
-                    live: cfg.live,
-                };
+                let mut snap =
+                    Snapshot { providers: Vec::new(), updated: now_unix(), live: cfg.live };
                 for key in &cfg.providers[..] {
-                    snap.providers.push(poll_provider(
-                        key, &cfg, &ua, interval, &mut holds, &mut cache,
-                    ));
+                    snap.providers
+                        .push(poll_provider(key, &cfg, &ua, interval, &mut holds, &mut cache));
                 }
                 holds.save();
 
@@ -532,8 +528,11 @@ pub fn dump(snap: &Snapshot) -> String {
         s.push_str(&format!("{}{}\n", p.name, plan));
         s.push_str(&format!("  status    {:?}\n", p.status));
         if let Some(t) = p.session_expires {
-            let when =
-                if t <= now_unix() { "expired".to_string() } else { format!("expires in {}", until(t)) };
+            let when = if t <= now_unix() {
+                "expired".to_string()
+            } else {
+                format!("expires in {}", until(t))
+            };
             s.push_str(&format!("  session   {when}\n"));
         }
         for w in &p.windows {
@@ -565,11 +564,17 @@ pub fn dump(snap: &Snapshot) -> String {
                 compact_count(l.cache_read_tokens),
                 compact_count(l.cache_write_tokens),
             ));
-            s.push_str(&format!("  api-equiv     ${:.2} across {} messages\n", l.cost_usd, l.messages));
+            s.push_str(&format!(
+                "  api-equiv     ${:.2} across {} messages\n",
+                l.cost_usd, l.messages
+            ));
         }
         s.push('\n');
     }
-    s.push_str(&format!("peak: {}\n", snap.peak_pct().map(|p| format!("{p:.0}%")).unwrap_or("—".into())));
+    s.push_str(&format!(
+        "peak: {}\n",
+        snap.peak_pct().map(|p| format!("{p:.0}%")).unwrap_or("—".into())
+    ));
     s
 }
 
@@ -682,7 +687,8 @@ fn anthropic(
                 p.windows = parse_usage(&v);
                 p.spend = parse_spend(&v);
                 if p.plan.is_none() {
-                    p.plan = v.get("subscription_type").and_then(|s| s.as_str()).map(str::to_string);
+                    p.plan =
+                        v.get("subscription_type").and_then(|s| s.as_str()).map(str::to_string);
                 }
                 p.status = if p.windows.is_empty() {
                     // Endpoint answered in a shape we don't recognise — say so
@@ -950,7 +956,10 @@ fn anthropic_credentials() -> Option<Creds> {
 /// `default_claude_max_5x` → `max 5x`. The raw tier carries a bucket prefix and
 /// a vendor name that earn nothing in a 280px popover.
 fn pretty_tier(raw: &str) -> String {
-    raw.split('_').filter(|p| !matches!(*p, "default" | "claude" | "")).collect::<Vec<_>>().join(" ")
+    raw.split('_')
+        .filter(|p| !matches!(*p, "default" | "claude" | ""))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Credential timestamps are milliseconds in every version of the file we've
@@ -1317,7 +1326,8 @@ fn openai(cfg: &AiConfig) -> Provider {
         Some(h) => h,
         None => return p,
     };
-    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or(home.join(".codex"));
+    let codex_home =
+        std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or(home.join(".codex"));
     if !codex_home.join("auth.json").exists() || which("codex").is_none() {
         p.status = Status::Absent;
         return p;
@@ -1545,9 +1555,11 @@ pub fn now_unix() -> i64 {
 /// Local midnight as unix seconds — the "today" boundary for local analytics.
 fn local_midnight_unix() -> i64 {
     match gtk4::glib::DateTime::now_local() {
-        Ok(now) => gtk4::glib::DateTime::from_local(now.year(), now.month(), now.day_of_month(), 0, 0, 0.0)
-            .map(|d| d.to_unix())
-            .unwrap_or(0),
+        Ok(now) => {
+            gtk4::glib::DateTime::from_local(now.year(), now.month(), now.day_of_month(), 0, 0, 0.0)
+                .map(|d| d.to_unix())
+                .unwrap_or(0)
+        }
         Err(_) => 0,
     }
 }
@@ -1653,11 +1665,17 @@ mod tests {
     #[test]
     fn parses_rfc3339_forms() {
         assert_eq!(parse_rfc3339("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(parse_rfc3339("2026-02-06T22:00:00+00:00"), parse_rfc3339("2026-02-06T22:00:00Z"));
+        assert_eq!(
+            parse_rfc3339("2026-02-06T22:00:00+00:00"),
+            parse_rfc3339("2026-02-06T22:00:00Z")
+        );
         // +02:00 is two hours *ahead*, so the same wall clock is earlier in UTC.
         let z = parse_rfc3339("2026-02-06T22:00:00Z").unwrap();
         assert_eq!(parse_rfc3339("2026-02-07T00:00:00+02:00"), Some(z));
-        assert_eq!(parse_rfc3339("2026-07-23T02:31:12.785Z"), parse_rfc3339("2026-07-23T02:31:12Z"));
+        assert_eq!(
+            parse_rfc3339("2026-07-23T02:31:12.785Z"),
+            parse_rfc3339("2026-07-23T02:31:12Z")
+        );
         assert_eq!(parse_rfc3339("nope"), None);
     }
 
@@ -1753,7 +1771,9 @@ mod tests {
 
     #[test]
     fn ignores_shapes_that_are_not_windows() {
-        let v: Value = serde_json::from_str(r#"{"account_uuid":"x","five_hour":{"utilization":1.0}}"#).unwrap();
+        let v: Value =
+            serde_json::from_str(r#"{"account_uuid":"x","five_hour":{"utilization":1.0}}"#)
+                .unwrap();
         assert_eq!(parse_usage(&v).len(), 1);
     }
 
@@ -1850,7 +1870,9 @@ mod tests {
         assert_eq!(e.key, "m1:r1");
 
         // A user line, a line with no usage, and one from before `start` do not.
-        assert!(parse_entry(r#"{"type":"user","timestamp":"2026-07-29T12:00:00Z"}"#, start).is_none());
+        assert!(
+            parse_entry(r#"{"type":"user","timestamp":"2026-07-29T12:00:00Z"}"#, start).is_none()
+        );
         assert!(parse_entry(
             r#"{"type":"assistant","timestamp":"2026-07-29T12:00:00Z","message":{"id":"m"}}"#,
             start

@@ -189,14 +189,9 @@ fn read_status() -> Status {
     }
 
     if !s.device.is_empty() {
-        if let Some(out) = nmcli_opt(&[
-            "-t",
-            "-f",
-            "IP4.ADDRESS,IP4.GATEWAY,IP4.DNS",
-            "device",
-            "show",
-            &s.device,
-        ]) {
+        if let Some(out) =
+            nmcli_opt(&["-t", "-f", "IP4.ADDRESS,IP4.GATEWAY,IP4.DNS", "device", "show", &s.device])
+        {
             for line in out.lines() {
                 let f = split_terse(line);
                 let (k, v) = (field(&f, 0), field(&f, 1));
@@ -328,7 +323,11 @@ fn access_points(rescan: bool) -> Result<Vec<Ap>, String> {
             signal: field(&f, 2).parse().unwrap_or(0),
             security: {
                 let s = field(&f, 3);
-                if s.trim().is_empty() { "open".to_string() } else { s }
+                if s.trim().is_empty() {
+                    "open".to_string()
+                } else {
+                    s
+                }
             },
             saved: saved.contains(&ssid),
             ssid,
@@ -524,8 +523,8 @@ fn cmd_vpn(args: &[&str]) -> Result<(), String> {
     match args.first().copied() {
         None | Some("list") => {
             let machine = args.iter().any(|a| *a == "--machine" || *a == "-m");
-            let out =
-                nmcli_opt(&["-t", "-f", "NAME,TYPE,ACTIVE", "connection", "show"]).unwrap_or_default();
+            let out = nmcli_opt(&["-t", "-f", "NAME,TYPE,ACTIVE", "connection", "show"])
+                .unwrap_or_default();
             let mut any = false;
             for line in out.lines() {
                 let f = split_terse(line);
@@ -561,17 +560,17 @@ fn cmd_vpn(args: &[&str]) -> Result<(), String> {
             println!("  {} {name} down", term::green("✓"));
             Ok(())
         }
-        Some(other) => Err(format!("unknown vpn subcommand: {other}\n  try: list · up <name> · down <name>")),
+        Some(other) => {
+            Err(format!("unknown vpn subcommand: {other}\n  try: list · up <name> · down <name>"))
+        }
     }
 }
 
 fn cmd_edit() -> Result<(), String> {
     if !util::has("nm-connection-editor") {
-        return Err(
-            "nm-connection-editor not found (`paru -S nm-connection-editor`) — \
+        return Err("nm-connection-editor not found (`paru -S nm-connection-editor`) — \
              or use `nmcli connection edit`"
-                .into(),
-        );
+            .into());
     }
     Command::new("nm-connection-editor")
         .stdin(Stdio::null())
@@ -600,7 +599,10 @@ fn print_help() {
     }
     println!();
     println!("{}", term::dim("  Passwords are read from stdin, never from the command line:"));
-    println!("{}", term::dim("    printf '%s\\n' \"$psk\" | tezca net connect MyWifi --password-stdin"));
+    println!(
+        "{}",
+        term::dim("    printf '%s\\n' \"$psk\" | tezca net connect MyWifi --password-stdin")
+    );
 }
 
 #[cfg(test)]
@@ -614,10 +616,7 @@ mod tests {
         // An SSID with a colon in it. Splitting naively would both mangle the
         // name and shift the signal and security fields one column left — this
         // is the bug the bar's own nmcli reader shipped with.
-        assert_eq!(
-            split_terse(r"*:My\:Net:72:WPA2"),
-            vec!["*", "My:Net", "72", "WPA2"]
-        );
+        assert_eq!(split_terse(r"*:My\:Net:72:WPA2"), vec!["*", "My:Net", "72", "WPA2"]);
         // A literal backslash.
         assert_eq!(split_terse(r"a\\b:c"), vec![r"a\b", "c"]);
         // Empty fields are real: an open network reports no security.

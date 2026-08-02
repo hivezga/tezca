@@ -76,11 +76,19 @@ fn cmd_status(args: &[&str]) -> Result<(), String> {
     println!("{}", term::header("tezca record"));
     println!();
     match pid {
-        Some(p) => println!("  {} recording  {}", term::green("●"), term::dim(&format!("{path} (pid {p})"))),
+        Some(p) => println!(
+            "  {} recording  {}",
+            term::green("●"),
+            term::dim(&format!("{path} (pid {p})"))
+        ),
         None => println!("  {} not recording", term::dim("○")),
     }
     if recorder().is_none() {
-        println!("  {} {}", term::yellow("!"), term::dim("no recorder installed (`paru -S wf-recorder`)"));
+        println!(
+            "  {} {}",
+            term::yellow("!"),
+            term::dim("no recorder installed (`paru -S wf-recorder`)")
+        );
     }
     println!();
     Ok(())
@@ -90,17 +98,12 @@ fn cmd_start(args: &[&str]) -> Result<(), String> {
     if let Some(pid) = active_pid() {
         return Err(format!("already recording (pid {pid}) — `tezca record stop` first"));
     }
-    let bin = recorder()
-        .ok_or("no screen recorder found — install one (`paru -S wf-recorder`)")?;
+    let bin = recorder().ok_or("no screen recorder found — install one (`paru -S wf-recorder`)")?;
 
     let region = args.contains(&"--region");
     let audio = args.contains(&"--audio");
     let no_cursor = args.contains(&"--no-cursor");
-    let output = args
-        .iter()
-        .position(|a| *a == "--output")
-        .and_then(|i| args.get(i + 1))
-        .copied();
+    let output = args.iter().position(|a| *a == "--output").and_then(|i| args.get(i + 1)).copied();
 
     // ~/Videos/Tezca/2026-08-01_14-32-05.mp4
     let stamp = Command::new("date")
@@ -112,7 +115,8 @@ fn cmd_start(args: &[&str]) -> Result<(), String> {
         .ok_or("could not read the current time")?;
     let home = std::env::var_os("HOME").ok_or("$HOME is not set")?;
     let dir = PathBuf::from(home).join("Videos").join("Tezca");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     let out = dir.join(format!("{stamp}.mp4"));
 
     let mut cmd = Command::new(bin);

@@ -131,8 +131,8 @@ fn app_dirs() -> Vec<PathBuf> {
     } else if let Some(home) = std::env::var_os("HOME") {
         dirs.push(PathBuf::from(home).join(".local/share/applications"));
     }
-    let data_dirs = std::env::var("XDG_DATA_DIRS")
-        .unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    let data_dirs =
+        std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
     for d in data_dirs.split(':').filter(|s| !s.is_empty()) {
         dirs.push(PathBuf::from(d).join("applications"));
     }
@@ -181,9 +181,7 @@ fn class_matches(class: &str, id: &str, app: Option<&AppEntry>) -> bool {
             cands.push(wm.to_lowercase());
         }
     }
-    cands
-        .iter()
-        .any(|c| !c.is_empty() && (*c == lc || last_segment(c) == last_segment(&lc)))
+    cands.iter().any(|c| !c.is_empty() && (*c == lc || last_segment(c) == last_segment(&lc)))
 }
 
 /// Resolve a paintable: prefer the app's `Icon=` name, else the class/id itself,

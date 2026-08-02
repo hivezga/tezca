@@ -149,9 +149,8 @@ fn build_ui(app: &Application, start_page: Option<&str>) {
     window.set_child(Some(&content));
 
     // Select the requested page (or the first), which triggers its build.
-    let start_index = start_page
-        .and_then(|p| PAGES.iter().position(|(id, _, _)| *id == p))
-        .unwrap_or(0);
+    let start_index =
+        start_page.and_then(|p| PAGES.iter().position(|(id, _, _)| *id == p)).unwrap_or(0);
     if let Some(row) = sidebar.row_at_index(start_index as i32) {
         sidebar.select_row(Some(&row));
     }

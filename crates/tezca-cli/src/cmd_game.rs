@@ -70,10 +70,7 @@ fn set_mode(on: bool) -> Result<(), String> {
         write_state(true)?;
         notify("Game mode ON", "blur · shadows · animations off");
         println!("  {} game mode {}", term::green("→"), term::bold("ON"));
-        println!(
-            "    {}",
-            term::dim("blur, shadows and animations disabled for lowest latency")
-        );
+        println!("    {}", term::dim("blur, shadows and animations disabled for lowest latency"));
     } else {
         report_hypr(restore());
         write_state(false)?;
@@ -92,11 +89,7 @@ fn cmd_toggle() -> Result<(), String> {
 /// Enables game mode first so the session is already lean when the title maps.
 fn cmd_run(rest: &[&str]) -> Result<(), String> {
     // Tolerate an optional `--` separator (`tezca game run -- steam`).
-    let cmd: Vec<&str> = rest
-        .iter()
-        .copied()
-        .skip_while(|a| *a == "--")
-        .collect();
+    let cmd: Vec<&str> = rest.iter().copied().skip_while(|a| *a == "--").collect();
     if cmd.is_empty() {
         return Err(
             "usage: tezca game run -- <command> [args...]\n  e.g. tezca game run -- steam steam://rungameid/570"

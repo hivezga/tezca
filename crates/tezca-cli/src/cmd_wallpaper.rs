@@ -23,10 +23,7 @@ fn state_path() -> Result<PathBuf, String> {
 }
 
 fn global_path() -> Result<PathBuf, String> {
-    Ok(repo::config_home()?
-        .join("tezca")
-        .join("current")
-        .join("wallpaper"))
+    Ok(repo::config_home()?.join("tezca").join("current").join("wallpaper"))
 }
 
 pub fn run(args: &[&str]) -> i32 {
@@ -120,9 +117,7 @@ fn cmd_clear(args: &[&str]) -> Result<(), String> {
 /// `tezca wallpaper list` — machine-readable `NAME<TAB>source<TAB>path`.
 fn cmd_list() -> Result<(), String> {
     let overrides = read_overrides()?;
-    let global = read_global()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let global = read_global().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     for name in monitor_names() {
         match overrides.iter().find(|(n, _)| *n == name) {
             Some((_, path)) => println!("{name}\toverride\t{path}"),
@@ -231,7 +226,6 @@ fn monitor_names() -> Vec<String> {
         .collect()
 }
 
-
 fn print_help() {
     println!("{}", term::header("tezca wallpaper"));
     println!("{}", term::dim("  per-monitor wallpaper overrides (global image → `tezca theme`)"));
@@ -239,5 +233,8 @@ fn print_help() {
     println!("  {}  override one output", term::cyan("set <img> --monitor <NAME>"));
     println!("  {}       drop an override (or --all)", term::cyan("clear --monitor <NAME>"));
     println!("  {}                       show each monitor's wallpaper", term::cyan("list"));
-    println!("  {}                      repaint global + overrides (autostart)", term::cyan("apply"));
+    println!(
+        "  {}                      repaint global + overrides (autostart)",
+        term::cyan("apply")
+    );
 }

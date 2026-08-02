@@ -47,11 +47,10 @@ pub fn subscribe(tx: async_channel::Sender<()>) {
             // Lines look like: `Event 'change' on sink #49`. We want master-sink
             // volume/mute only — NOT `sink-input` (per-app streams) and not
             // sources/cards. `on sink #` matches "sink" but not "sink-input".
-            if line.contains("on sink #")
-                && tx.send_blocking(()).is_err() {
-                    let _ = child.kill();
-                    return; // GTK side gone
-                }
+            if line.contains("on sink #") && tx.send_blocking(()).is_err() {
+                let _ = child.kill();
+                return; // GTK side gone
+            }
         }
         // `pactl subscribe` ended (server restart?). Reap and reconnect.
         let _ = child.wait();

@@ -34,7 +34,8 @@ fn activate(app: &Application) {
     let (tx, rx) = async_channel::unbounded::<()>();
     hypr::subscribe(tx);
     glib::spawn_future_local(glib::clone!(
-        #[strong] dock,
+        #[strong]
+        dock,
         async move {
             while rx.recv().await.is_ok() {
                 // Coalesce bursts (opening a window fires several events).
@@ -57,7 +58,8 @@ fn activate(app: &Application) {
         });
     }
     glib::spawn_future_local(glib::clone!(
-        #[strong] dock,
+        #[strong]
+        dock,
         async move {
             while let Ok(sig) = sig_rx.recv().await {
                 match sig {

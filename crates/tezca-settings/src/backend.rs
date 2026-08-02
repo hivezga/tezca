@@ -60,10 +60,7 @@ fn config_tezca(rel: &str) -> Option<PathBuf> {
 /// The active curated theme name — `current/theme.state` holds "obsidian" or
 /// "dynamic:/path". Returns the curated name, or None when dynamic/unset.
 pub fn active_theme() -> Option<String> {
-    let s = std::fs::read_to_string(config_tezca("current/theme.state")?)
-        .ok()?
-        .trim()
-        .to_string();
+    let s = std::fs::read_to_string(config_tezca("current/theme.state")?).ok()?.trim().to_string();
     if s.is_empty() || s.starts_with("dynamic:") {
         None
     } else {
@@ -73,10 +70,7 @@ pub fn active_theme() -> Option<String> {
 
 /// Current wallpaper path from `current/wallpaper`.
 pub fn current_wallpaper() -> Option<PathBuf> {
-    let s = std::fs::read_to_string(config_tezca("current/wallpaper")?)
-        .ok()?
-        .trim()
-        .to_string();
+    let s = std::fs::read_to_string(config_tezca("current/wallpaper")?).ok()?.trim().to_string();
     if s.is_empty() {
         None
     } else {

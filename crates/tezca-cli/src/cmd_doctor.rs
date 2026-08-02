@@ -253,8 +253,9 @@ fn modprobe_sets_modeset() -> bool {
 fn parse_driver_version(s: &str) -> Option<String> {
     // "NVRM version: NVIDIA UNIX ... Kernel Module  560.35.03  ..."
     s.split_whitespace()
-        .find(|tok| tok.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
-            && tok.contains('.'))
+        .find(|tok| {
+            tok.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) && tok.contains('.')
+        })
         .map(|s| s.to_string())
 }
 
@@ -289,10 +290,7 @@ fn session_checks() -> Vec<Check> {
     }
 
     // Key NVIDIA env vars (only meaningful once uwsm has exported them).
-    for (key, want) in [
-        ("__GLX_VENDOR_LIBRARY_NAME", "nvidia"),
-        ("LIBVA_DRIVER_NAME", "nvidia"),
-    ] {
+    for (key, want) in [("__GLX_VENDOR_LIBRARY_NAME", "nvidia"), ("LIBVA_DRIVER_NAME", "nvidia")] {
         match std::env::var(key).ok() {
             Some(val) if val == want => v.push(Check::pass(key, val)),
             Some(val) => v.push(Check::warn(key, format!("is '{val}', expected '{want}'"))),
@@ -318,20 +316,14 @@ fn config_checks() -> Vec<Check> {
         }
     };
 
-    for (name, file) in [
-        ("hypr", "hyprland.lua"),
-        ("uwsm", "env"),
-    ] {
+    for (name, file) in [("hypr", "hyprland.lua"), ("uwsm", "env")] {
         let path = cfg.join(name).join(file);
         if path.exists() {
             let linked = cfg.join(name).read_link().is_ok();
             let how = if linked { "symlinked" } else { "present (not a symlink)" };
             v.push(Check::pass(&format!("{name}/{file}"), how));
         } else {
-            v.push(Check::fail(
-                &format!("{name}/{file}"),
-                "missing — run `tezca link`",
-            ));
+            v.push(Check::fail(&format!("{name}/{file}"), "missing — run `tezca link`"));
         }
     }
 
@@ -346,7 +338,10 @@ fn config_checks() -> Vec<Check> {
         if cfg.join(rel).exists() {
             v.push(Check::pass(rel, what));
         } else {
-            v.push(Check::warn(rel, "missing — your saved overrides won't apply; run `tezca link`"));
+            v.push(Check::warn(
+                rel,
+                "missing — your saved overrides won't apply; run `tezca link`",
+            ));
         }
     }
 
@@ -426,14 +421,9 @@ fn config_validity_checks() -> Vec<Check> {
                     .next()
                     // Trim the noisy absolute-path prefix for a readable one-liner.
                     .map(|l| l.replace("Config error in file ", ""))
-                    .unwrap_or_else(|| {
-                        "run `Hyprland --verify-config` to see the errors".into()
-                    });
-                let detail = if count > 1 {
-                    format!("{count} errors — first: {first}")
-                } else {
-                    first
-                };
+                    .unwrap_or_else(|| "run `Hyprland --verify-config` to see the errors".into());
+                let detail =
+                    if count > 1 { format!("{count} errors — first: {first}") } else { first };
                 v.push(Check::fail("hyprland config INVALID", detail));
             }
         }
@@ -450,10 +440,7 @@ fn config_validity_checks() -> Vec<Check> {
 fn monitor_checks() -> Vec<Check> {
     let mut v = Vec::new();
     if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
-        v.push(Check::warn(
-            "monitor checks skipped",
-            "not in a Hyprland session",
-        ));
+        v.push(Check::warn("monitor checks skipped", "not in a Hyprland session"));
         return v;
     }
 
@@ -516,17 +503,17 @@ fn dependency_checks() -> Vec<Check> {
         ("matugen", false, &[]),
         ("hyprlock", false, &[]),
         ("hypridle", false, &[]),
-        ("tezca-bar", false, &[]),         // Phase 10 bespoke menubar (build via install.sh)
-        ("tezca-dock", false, &[]),        // Phase 5 bespoke dock (build via install.sh)
-        ("tezca-settings", false, &[]),    // Phase 8 control center (build via install.sh)
-        ("playerctl", false, &[]),         // Phase 10 bar now-playing (MPRIS)
-        ("wlogout", false, &[]),           // Phase 4 power menu
-        ("hyprpicker", false, &[]),        // color picker (SUPER+SHIFT+P)
-        ("dolphin", false, &[]),           // file manager (SUPER+E)
-        ("ddcutil", false, &[]),           // Phase 9 external-monitor brightness (`tezca display brightness`)
-        ("nmcli", false, &[]),             // `tezca net` — Wi-Fi / VPN / airplane mode
-        ("bluetoothctl", false, &[]),      // `tezca bt` — Bluetooth
-        ("hyprsunset", false, &[]),        // `tezca night` — blue-light filter
+        ("tezca-bar", false, &[]), // Phase 10 bespoke menubar (build via install.sh)
+        ("tezca-dock", false, &[]), // Phase 5 bespoke dock (build via install.sh)
+        ("tezca-settings", false, &[]), // Phase 8 control center (build via install.sh)
+        ("playerctl", false, &[]), // Phase 10 bar now-playing (MPRIS)
+        ("wlogout", false, &[]),   // Phase 4 power menu
+        ("hyprpicker", false, &[]), // color picker (SUPER+SHIFT+P)
+        ("dolphin", false, &[]),   // file manager (SUPER+E)
+        ("ddcutil", false, &[]), // Phase 9 external-monitor brightness (`tezca display brightness`)
+        ("nmcli", false, &[]),   // `tezca net` — Wi-Fi / VPN / airplane mode
+        ("bluetoothctl", false, &[]), // `tezca bt` — Bluetooth
+        ("hyprsunset", false, &[]), // `tezca night` — blue-light filter
         ("wf-recorder", false, &["/usr/bin/wl-screenrec"]), // `tezca record`
     ];
 
@@ -581,11 +568,7 @@ fn dependency_checks() -> Vec<Check> {
 
 /// True if a process with the exact name `name` is alive (`pkill -0 -x`).
 fn proc_running(name: &str) -> bool {
-    Command::new("pkill")
-        .args(["-0", "-x", name])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    Command::new("pkill").args(["-0", "-x", name]).status().map(|s| s.success()).unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -638,10 +621,7 @@ fn theme_checks() -> Vec<Check> {
     if util::has("matugen") {
         v.push(Check::pass("matugen", "dynamic (wallpaper) theming available"));
     } else {
-        v.push(Check::warn(
-            "matugen",
-            "absent — curated themes work, `theme wallpaper` won't",
-        ));
+        v.push(Check::warn("matugen", "absent — curated themes work, `theme wallpaper` won't"));
     }
 
     v
@@ -685,8 +665,8 @@ fn workflow_checks() -> Vec<Check> {
 
     // AI launchers: the Claude desktop app (SUPER+C) and Claude Code (SUPER+A /
     // the AI scratchpad). Each degrades independently.
-    let claude_desktop = util::has("claude-desktop")
-        || dirs_have_desktop("com.anthropic.Claude.desktop");
+    let claude_desktop =
+        util::has("claude-desktop") || dirs_have_desktop("com.anthropic.Claude.desktop");
     if claude_desktop {
         v.push(Check::pass("claude-desktop", "AI chat app (SUPER+C)"));
     } else {
@@ -714,9 +694,7 @@ fn dirs_have_desktop(file: &str) -> bool {
     if let Some(h) = std::env::var_os("HOME") {
         roots.push(format!("{}/.local/share", h.to_string_lossy()));
     }
-    roots
-        .iter()
-        .any(|r| Path::new(r).join("applications").join(file).is_file())
+    roots.iter().any(|r| Path::new(r).join("applications").join(file).is_file())
 }
 
 #[cfg(test)]

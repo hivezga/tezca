@@ -303,17 +303,14 @@ fn cmd_switch(want: Option<bool>) -> Result<(), String> {
     n.enabled = want.unwrap_or(!n.enabled);
     write(&n)?;
     apply(&n)?;
-    println!(
-        "  {} night light {}",
-        term::green("✓"),
-        if n.enabled { "on" } else { "off" }
-    );
+    println!("  {} night light {}", term::green("✓"), if n.enabled { "on" } else { "off" });
     Ok(())
 }
 
 fn cmd_temp(args: &[&str]) -> Result<(), String> {
     let v = args.first().copied().ok_or("usage: tezca night temp <1000-6500>")?;
-    let kelvin: u32 = v.parse().map_err(|_| format!("invalid temperature {v:?} — expected kelvin, e.g. 4000"))?;
+    let kelvin: u32 =
+        v.parse().map_err(|_| format!("invalid temperature {v:?} — expected kelvin, e.g. 4000"))?;
     if !(1000..=6500).contains(&kelvin) {
         return Err(format!("temperature {kelvin} is out of range — expected 1000-6500 K"));
     }
@@ -341,8 +338,10 @@ fn cmd_schedule(args: &[&str]) -> Result<(), String> {
         }
         Some(from) => {
             let to = args.get(1).copied().ok_or("usage: tezca night schedule <HH:MM> <HH:MM>")?;
-            let f = parse_hhmm(from).ok_or_else(|| format!("invalid time {from:?} — expected HH:MM"))?;
-            let t = parse_hhmm(to).ok_or_else(|| format!("invalid time {to:?} — expected HH:MM"))?;
+            let f = parse_hhmm(from)
+                .ok_or_else(|| format!("invalid time {from:?} — expected HH:MM"))?;
+            let t =
+                parse_hhmm(to).ok_or_else(|| format!("invalid time {to:?} — expected HH:MM"))?;
             if f == t {
                 return Err("the start and end times are the same — that is not a window".into());
             }
@@ -423,10 +422,9 @@ mod tests {
 
     #[test]
     fn round_trips_through_the_store() {
-        for n in [
-            Night::default(),
-            Night { enabled: true, temp: 3200, from: Some(1290), to: Some(390) },
-        ] {
+        for n in
+            [Night::default(), Night { enabled: true, temp: 3200, from: Some(1290), to: Some(390) }]
+        {
             assert_eq!(parse(&render(&n)), n);
         }
     }

@@ -23,11 +23,8 @@ impl CpuMeter {
         let Ok(stat) = std::fs::read_to_string("/proc/stat") else { return 0.0 };
         let Some(line) = stat.lines().next() else { return 0.0 };
         // "cpu  user nice system idle iowait irq softirq steal ..."
-        let nums: Vec<u64> = line
-            .split_whitespace()
-            .skip(1)
-            .filter_map(|s| s.parse().ok())
-            .collect();
+        let nums: Vec<u64> =
+            line.split_whitespace().skip(1).filter_map(|s| s.parse().ok()).collect();
         if nums.len() < 4 {
             return 0.0;
         }
@@ -61,9 +58,7 @@ pub fn mem() -> Mem {
     let total = get("MemTotal:");
     let avail = get("MemAvailable:");
     let used = (total - avail).max(0.0);
-    Mem {
-        used_frac: if total > 0.0 { used / total } else { 0.0 },
-    }
+    Mem { used_frac: if total > 0.0 { used / total } else { 0.0 } }
 }
 
 /// Audio sink state from wpctl.
@@ -260,9 +255,7 @@ pub fn battery() -> Option<Battery> {
         if ty.as_deref() != Some("Battery") {
             continue;
         }
-        let percent = read_trim(&p.join("capacity"))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let percent = read_trim(&p.join("capacity")).and_then(|s| s.parse().ok()).unwrap_or(0);
         let status = read_trim(&p.join("status")).unwrap_or_default();
         return Some(Battery { percent, charging: status == "Charging" || status == "Full" });
     }

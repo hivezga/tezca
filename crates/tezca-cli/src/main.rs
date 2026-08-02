@@ -192,14 +192,29 @@ fn print_help() {
     }
     println!();
     println!("{}", term::bold("THEME"));
-    println!("  {}            list curated themes + the active one", term::cyan("tezca theme list"));
-    println!("  {}       apply a curated palette (e.g. obsidian)", term::cyan("tezca theme set <name>"));
-    println!("  {}  extract a palette from any image (matugen)", term::cyan("tezca theme wallpaper <img>"));
+    println!(
+        "  {}            list curated themes + the active one",
+        term::cyan("tezca theme list")
+    );
+    println!(
+        "  {}       apply a curated palette (e.g. obsidian)",
+        term::cyan("tezca theme set <name>")
+    );
+    println!(
+        "  {}  extract a palette from any image (matugen)",
+        term::cyan("tezca theme wallpaper <img>")
+    );
     println!("  {}          re-apply the active theme + reload", term::cyan("tezca theme reload"));
     println!();
     println!("{}", term::bold("GAME"));
-    println!("  {}          low-latency profile: blur/shadow/anim off", term::cyan("tezca game on"));
-    println!("  {}         restore desktop eye-candy (hyprctl reload)", term::cyan("tezca game off"));
+    println!(
+        "  {}          low-latency profile: blur/shadow/anim off",
+        term::cyan("tezca game on")
+    );
+    println!(
+        "  {}         restore desktop eye-candy (hyprctl reload)",
+        term::cyan("tezca game off")
+    );
     println!("  {}      flip the profile (bound to SUPER+G)", term::cyan("tezca game toggle"));
     println!("  {}  launch under gamemode + MangoHud", term::cyan("tezca game run -- <cmd>"));
     println!();

@@ -393,22 +393,15 @@ impl DockSurface {
         let now = clock.frame_time();
         let (target, dt) = {
             let mut st = self.st.borrow_mut();
-            let dt = if st.last_frame == 0 {
-                0.0
-            } else {
-                (now - st.last_frame) as f64 / 1_000_000.0
-            };
+            let dt =
+                if st.last_frame == 0 { 0.0 } else { (now - st.last_frame) as f64 / 1_000_000.0 };
             st.last_frame = now;
             (st.target, dt)
         };
 
         let cur = self.mag.reveal();
         let step = if dt > 0.0 { dt / ANIM_SECS } else { 0.0 };
-        let next = if target > cur {
-            (cur + step).min(target)
-        } else {
-            (cur - step).max(target)
-        };
+        let next = if target > cur { (cur + step).min(target) } else { (cur - step).max(target) };
         self.mag.set_reveal(next);
 
         if (next - target).abs() < 0.001 {

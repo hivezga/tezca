@@ -58,25 +58,32 @@ mod imp {
             // Pointer tracking → magnification + reveal/hide triggers.
             let motion = gtk4::EventControllerMotion::new();
             motion.connect_enter(glib::clone!(
-                #[weak] obj,
+                #[weak]
+                obj,
                 move |_, x, _| {
                     obj.imp().pointer_x.set(Some(x));
-                    if let Some(cb) = obj.imp().on_enter.borrow().as_ref() { cb(); }
+                    if let Some(cb) = obj.imp().on_enter.borrow().as_ref() {
+                        cb();
+                    }
                     obj.queue_draw();
                 }
             ));
             motion.connect_motion(glib::clone!(
-                #[weak] obj,
+                #[weak]
+                obj,
                 move |_, x, _| {
                     obj.imp().pointer_x.set(Some(x));
                     obj.queue_draw();
                 }
             ));
             motion.connect_leave(glib::clone!(
-                #[weak] obj,
+                #[weak]
+                obj,
                 move |_| {
                     obj.imp().pointer_x.set(None);
-                    if let Some(cb) = obj.imp().on_leave.borrow().as_ref() { cb(); }
+                    if let Some(cb) = obj.imp().on_leave.borrow().as_ref() {
+                        cb();
+                    }
                     obj.queue_draw();
                 }
             ));
@@ -86,10 +93,13 @@ mod imp {
             let click = gtk4::GestureClick::new();
             click.set_button(gtk4::gdk::BUTTON_PRIMARY);
             click.connect_released(glib::clone!(
-                #[weak] obj,
+                #[weak]
+                obj,
                 move |_, _, x, _| {
                     if let Some(i) = obj.hit_test(x) {
-                        if let Some(cb) = obj.imp().on_activate.borrow().as_ref() { cb(i); }
+                        if let Some(cb) = obj.imp().on_activate.borrow().as_ref() {
+                            cb(i);
+                        }
                     }
                 }
             ));
@@ -292,9 +302,7 @@ impl Magnifier {
         let cfg = self.imp().config.borrow();
         let (centers, _) = self.base_centers(w);
         let half = cfg.icon_size / 2.0 + cfg.gap / 2.0;
-        centers
-            .iter()
-            .position(|&c| (x - c).abs() <= half)
+        centers.iter().position(|&c| (x - c).abs() <= half)
     }
 
     // --- drawing ----------------------------------------------------------
@@ -327,7 +335,8 @@ impl Magnifier {
         let pill_x = (w - pill_w) / 2.0;
         let pill_y = h - pill_h;
         let radius = (pill_h / 2.0).min(20.0) as f32;
-        let pill_rect = graphene::Rect::new(pill_x as f32, pill_y as f32, pill_w as f32, pill_h as f32);
+        let pill_rect =
+            graphene::Rect::new(pill_x as f32, pill_y as f32, pill_w as f32, pill_h as f32);
         let rr = gsk::RoundedRect::from_rect(pill_rect, radius);
         snapshot.push_rounded_clip(&rr);
         snapshot.append_color(&theme::with_alpha(pal.base, 0.72), &pill_rect);
@@ -344,7 +353,8 @@ impl Magnifier {
         for (i, it) in items.iter().enumerate() {
             if it.divider_before {
                 let dx = (geoms[i].left - DIVIDER_GAP / 2.0) as f32;
-                let dr = graphene::Rect::new(dx, (pill_y + 6.0) as f32, 1.0, (pill_h - 12.0) as f32);
+                let dr =
+                    graphene::Rect::new(dx, (pill_y + 6.0) as f32, 1.0, (pill_h - 12.0) as f32);
                 snapshot.append_color(&theme::with_alpha(pal.muted, 0.35), &dr);
             }
         }
@@ -381,7 +391,14 @@ impl Magnifier {
                 let _ = p;
                 let g = &geoms[a];
                 let top = bottom - g.size;
-                self.draw_label(snapshot, &items[a].label, g.left + g.size / 2.0, top - 8.0, &pal, w);
+                self.draw_label(
+                    snapshot,
+                    &items[a].label,
+                    g.left + g.size / 2.0,
+                    top - 8.0,
+                    &pal,
+                    w,
+                );
             }
         }
 
@@ -389,7 +406,15 @@ impl Magnifier {
         snapshot.pop(); // clip
     }
 
-    fn draw_label(&self, snapshot: &gtk4::Snapshot, text: &str, cx: f64, baseline_y: f64, pal: &Palette, w: f64) {
+    fn draw_label(
+        &self,
+        snapshot: &gtk4::Snapshot,
+        text: &str,
+        cx: f64,
+        baseline_y: f64,
+        pal: &Palette,
+        w: f64,
+    ) {
         let layout = self.create_pango_layout(Some(text));
         let desc = gtk4::pango::FontDescription::from_string("Inter 10");
         layout.set_font_description(Some(&desc));
@@ -409,7 +434,8 @@ impl Magnifier {
         snapshot.append_border(&rr, &[1.0; 4], &[theme::with_alpha(pal.accent, 0.18); 4]);
 
         snapshot.save();
-        snapshot.translate(&graphene::Point::new((bx + pad) as f32, (by + bh * 0.5 - th / 2.0) as f32));
+        snapshot
+            .translate(&graphene::Point::new((bx + pad) as f32, (by + bh * 0.5 - th / 2.0) as f32));
         snapshot.append_layout(&layout, &pal.text);
         snapshot.restore();
     }

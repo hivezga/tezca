@@ -16,13 +16,13 @@ use std::process::{Command, Stdio};
 
 /// The generated files every component imports from ~/.config/tezca/current/.
 const FILES: &[&str] = &[
-    "colors.css",             // GTK: tezca-bar, swaync, Walker
-    "colors-alacritty.toml",  // Alacritty (the terminal)
+    "colors.css",            // GTK: tezca-bar, swaync, Walker
+    "colors-alacritty.toml", // Alacritty (the terminal)
     // Lua data table since the Hyprland config moved off hyprlang; loaded by
     // hypr/conf.d/decoration.lua (borders/shadows).
     "colors-hypr.lua",
     // Still hyprlang: hyprlock keeps the .conf format, so this one does not move.
-    "colors-hyprlock.conf",   // hypr/hyprlock.conf (+ wallpaper path)
+    "colors-hyprlock.conf", // hypr/hyprlock.conf (+ wallpaper path)
 ];
 
 /// Token in colors-hyprlock.conf we substitute with the wallpaper's abs path.
@@ -79,16 +79,9 @@ pub fn ensure_default(quiet: bool) -> Result<(), String> {
         return Ok(()); // already themed — leave the user's choice alone
     }
     if !quiet {
-        println!(
-            "  {} seeding default theme {}",
-            term::dim("theme:"),
-            term::cyan(DEFAULT_THEME)
-        );
+        println!("  {} seeding default theme {}", term::dim("theme:"), term::cyan(DEFAULT_THEME));
     }
-    apply_curated(
-        DEFAULT_THEME,
-        Opts { set_wallpaper: false, reload: false, announce: false },
-    )
+    apply_curated(DEFAULT_THEME, Opts { set_wallpaper: false, reload: false, announce: false })
 }
 
 // ---------------------------------------------------------------------------
@@ -177,10 +170,7 @@ fn apply_curated(name: &str, opts: Opts) -> Result<(), String> {
     let theme_dir = root.join("themes").join(name);
     let meta_path = theme_dir.join("theme.meta");
     if !meta_path.is_file() {
-        return Err(format!(
-            "no curated theme '{name}' ({} not found)",
-            meta_path.display()
-        ));
+        return Err(format!("no curated theme '{name}' ({} not found)", meta_path.display()));
     }
     let meta = read_meta(&meta_path)?;
     let current = current_dir()?;
@@ -199,8 +189,7 @@ fn apply_curated(name: &str, opts: Opts) -> Result<(), String> {
             return Err(format!("theme '{name}' is missing {}", src.display()));
         }
         let dst = current.join(f);
-        fs::copy(&src, &dst)
-            .map_err(|e| format!("cannot write {}: {e}", dst.display()))?;
+        fs::copy(&src, &dst).map_err(|e| format!("cannot write {}: {e}", dst.display()))?;
     }
 
     // Resolve the theme's wallpaper (relative to wallpapers/, or an abs path).
@@ -218,8 +207,7 @@ fn apply_dynamic(img: &str, opts: Opts) -> Result<(), String> {
     }
     let root = repo::root()?;
     let templates = root.join("templates");
-    let img_abs = fs::canonicalize(img)
-        .map_err(|e| format!("cannot read image '{img}': {e}"))?;
+    let img_abs = fs::canonicalize(img).map_err(|e| format!("cannot read image '{img}': {e}"))?;
 
     let current = current_dir()?;
     fs::create_dir_all(&current)
@@ -233,16 +221,23 @@ fn apply_dynamic(img: &str, opts: Opts) -> Result<(), String> {
     // Write a resolved matugen config (abs input/output paths) and run it.
     let mcfg = write_matugen_config(&templates, &current)?;
     let out = Command::new("matugen")
-        .arg("-c").arg(&mcfg)
-        .arg("image").arg(&img_abs)
-        .arg("--prefer").arg("saturation") // non-interactive: no TTY to disambiguate
-        .arg("-m").arg("dark")
+        .arg("-c")
+        .arg(&mcfg)
+        .arg("image")
+        .arg(&img_abs)
+        .arg("--prefer")
+        .arg("saturation") // non-interactive: no TTY to disambiguate
+        .arg("-m")
+        .arg("dark")
         .output()
         .map_err(|e| format!("failed to run matugen: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         // matugen colorizes errors; strip the noisiest control chars for a clean line.
-        let msg = err.lines().rev().find(|l| l.contains("rror") || l.contains("ailed"))
+        let msg = err
+            .lines()
+            .rev()
+            .find(|l| l.contains("rror") || l.contains("ailed"))
             .unwrap_or_else(|| err.lines().last().unwrap_or(""))
             .trim();
         return Err(format!("matugen failed: {}", strip_ansi(msg)));
@@ -423,7 +418,9 @@ fn reload_walker() -> Outcome {
 /// True if at least one process with the exact name `name` is alive.
 fn proc_running(name: &str) -> bool {
     Command::new("pkill")
-        .arg("-0").arg("-x").arg(name)
+        .arg("-0")
+        .arg("-x")
+        .arg(name)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -479,8 +476,10 @@ fn set_wallpaper(path: &Path) {
     let o = Command::new("awww")
         .arg("img")
         .arg(path)
-        .arg("--transition-type").arg("grow")
-        .arg("--transition-pos").arg("center")
+        .arg("--transition-type")
+        .arg("grow")
+        .arg("--transition-pos")
+        .arg("center")
         .output();
     match o {
         Ok(s) if s.status.success() => report("wallpaper", Outcome::Done(String::new())),
@@ -488,7 +487,10 @@ fn set_wallpaper(path: &Path) {
             "wallpaper",
             Outcome::Failed(
                 strip_ansi(String::from_utf8_lossy(&s.stderr).trim())
-                    .lines().next().unwrap_or("awww img failed").to_string(),
+                    .lines()
+                    .next()
+                    .unwrap_or("awww img failed")
+                    .to_string(),
             ),
         ),
         Err(e) => report("wallpaper", Outcome::Failed(e.to_string())),
@@ -504,8 +506,7 @@ fn set_wallpaper(path: &Path) {
 /// repo + config locations (robust to a repo whose path contains a ':').
 fn write_matugen_config(templates: &Path, current: &Path) -> Result<PathBuf, String> {
     let cache = cache_dir()?.join("tezca");
-    fs::create_dir_all(&cache)
-        .map_err(|e| format!("cannot create {}: {e}", cache.display()))?;
+    fs::create_dir_all(&cache).map_err(|e| format!("cannot create {}: {e}", cache.display()))?;
     let cfg_path = cache.join("matugen.toml");
 
     let mut body = String::from("# Generated by `tezca theme` — do not edit.\n[config]\n\n");
@@ -569,8 +570,8 @@ fn curated_themes() -> Result<Vec<(String, String)>, String> {
 }
 
 fn read_meta(path: &Path) -> Result<Vec<(String, String)>, String> {
-    let text = fs::read_to_string(path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let mut out = Vec::new();
     for line in text.lines() {
         let l = line.trim();
@@ -597,7 +598,11 @@ fn read_wallpaper() -> Option<PathBuf> {
     let p = current_dir().ok()?.join("wallpaper");
     let s = fs::read_to_string(p).ok()?;
     let t = s.trim();
-    if t.is_empty() { None } else { Some(PathBuf::from(t)) }
+    if t.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(t))
+    }
 }
 
 /// Print the section header for a theme subcommand.
@@ -605,7 +610,6 @@ fn announce_header(sub: &str) {
     println!("{}", term::header(&format!("tezca theme {sub}")));
     println!();
 }
-
 
 /// Strip ANSI SGR sequences so captured error text prints cleanly.
 fn strip_ansi(s: &str) -> String {
@@ -636,7 +640,13 @@ fn print_help() {
     println!("  {}            bare names, one per line (for scripts)", term::cyan("names"));
     println!("  {}       apply a curated palette", term::cyan("set <name>"));
     println!("  {}  extract a palette from any image (matugen)", term::cyan("wallpaper <img>"));
-    println!("  {}           re-apply the active theme and re-send reload signals", term::cyan("reload"));
+    println!(
+        "  {}           re-apply the active theme and re-send reload signals",
+        term::cyan("reload")
+    );
     println!();
-    println!("{}", term::dim("  e.g. tezca theme set obsidian · tezca theme wallpaper ~/Pictures/a.jpg"));
+    println!(
+        "{}",
+        term::dim("  e.g. tezca theme set obsidian · tezca theme wallpaper ~/Pictures/a.jpg")
+    );
 }

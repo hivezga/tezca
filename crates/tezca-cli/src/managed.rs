@@ -589,7 +589,10 @@ mod tests {
         assert_eq!(lua_value("-40"), "-40");
         assert_eq!(lua_value("true"), "true");
         assert_eq!(lua_value("rgba(3FB8AFff)"), "\"rgba(3FB8AFff)\"");
-        assert_eq!(lua_value("$tz_accent $tz_accent_dim 45deg"), "\"$tz_accent $tz_accent_dim 45deg\"");
+        assert_eq!(
+            lua_value("$tz_accent $tz_accent_dim 45deg"),
+            "\"$tz_accent $tz_accent_dim 45deg\""
+        );
         // `inf`/`NaN` parse as f64 but are not Lua number literals we want bare.
         assert_eq!(lua_value("inf"), "\"inf\"");
         assert_eq!(lua_value("NaN"), "\"NaN\"");
@@ -604,10 +607,8 @@ mod tests {
 
     #[test]
     fn re_setting_a_key_replaces_its_entry_instead_of_appending() {
-        let mut store = Store {
-            options: vec![("decoration:rounding".into(), "12".into())],
-            monitors: vec![],
-        };
+        let mut store =
+            Store { options: vec![("decoration:rounding".into(), "12".into())], monitors: vec![] };
         let key = "decoration:rounding";
         match store.options.iter_mut().find(|(k, _)| k == key) {
             Some(slot) => slot.1 = "20".into(),
@@ -641,8 +642,9 @@ mod tests {
 
     #[test]
     fn stripping_the_legacy_block_preserves_everything_around_it() {
-        let legacy =
-            format!("# keep me\n# and me\n{LEGACY_BEGIN}\ndecoration:rounding = 12\n{LEGACY_END}\n");
+        let legacy = format!(
+            "# keep me\n# and me\n{LEGACY_BEGIN}\ndecoration:rounding = 12\n{LEGACY_END}\n"
+        );
         let out = strip_legacy_block(&legacy).unwrap();
         assert_eq!(out, "# keep me\n# and me\n");
         assert!(!out.contains(LEGACY_BEGIN));
@@ -666,4 +668,3 @@ mod tests {
         assert_eq!(store.options, vec![("decoration:rounding".to_string(), "14".to_string())]);
     }
 }
-

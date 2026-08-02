@@ -121,11 +121,8 @@ fn parse_devices(text: &str, default_name: &str, drop_monitors: bool) -> Vec<Dev
 }
 
 fn devices(input: bool) -> Vec<Device> {
-    let (list, default) = if input {
-        ("sources", "get-default-source")
-    } else {
-        ("sinks", "get-default-sink")
-    };
+    let (list, default) =
+        if input { ("sources", "get-default-source") } else { ("sinks", "get-default-sink") };
     let text = pactl_opt(&["list", list]).unwrap_or_default();
     let def = pactl_opt(&[default]).unwrap_or_default().trim().to_string();
     parse_devices(&text, &def, input)
@@ -169,13 +166,23 @@ fn cmd_status(args: &[&str]) -> Result<(), String> {
         "  {} {:<8} {}",
         term::green("●"),
         "output",
-        term::dim(&format!("{}  {}%{}", out_dev.description, ovol, if omute { " (muted)" } else { "" }))
+        term::dim(&format!(
+            "{}  {}%{}",
+            out_dev.description,
+            ovol,
+            if omute { " (muted)" } else { "" }
+        ))
     );
     println!(
         "  {} {:<8} {}",
         term::green("●"),
         "input",
-        term::dim(&format!("{}  {}%{}", in_dev.description, ivol, if imute { " (muted)" } else { "" }))
+        term::dim(&format!(
+            "{}  {}%{}",
+            in_dev.description,
+            ivol,
+            if imute { " (muted)" } else { "" }
+        ))
     );
     println!();
     Ok(())
@@ -208,10 +215,9 @@ fn cmd_list(input: bool, args: &[&str]) -> Result<(), String> {
 }
 
 fn cmd_set_default(input: bool, args: &[&str]) -> Result<(), String> {
-    let want = args
-        .first()
-        .copied()
-        .ok_or_else(|| format!("usage: tezca audio set-{} <name>", if input { "input" } else { "output" }))?;
+    let want = args.first().copied().ok_or_else(|| {
+        format!("usage: tezca audio set-{} <name>", if input { "input" } else { "output" })
+    })?;
 
     // Accept an exact node name or a unique description substring — the GUI sends
     // the former, a human typing at a prompt has only ever seen the latter.

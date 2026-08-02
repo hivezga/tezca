@@ -96,10 +96,7 @@ pub fn mixer(anchor: &impl IsA<gtk4::Widget>) -> Popover {
         while let Some(c) = content_c.first_child() {
             content_c.remove(&c);
         }
-        let rows = [
-            ("Output", "@DEFAULT_AUDIO_SINK@"),
-            ("Input", "@DEFAULT_AUDIO_SOURCE@"),
-        ];
+        let rows = [("Output", "@DEFAULT_AUDIO_SINK@"), ("Input", "@DEFAULT_AUDIO_SOURCE@")];
         for (label, id) in rows {
             let a = sysinfo::audio_of(id);
             let (vol, muted) = a.map(|x| (x.volume, x.muted)).unwrap_or((0, true));
@@ -632,7 +629,11 @@ pub fn ai_detail(anchor: &impl IsA<gtk4::Widget>, state: Rc<RefCell<ai::Snapshot
 
             if let Some(l) = &p.local {
                 let rows = GtkBox::new(Orientation::Vertical, 7);
-                rows.append(&mono_row("today", &format!("{} tok", ai::compact_count(l.total_tokens())), false));
+                rows.append(&mono_row(
+                    "today",
+                    &format!("{} tok", ai::compact_count(l.total_tokens())),
+                    false,
+                ));
                 if l.cost_usd > 0.0 {
                     // Named "API-equivalent" because on a subscription plan
                     // this is not money you are actually charged.

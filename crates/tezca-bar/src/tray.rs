@@ -36,9 +36,16 @@ use zbus::Connection;
 #[derive(Clone)]
 pub enum TrayIcon {
     /// A themed icon name, plus an optional extra icon-theme search path.
-    Named { name: String, theme_path: Option<String> },
+    Named {
+        name: String,
+        theme_path: Option<String>,
+    },
     /// A raw ARGB32 (network byte order) frame straight from `IconPixmap`.
-    Pixmap { width: i32, height: i32, argb: Vec<u8> },
+    Pixmap {
+        width: i32,
+        height: i32,
+        argb: Vec<u8>,
+    },
     None,
 }
 
@@ -76,7 +83,10 @@ pub enum TrayCmd {
     /// Ask the item to show its own menu — the right-click fallback for apps
     /// whose DBusMenu we can't render ourselves.
     ContextMenu(String),
-    MenuClicked { key: String, id: i32 },
+    MenuClicked {
+        key: String,
+        id: i32,
+    },
 }
 
 // ── D-Bus proxies (client side) ─────────────────────────────────────────────
@@ -237,9 +247,7 @@ async fn run(
     conn.request_name(host.as_str()).await?;
 
     // Become the watcher if the seat is empty; otherwise use the incumbent.
-    conn.object_server()
-        .at("/StatusNotifierWatcher", Watcher::default())
-        .await?;
+    conn.object_server().at("/StatusNotifierWatcher", Watcher::default()).await?;
     let owned = matches!(
         conn.request_name_with_flags(
             "org.kde.StatusNotifierWatcher",
@@ -283,8 +291,10 @@ async fn pump(
             .build()
     };
     let mut streams = futures_util::stream::select_all(vec![
-        zbus::MessageStream::for_match_rule(rule("org.kde.StatusNotifierWatcher"), &conn, None).await?,
-        zbus::MessageStream::for_match_rule(rule("org.kde.StatusNotifierItem"), &conn, None).await?,
+        zbus::MessageStream::for_match_rule(rule("org.kde.StatusNotifierWatcher"), &conn, None)
+            .await?,
+        zbus::MessageStream::for_match_rule(rule("org.kde.StatusNotifierItem"), &conn, None)
+            .await?,
         zbus::MessageStream::for_match_rule(rule("com.canonical.dbusmenu"), &conn, None).await?,
         zbus::MessageStream::for_match_rule(rule("org.freedesktop.DBus"), &conn, None).await?,
     ]);
@@ -328,11 +338,8 @@ async fn on_signal(
         }
         // Any New* icon/title/tooltip/status change → re-read that item.
         ("org.kde.StatusNotifierItem", _) => {
-            if let Some(key) = state
-                .items
-                .iter()
-                .find(|(_, it)| it.unique == sender)
-                .map(|(k, _)| k.clone())
+            if let Some(key) =
+                state.items.iter().find(|(_, it)| it.unique == sender).map(|(k, _)| k.clone())
             {
                 refresh_item(conn, state, updates, &key).await;
             }
@@ -380,12 +387,8 @@ async fn add_item(
     };
     let Ok(proxy) = proxy.build().await else { return };
 
-    let menu_path = proxy
-        .menu()
-        .await
-        .ok()
-        .map(|o| o.to_string())
-        .filter(|s| !s.is_empty() && s != "/");
+    let menu_path =
+        proxy.menu().await.ok().map(|o| o.to_string()).filter(|s| !s.is_empty() && s != "/");
     let (icon, tooltip) = read_item(&proxy).await;
     let view = TrayItemView { key: key.clone(), icon, tooltip };
 
@@ -462,7 +465,8 @@ async fn remove_where(
 }
 
 async fn emit_items(state: &State, updates: &async_channel::Sender<TrayUpdate>) {
-    let views = state.order.iter().filter_map(|k| state.items.get(k)).map(|it| it.view.clone()).collect();
+    let views =
+        state.order.iter().filter_map(|k| state.items.get(k)).map(|it| it.view.clone()).collect();
     let _ = updates.send(TrayUpdate::Items(views)).await;
 }
 
@@ -474,15 +478,17 @@ async fn fetch_menu(
     menu_path: &str,
 ) {
     let Some(it) = state.items.get(key) else { return };
-    let Ok(builder) =
-        DBusMenuProxy::builder(conn).destination(it.bus.clone()).and_then(|b| b.path(menu_path.to_string()))
+    let Ok(builder) = DBusMenuProxy::builder(conn)
+        .destination(it.bus.clone())
+        .and_then(|b| b.path(menu_path.to_string()))
     else {
         return;
     };
     let Ok(menu) = builder.build().await else { return };
     let _ = menu.about_to_show(0).await;
     if let Ok((_rev, raw)) = menu.get_layout(0, -1, &[]).await {
-        let _ = updates.send(TrayUpdate::Menu { key: key.to_string(), root: parse_menu(raw) }).await;
+        let _ =
+            updates.send(TrayUpdate::Menu { key: key.to_string(), root: parse_menu(raw) }).await;
     }
 }
 
@@ -588,10 +594,8 @@ fn parse_menu(raw: RawMenu) -> MenuNode {
     let checked = toggle.map(|_| {
         props.get("toggle-state").and_then(|v| i32::try_from(v.clone()).ok()).unwrap_or(0) == 1
     });
-    let kids = children
-        .into_iter()
-        .filter_map(|c| RawMenu::try_from(c).ok().map(parse_menu))
-        .collect();
+    let kids =
+        children.into_iter().filter_map(|c| RawMenu::try_from(c).ok().map(parse_menu)).collect();
 
     MenuNode {
         id,

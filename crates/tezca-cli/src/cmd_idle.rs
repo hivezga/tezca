@@ -171,11 +171,11 @@ fn cmd_status(args: &[&str]) -> Result<(), String> {
     if generated.is_none() {
         println!("  {}", term::dim("using the shipped config (no idle timers)"));
     }
-    for (label, v) in
-        [("lock", idle.lock), ("screen off", idle.dpms), ("suspend", idle.suspend)]
-    {
+    for (label, v) in [("lock", idle.lock), ("screen off", idle.dpms), ("suspend", idle.suspend)] {
         match v {
-            Some(secs) => println!("  {} {:<12} {}", term::green("●"), label, term::dim(&fmt_secs(secs))),
+            Some(secs) => {
+                println!("  {} {:<12} {}", term::green("●"), label, term::dim(&fmt_secs(secs)))
+            }
             None => println!("  {} {:<12} {}", term::dim("○"), label, term::dim("never")),
         }
     }
@@ -185,7 +185,12 @@ fn cmd_status(args: &[&str]) -> Result<(), String> {
         "keep awake",
         term::dim(if inhibited { "on" } else { "off" })
     );
-    println!("  {} {:<12} {}", term::dim("·"), "hypridle", term::dim(if running() { "running" } else { "not running" }));
+    println!(
+        "  {} {:<12} {}",
+        term::dim("·"),
+        "hypridle",
+        term::dim(if running() { "running" } else { "not running" })
+    );
     println!();
     Ok(())
 }
@@ -374,7 +379,12 @@ fn print_help() {
         println!("  {:<20} {}", term::cyan(c), term::dim(d));
     }
     println!();
-    println!("{}", term::dim("  Writes ~/.config/tezca/hypridle.conf; delete it to restore the shipped config."));
+    println!(
+        "{}",
+        term::dim(
+            "  Writes ~/.config/tezca/hypridle.conf; delete it to restore the shipped config."
+        )
+    );
 }
 
 #[cfg(test)]

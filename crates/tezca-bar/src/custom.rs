@@ -29,8 +29,8 @@
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -378,7 +378,10 @@ pub fn dump(mods: &[CustomModule]) -> String {
     let dir = dir().map(|p| p.display().to_string()).unwrap_or_default();
     if mods.is_empty() {
         let _ = writeln!(s, "No custom modules found in {dir}");
-        let _ = writeln!(s, "Drop a <name>.toml manifest there (see DESIGN.md / the example) to add one.");
+        let _ = writeln!(
+            s,
+            "Drop a <name>.toml manifest there (see DESIGN.md / the example) to add one."
+        );
         return s;
     }
     let _ = writeln!(s, "{} custom module(s) in {dir}:\n", mods.len());
@@ -470,7 +473,10 @@ mod tests {
         assert_eq!(parse_manifest("x", "exec = a\ntimeout = 5").unwrap().timeout, 5);
         assert_eq!(parse_manifest("x", "exec = a\ntimeout = 9999").unwrap().timeout, 120);
         // Unparseable values leave the default alone rather than zeroing it.
-        assert_eq!(parse_manifest("x", "exec = a\ntimeout = soon").unwrap().timeout, DEFAULT_TIMEOUT);
+        assert_eq!(
+            parse_manifest("x", "exec = a\ntimeout = soon").unwrap().timeout,
+            DEFAULT_TIMEOUT
+        );
     }
 
     fn module(exec: &str, timeout: u32) -> CustomModule {
@@ -517,11 +523,7 @@ mod tests {
     fn a_flood_of_output_is_capped_rather_than_read_into_memory() {
         // `yes` never stops. Previously this grew the bar's RSS without bound.
         let out = run_once(&module("yes tezca", 10));
-        assert!(
-            out.error.as_deref().unwrap_or("").contains("truncated"),
-            "{:?}",
-            out.error
-        );
+        assert!(out.error.as_deref().unwrap_or("").contains("truncated"), "{:?}", out.error);
         // We still show the first line: partial output beats no output.
         assert_eq!(out.text, "tezca");
     }

@@ -72,10 +72,7 @@ pub fn cursor_pos() -> Option<(i32, i32)> {
 /// which is the right outcome for a dock button whose window just closed.
 pub fn focus(address: &str) {
     let _ = Command::new("hyprctl")
-        .args([
-            "dispatch",
-            &format!("hl.dsp.focus({{ window = \"address:{address}\" }})"),
-        ])
+        .args(["dispatch", &format!("hl.dsp.focus({{ window = \"address:{address}\" }})")])
         .status();
 }
 

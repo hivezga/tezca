@@ -301,10 +301,8 @@ fn resolve(id: &str) -> Result<String, String> {
 }
 
 fn cmd_device_action(action: &str, args: &[&str]) -> Result<(), String> {
-    let id = args
-        .first()
-        .copied()
-        .ok_or_else(|| format!("usage: tezca bt {action} <address|name>"))?;
+    let id =
+        args.first().copied().ok_or_else(|| format!("usage: tezca bt {action} <address|name>"))?;
     let mac = resolve(id)?;
     let out = bt(&[action, &mac])?;
     // bluetoothctl reports failures on stdout with a zero exit status, in the
@@ -321,10 +319,8 @@ fn cmd_scan(args: &[&str]) -> Result<(), String> {
     let mut it = args.iter().copied();
     while let Some(a) = it.next() {
         if a == "--seconds" || a == "-s" {
-            secs = it
-                .next()
-                .and_then(|v| v.parse().ok())
-                .ok_or("--seconds needs a whole number")?;
+            secs =
+                it.next().and_then(|v| v.parse().ok()).ok_or("--seconds needs a whole number")?;
         }
     }
     let secs = secs.clamp(1, 60);
@@ -370,10 +366,7 @@ fn print_help() {
         println!("  {:<22} {}", term::cyan(c), term::dim(d));
     }
     println!();
-    println!(
-        "{}",
-        term::dim("  Pairing that needs a displayed passkey is not handled here —")
-    );
+    println!("{}", term::dim("  Pairing that needs a displayed passkey is not handled here —"));
     println!("{}", term::dim("  run `bluetoothctl` interactively for those."));
 }
 

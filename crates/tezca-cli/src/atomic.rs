@@ -21,9 +21,8 @@ use std::path::{Path, PathBuf};
 /// and preserves the existing file's permissions.
 pub fn write(path: &Path, body: &str) -> Result<(), String> {
     let target = resolve(path);
-    let dir = target
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", target.display()))?;
+    let dir =
+        target.parent().ok_or_else(|| format!("{} has no parent directory", target.display()))?;
     fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
     let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("tezca");
@@ -71,9 +70,9 @@ fn resolve(path: &Path) -> PathBuf {
     // path. Resolve the directory instead so the temp file still lands on the
     // same filesystem as the final name.
     match (path.parent(), path.file_name()) {
-        (Some(dir), Some(name)) => fs::canonicalize(dir)
-            .map(|d| d.join(name))
-            .unwrap_or_else(|_| path.to_path_buf()),
+        (Some(dir), Some(name)) => {
+            fs::canonicalize(dir).map(|d| d.join(name)).unwrap_or_else(|_| path.to_path_buf())
+        }
         _ => path.to_path_buf(),
     }
 }

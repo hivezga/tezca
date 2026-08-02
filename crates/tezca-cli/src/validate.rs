@@ -90,7 +90,9 @@ pub fn hypr_option(v: &str) -> Result<(), String> {
             "invalid character {bad:?} in option {k:?} — expected a path like decoration:rounding"
         ));
     }
-    if k.split([':', '.']).any(|seg| seg.is_empty() || seg.chars().next().is_some_and(|c| c.is_ascii_digit())) {
+    if k.split([':', '.'])
+        .any(|seg| seg.is_empty() || seg.chars().next().is_some_and(|c| c.is_ascii_digit()))
+    {
         return Err(format!(
             "malformed option path {k:?} — every segment must be a non-empty name, e.g. decoration:blur:size"
         ));
@@ -166,8 +168,9 @@ pub fn display_pos(v: &str) -> Result<(), String> {
     let p = v.trim();
     // `auto`, `auto-right`, `auto-left`, `auto-up`, `auto-down`, …
     if p == "auto"
-        || p.strip_prefix("auto-")
-            .is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_alphabetic() || c == '-'))
+        || p.strip_prefix("auto-").is_some_and(|r| {
+            !r.is_empty() && r.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+        })
     {
         return Ok(());
     }
@@ -204,9 +207,9 @@ pub fn display_transform(v: &str) -> Result<(), String> {
 pub fn display_vrr(v: &str) -> Result<(), String> {
     match v.trim() {
         "" | "0" | "1" | "2" => Ok(()),
-        other => Err(format!(
-            "invalid vrr {other:?} — expected 0 (off), 1 (on) or 2 (fullscreen-only)"
-        )),
+        other => {
+            Err(format!("invalid vrr {other:?} — expected 0 (off), 1 (on) or 2 (fullscreen-only)"))
+        }
     }
 }
 
@@ -359,9 +362,21 @@ mod tests {
     #[test]
     fn accepts_every_modifier_combination_already_in_keybinds_conf() {
         for m in [
-            "", "$mod", "$mod ALT", "$mod ALT CTRL", "$mod ALT SHIFT", "$mod CTRL",
-            "$mod CTRL SHIFT", "$mod SHIFT", "$mod SHIFT ALT", "ALT", "ALT CTRL", "CTRL",
-            "CTRL SHIFT", "SHIFT", "SUPER SHIFT",
+            "",
+            "$mod",
+            "$mod ALT",
+            "$mod ALT CTRL",
+            "$mod ALT SHIFT",
+            "$mod CTRL",
+            "$mod CTRL SHIFT",
+            "$mod SHIFT",
+            "$mod SHIFT ALT",
+            "ALT",
+            "ALT CTRL",
+            "CTRL",
+            "CTRL SHIFT",
+            "SHIFT",
+            "SUPER SHIFT",
         ] {
             assert!(keybind_mods(m).is_ok(), "{m:?} should be a valid modifier list");
         }
@@ -370,9 +385,30 @@ mod tests {
     #[test]
     fn accepts_every_keysym_already_in_keybinds_conf() {
         for k in [
-            "A", "W", "0", "9", "F12", "comma", "period", "slash", "SPACE", "Tab", "Return",
-            "Escape", "Delete", "Print", "left", "right", "up", "down", "Control_R",
-            "mouse:272", "mouse_up", "mouse_down", "XF86AudioRaiseVolume", "XF86MonBrightnessUp",
+            "A",
+            "W",
+            "0",
+            "9",
+            "F12",
+            "comma",
+            "period",
+            "slash",
+            "SPACE",
+            "Tab",
+            "Return",
+            "Escape",
+            "Delete",
+            "Print",
+            "left",
+            "right",
+            "up",
+            "down",
+            "Control_R",
+            "mouse:272",
+            "mouse_up",
+            "mouse_down",
+            "XF86AudioRaiseVolume",
+            "XF86MonBrightnessUp",
         ] {
             assert!(keybind_key(k).is_ok(), "{k:?} should be a valid keysym");
         }

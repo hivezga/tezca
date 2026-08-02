@@ -52,11 +52,13 @@ pub fn load() -> Vec<Section> {
                 if sections.is_empty() {
                     sections.push(Section { title: "General".into(), binds: Vec::new() });
                 }
-                sections
-                    .last_mut()
-                    .unwrap()
-                    .binds
-                    .push(Bind { line: line_no, mods, key, desc, action });
+                sections.last_mut().unwrap().binds.push(Bind {
+                    line: line_no,
+                    mods,
+                    key,
+                    desc,
+                    action,
+                });
             }
             _ => {}
         }

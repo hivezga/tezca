@@ -177,11 +177,7 @@ fn parse(text: &str) -> Store {
         }
         if let Some(rest) = line.strip_prefix("disabled = {") {
             let inner = rest.trim_end_matches(',').trim().trim_end_matches('}');
-            store.disabled = inner
-                .split(',')
-                .map(unlua_str)
-                .filter(|s| !s.is_empty())
-                .collect();
+            store.disabled = inner.split(',').map(unlua_str).filter(|s| !s.is_empty()).collect();
             continue;
         }
         if line.starts_with('{') && line.contains("exec") {
@@ -264,7 +260,11 @@ fn slug(exec: &str) -> String {
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect();
     let cleaned = cleaned.trim_matches('-').to_lowercase();
-    if cleaned.is_empty() { "app".to_string() } else { cleaned }
+    if cleaned.is_empty() {
+        "app".to_string()
+    } else {
+        cleaned
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +312,11 @@ fn cmd_list(args: &[&str]) -> Result<(), String> {
     for e in &store.entries {
         let dot = if e.enabled { term::green("●") } else { term::dim("○") };
         let delay = if e.delay > 0 { format!("  +{}s", e.delay) } else { String::new() };
-        println!("  {dot} {:<26} {}", term::bold(&e.label), term::dim(&format!("{}{delay}", e.exec)));
+        println!(
+            "  {dot} {:<26} {}",
+            term::bold(&e.label),
+            term::dim(&format!("{}{delay}", e.exec))
+        );
     }
     println!();
     Ok(())
@@ -362,7 +366,10 @@ fn cmd_add(args: &[&str]) -> Result<(), String> {
     store.entries.push(Entry { id: id.clone(), exec, label: label.clone(), enabled: true, delay });
     write(&store)?;
     println!("  {} added {} ({id})", term::green("✓"), term::bold(&label));
-    println!("  {}", term::dim("starts at your next login — `tezca startup run <id>` to test it now"));
+    println!(
+        "  {}",
+        term::dim("starts at your next login — `tezca startup run <id>` to test it now")
+    );
     Ok(())
 }
 
@@ -370,7 +377,10 @@ fn unique_id(store: &Store, base: &str) -> String {
     if !store.entries.iter().any(|e| e.id == base) {
         return base.to_string();
     }
-    (2..).map(|n| format!("{base}-{n}")).find(|c| !store.entries.iter().any(|e| e.id == *c)).unwrap_or_default()
+    (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|c| !store.entries.iter().any(|e| e.id == *c))
+        .unwrap_or_default()
 }
 
 fn title_case(s: &str) -> String {
@@ -396,10 +406,9 @@ fn cmd_remove(args: &[&str]) -> Result<(), String> {
 }
 
 fn cmd_set_enabled(args: &[&str], on: bool) -> Result<(), String> {
-    let id = args
-        .first()
-        .copied()
-        .ok_or_else(|| format!("usage: tezca startup {} <id>", if on { "enable" } else { "disable" }))?;
+    let id = args.first().copied().ok_or_else(|| {
+        format!("usage: tezca startup {} <id>", if on { "enable" } else { "disable" })
+    })?;
     let mut store = read()?;
 
     if let Some(e) = store.entries.iter_mut().find(|e| e.id == id) {
@@ -469,7 +478,10 @@ fn print_help() {
         println!("  {:<18} {}", term::cyan(c), term::dim(d));
     }
     println!();
-    println!("{}", term::dim("  Your list lives in ~/.config/tezca/startup.lua, outside the repo."));
+    println!(
+        "{}",
+        term::dim("  Your list lives in ~/.config/tezca/startup.lua, outside the repo.")
+    );
 }
 
 #[cfg(test)]
@@ -477,13 +489,7 @@ mod tests {
     use super::*;
 
     fn entry(id: &str, exec: &str) -> Entry {
-        Entry {
-            id: id.into(),
-            exec: exec.into(),
-            label: title_case(id),
-            enabled: true,
-            delay: 0,
-        }
+        Entry { id: id.into(), exec: exec.into(), label: title_case(id), enabled: true, delay: 0 }
     }
 
     #[test]

@@ -1,0 +1,32 @@
+# Project:Tezca — rustfmt configuration.
+#
+# This file exists so that `cargo fmt` agrees with the code that was already
+# here, rather than the other way round. Both settings were chosen by measuring
+# the tree, not by taste: with rustfmt's defaults the workspace needed 637 hunks
+# of reformatting, and with these two it needed 203 — the rest being genuine
+# over-length lines that had to wrap.
+#
+# `use_small_heuristics = "Max"` is the one that matters. Its default caps a
+# struct literal at 18% of max_width, a function call's arguments at 60%, and a
+# single-line `if`/`else` at 50%, so rustfmt explodes these across five lines
+# each even where they comfortably fit:
+#
+#     let effective = AiConfig { live: cfg.live && cfg.enabled, ..cfg.clone() };
+#     let pct = if limit > 0.0 { used / limit * 100.0 } else { 0.0 };
+#
+# Those one-liners are the house style throughout, and "Max" lifts every one of
+# those sub-limits to max_width, which is the single rule the code already
+# follows.
+#
+# max_width stays at rustfmt's default 100 because that is demonstrably the
+# width the code was hand-wrapped to: only 130 of ~25,000 lines exceed it, and
+# raising it to 110 or 120 *increases* the diff (239 and 317 hunks), because
+# rustfmt then starts joining lines that were deliberately split.
+#
+# Keep every option here stable-only. CI formats with `dtolnay/rust-toolchain@
+# stable`, and rustfmt silently ignores nightly-only options on a stable
+# toolchain — which would mean the gate checking a different style than the one
+# written down here.
+
+max_width = 100
+use_small_heuristics = "Max"

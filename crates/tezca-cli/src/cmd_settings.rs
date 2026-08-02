@@ -17,7 +17,9 @@ pub fn run(args: &[&str]) -> i32 {
             eprintln!("{} could not launch {BIN}: {e}", term::red("error:"));
             eprintln!(
                 "  {}",
-                term::dim("build it with ./install.sh (or cargo build -p tezca-settings --release)")
+                term::dim(
+                    "build it with ./install.sh (or cargo build -p tezca-settings --release)"
+                )
             );
             1
         }

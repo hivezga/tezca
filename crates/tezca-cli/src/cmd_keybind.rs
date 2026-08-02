@@ -623,7 +623,9 @@ fn migrate_entry(
     let mut hits = shipped.iter().filter(|b| same_combo(&b.mods, &b.key, &e.was_mods, &e.was_key));
     let target = hits
         .next()
-        .ok_or_else(|| format!("{combo} is no longer in the shipped map — rebind it from Settings"))?
+        .ok_or_else(|| {
+            format!("{combo} is no longer in the shipped map — rebind it from Settings")
+        })?
         .clone();
     if hits.next().is_some() {
         return Err(format!(
@@ -1281,8 +1283,7 @@ hl.bind(mod .. " + U", hl.dsp.exec_cmd("undocumented-no-desc"))
         let b = binds.iter().find(|b| b.line == 4).unwrap();
         assert_eq!(b.mods, "SUPER SHIFT");
         assert_eq!(
-            b.action,
-            r#"hl.dsp.exec_cmd("uwsm app -- brave")"#,
+            b.action, r#"hl.dsp.exec_cmd("uwsm app -- brave")"#,
             "the action must survive a rebind"
         );
         assert!(b.overridden);
@@ -1424,7 +1425,10 @@ bind  = $mod, T,          exec, alacritty               # Terminal
 
     #[test]
     fn parses_a_pre_lua_entry_and_expands_the_mod_variable() {
-        let e = legacy_entry("# @5 was=$mod|W", "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser");
+        let e = legacy_entry(
+            "# @5 was=$mod|W",
+            "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser",
+        );
         assert_eq!(e.line, 5);
         // `$mod` has to become SUPER on both halves, or the combo will not match
         // the Lua map (which spells every registered combo out in full).
@@ -1439,9 +1443,10 @@ bind  = $mod, T,          exec, alacritty               # Terminal
         // The entry records line 5 (where $mod+W lives in the hyprlang map). In
         // the Lua map that line is the *Editor* bind — carrying the number over
         // would silently rebind the wrong key, which is the bug this guards.
-        let o = migrated("# @5 was=$mod|W", "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser")
-            .unwrap()
-            .expect("a real override");
+        let o =
+            migrated("# @5 was=$mod|W", "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser")
+                .unwrap()
+                .expect("a real override");
         assert_eq!(o.line, 4, "must land on the Lua map's $mod+W, not on line 5");
         assert_eq!((o.was_mods.as_str(), o.was_key.as_str()), ("SUPER", "W"));
         assert_eq!((o.mods.as_str(), o.key.as_str()), ("SUPER SHIFT", "B"));
@@ -1449,9 +1454,10 @@ bind  = $mod, T,          exec, alacritty               # Terminal
 
     #[test]
     fn an_exec_dispatcher_is_re_expressed_as_a_lua_call() {
-        let o = migrated("# @5 was=$mod|W", "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser")
-            .unwrap()
-            .unwrap();
+        let o =
+            migrated("# @5 was=$mod|W", "bind = $mod SHIFT, B, exec, uwsm app -- brave  # Browser")
+                .unwrap()
+                .unwrap();
         assert_eq!(o.action, r#"hl.dsp.exec_cmd("uwsm app -- brave")"#);
     }
 
@@ -1471,9 +1477,10 @@ bind  = $mod, T,          exec, alacritty               # Terminal
     fn a_non_exec_rebind_adopts_whatever_the_lua_map_now_dispatches() {
         // A plain rebind never touched the action, so the Lua map's own call is
         // the correct one — no hyprlang→Lua dispatcher table needed.
-        let o = migrated("# @4 was=CTRL|Q", "bind = CTRL SHIFT, Q, killactive  # close focused window")
-            .unwrap()
-            .expect("the combo moved");
+        let o =
+            migrated("# @4 was=CTRL|Q", "bind = CTRL SHIFT, Q, killactive  # close focused window")
+                .unwrap()
+                .expect("the combo moved");
         assert_eq!(o.line, 3);
         assert_eq!(o.action, "hl.dsp.window.close()");
         assert_eq!((o.mods.as_str(), o.key.as_str()), ("CTRL SHIFT", "Q"));
@@ -1484,11 +1491,17 @@ bind  = $mod, T,          exec, alacritty               # Terminal
         // Shipped line 4 is `killactive`; this entry says `fullscreen, 0`. That
         // is a set-action onto a dispatcher with no mechanical translation — the
         // one case the migration has to admit it cannot carry.
-        let e = legacy_entry("# @4 was=CTRL|Q", "bind = CTRL, Q, fullscreen, 0  # close focused window");
+        let e = legacy_entry(
+            "# @4 was=CTRL|Q",
+            "bind = CTRL, Q, fullscreen, 0  # close focused window",
+        );
         assert!(legacy_action_was_customised(&e, LEGACY_BASE));
 
         // A plain rebind must NOT be flagged, or every migration warns.
-        let plain = legacy_entry("# @4 was=CTRL|Q", "bind = CTRL SHIFT, Q, killactive  # close focused window");
+        let plain = legacy_entry(
+            "# @4 was=CTRL|Q",
+            "bind = CTRL SHIFT, Q, killactive  # close focused window",
+        );
         assert!(!legacy_action_was_customised(&plain, LEGACY_BASE));
 
         // Without the old shipped map there is nothing to compare against, and
@@ -1499,7 +1512,8 @@ bind  = $mod, T,          exec, alacritty               # Terminal
     #[test]
     fn entries_that_cannot_be_reproduced_are_refused_rather_than_guessed_at() {
         // A combo that no longer exists in the shipped map.
-        let e = migrated("# @4 was=CTRL|Y", "bind = CTRL SHIFT, Y, killactive  # gone").unwrap_err();
+        let e =
+            migrated("# @4 was=CTRL|Y", "bind = CTRL SHIFT, Y, killactive  # gone").unwrap_err();
         assert!(e.contains("no longer in the shipped map"), "{e}");
 
         // A hold-bind: `hl.unbind` cannot release one, so an override would leave
@@ -1511,8 +1525,8 @@ bind  = $mod, T,          exec, alacritty               # Terminal
         // A hand-edited old file is still untrusted input, and it reaches the
         // generated Lua verbatim — so it goes through the same validator as the
         // live path rather than being trusted for having been on disk.
-        let e = migrated("# @5 was=$mod|W", "bind = $mod, W;rm -rf ~, exec, x  # Browser")
-            .unwrap_err();
+        let e =
+            migrated("# @5 was=$mod|W", "bind = $mod, W;rm -rf ~, exec, x  # Browser").unwrap_err();
         assert!(e.contains("invalid character"), "{e}");
     }
 
@@ -1520,7 +1534,8 @@ bind  = $mod, T,          exec, alacritty               # Terminal
     fn an_entry_that_restates_the_shipped_bind_is_dropped() {
         // Migrating a file whose entry now says exactly what the Lua map says
         // must leave a clean override layer, not a no-op entry.
-        let o = migrated("# @5 was=$mod|W", "bind = $mod, W, exec, uwsm app -- brave  # Browser").unwrap();
+        let o = migrated("# @5 was=$mod|W", "bind = $mod, W, exec, uwsm app -- brave  # Browser")
+            .unwrap();
         assert!(o.is_none(), "a no-op override should not be carried over");
     }
 

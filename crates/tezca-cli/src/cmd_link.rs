@@ -188,11 +188,9 @@ fn link_one(src: &Path, target: &Path, opts: &Opts) -> Result<Action, String> {
             })?;
         } else {
             let backup = backup_path(target);
-            act(
-                opts,
-                &format!("back up {} → {}", target.display(), backup.display()),
-                || fs::rename(target, &backup).map_err(|e| e.to_string()),
-            )?;
+            act(opts, &format!("back up {} → {}", target.display(), backup.display()), || {
+                fs::rename(target, &backup).map_err(|e| e.to_string())
+            })?;
             backed_up = true;
         }
     }
@@ -222,7 +220,8 @@ fn seed_one(src: &Path, target: &Path, opts: &Opts) -> Result<(usize, usize), St
         }
     }
     if !opts.dry_run {
-        fs::create_dir_all(target).map_err(|e| format!("cannot create {}: {e}", target.display()))?;
+        fs::create_dir_all(target)
+            .map_err(|e| format!("cannot create {}: {e}", target.display()))?;
     }
     // A dry run leaves the symlink in place, so `exists()` on the destination would
     // resolve through it and every shipped file would look like one the user
@@ -255,7 +254,8 @@ fn copy_missing(
         let (s, d) = (entry.path(), dst.join(&name));
         if s.is_dir() {
             if !opts.dry_run {
-                fs::create_dir_all(&d).map_err(|e| format!("cannot create {}: {e}", d.display()))?;
+                fs::create_dir_all(&d)
+                    .map_err(|e| format!("cannot create {}: {e}", d.display()))?;
             }
             let (c, k) = copy_missing(&s, &d, opts, assume_empty)?;
             copied += c;
@@ -288,8 +288,7 @@ fn act<F: FnOnce() -> Result<(), String>>(opts: &Opts, what: &str, f: F) -> Resu
 /// second would otherwise collide and the second `rename` would silently destroy
 /// the first.
 fn backup_path(target: &Path) -> PathBuf {
-    let secs =
-        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let name = target.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let mut candidate = target.with_file_name(format!("{name}.bak.{secs}"));
     let mut n = 1;
@@ -395,10 +394,7 @@ mod tests {
             .map(|e| e.path())
             .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("as-dir.bak."))
             .expect("--force must still back up a real directory");
-        assert_eq!(
-            fs::read_to_string(backup.join("precious.conf")).unwrap(),
-            "do not lose me\n"
-        );
+        assert_eq!(fs::read_to_string(backup.join("precious.conf")).unwrap(), "do not lose me\n");
         fs::remove_dir_all(&d).unwrap();
     }
 

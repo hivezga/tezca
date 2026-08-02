@@ -44,10 +44,6 @@ pub fn play_pause() {
 
 /// Nudge the position by `secs` (negative rewinds).
 pub fn seek(secs: i32) {
-    let arg = if secs >= 0 {
-        format!("{secs}+")
-    } else {
-        format!("{}-", -secs)
-    };
+    let arg = if secs >= 0 { format!("{secs}+") } else { format!("{}-", -secs) };
     let _ = Command::new("playerctl").args(["position", &arg]).status();
 }

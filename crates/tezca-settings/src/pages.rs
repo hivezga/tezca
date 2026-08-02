@@ -174,12 +174,8 @@ const ORIENTATIONS: &[(&str, &str)] = &[
     ("Flipped, 270°", "7"),
 ];
 
-const VRR_MODES: &[(&str, &str)] = &[
-    ("Inherit global", ""),
-    ("Off", "0"),
-    ("Always on", "1"),
-    ("Fullscreen only", "2"),
-];
+const VRR_MODES: &[(&str, &str)] =
+    &[("Inherit global", ""), ("Off", "0"), ("Always on", "1"), ("Fullscreen only", "2")];
 
 const BITDEPTHS: &[(&str, &str)] = &[("Automatic", ""), ("8-bit", "8"), ("10-bit", "10")];
 
@@ -459,7 +455,8 @@ fn profiles_section(c: &Box, status: &Status, rebuild: &RenderCell) {
 /// Night light lives on the Displays page because that is where you look for it,
 /// even though it is driven by a separate daemon.
 fn night_section(c: &Box, status: &Status) {
-    let st = backend::flat(&backend::tezca_out(&["night", "status", "--machine"]).unwrap_or_default());
+    let st =
+        backend::flat(&backend::tezca_out(&["night", "status", "--machine"]).unwrap_or_default());
     let get = |k: &str| st.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap_or_default();
 
     c.append(&section_header("Night light"));
@@ -742,7 +739,9 @@ fn populate_displays(c: &Box, window: &Window, status: &Status, rebuild: &Render
                 sl.set_value(cur as f64);
                 debounce_scale(&sl, 300, {
                     let name = m.name.clone();
-                    move |v| backend::tezca(&["display", "brightness", &name, &(v as i32).to_string()])
+                    move |v| {
+                        backend::tezca(&["display", "brightness", &name, &(v as i32).to_string()])
+                    }
                 });
                 c.append(&control_row("Brightness", &sl));
             }
@@ -840,7 +839,9 @@ pub fn bar() -> Widget {
     clock.set_text(&get("clock_format").unwrap_or_else(|| "%a %d %b   %H:%M".into()));
     clock.set_width_chars(20);
     page.append(&control_row("Format", &clock));
-    page.append(&hint("strftime-style — e.g. %a %d %b   %H:%M for “Wed 22 Jul  16:59”. See `man strftime`."));
+    page.append(&hint(
+        "strftime-style — e.g. %a %d %b   %H:%M for “Wed 22 Jul  16:59”. See `man strftime`.",
+    ));
 
     // --- Workspaces ---------------------------------------------------------
     page.append(&section_header("Workspaces"));
@@ -919,10 +920,12 @@ pub fn bar() -> Widget {
     const DEF_CENTER: &str = "nowplaying";
     const DEF_RIGHT: &str =
         "gamemode, camera, microphone, recording, caffeine, night, ai, tray, cpu, mem, gpu, sep, network, bluetooth, volume, brightness, battery, sep, bell, clock, power";
-    let (left_w, left_ids) = module_region("Left", seed_modules(get("layout_left"), DEF_LEFT), defs.clone());
+    let (left_w, left_ids) =
+        module_region("Left", seed_modules(get("layout_left"), DEF_LEFT), defs.clone());
     let (center_w, center_ids) =
         module_region("Center", seed_modules(get("layout_center"), DEF_CENTER), defs.clone());
-    let (right_w, right_ids) = module_region("Right", seed_modules(get("layout_right"), DEF_RIGHT), defs.clone());
+    let (right_w, right_ids) =
+        module_region("Right", seed_modules(get("layout_right"), DEF_RIGHT), defs.clone());
     let modules_row = Box::new(Orientation::Horizontal, 16);
     modules_row.add_css_class("tz-modcols");
     left_w.set_hexpand(true);
@@ -947,17 +950,24 @@ pub fn bar() -> Widget {
         let (numerals, hide_empty, compact_ws, assign_rows) =
             (numerals.clone(), hide_empty.clone(), compact_ws.clone(), assign_rows.clone());
         let (osd_enabled, osd_timeout) = (osd_enabled.clone(), osd_timeout.clone());
-        let (left_ids, center_ids, right_ids) = (left_ids.clone(), center_ids.clone(), right_ids.clone());
+        let (left_ids, center_ids, right_ids) =
+            (left_ids.clone(), center_ids.clone(), right_ids.clone());
         apply.connect_clicked(move |_| {
             // Build a flat `key value key value …` arg list (some keys — the
             // per-monitor sets — are dynamic, so a fixed array won't do).
             let mut kvs: Vec<(String, String)> = vec![
-                ("shape".into(), SHAPES.get(shape.selected() as usize).copied().unwrap_or("floating").into()),
+                (
+                    "shape".into(),
+                    SHAPES.get(shape.selected() as usize).copied().unwrap_or("floating").into(),
+                ),
                 ("height".into(), (height.value() as i64).to_string()),
                 ("margin_top".into(), (mtop.value() as i64).to_string()),
                 ("margin_side".into(), (mside.value() as i64).to_string()),
                 ("clock_format".into(), clock.text().to_string()),
-                ("workspace_numerals".into(), NUMERALS.get(numerals.selected() as usize).copied().unwrap_or("arabic").into()),
+                (
+                    "workspace_numerals".into(),
+                    NUMERALS.get(numerals.selected() as usize).copied().unwrap_or("arabic").into(),
+                ),
                 ("workspace_hide_empty".into(), bool_str(hide_empty.is_active())),
                 ("workspace_compact".into(), bool_str(compact_ws.is_active())),
                 ("cpu_interval".into(), (cpu_iv.value() as i64).to_string()),
@@ -1032,7 +1042,11 @@ fn ws_spec_value(dd: &DropDown, entry: &Entry) -> String {
         2 => "even".into(),
         3 => {
             let t = entry.text().trim().to_string();
-            if t.is_empty() { "auto".into() } else { t }
+            if t.is_empty() {
+                "auto".into()
+            } else {
+                t
+            }
         }
         _ => "auto".into(),
     }
@@ -1249,13 +1263,20 @@ pub fn dock() -> Widget {
             let margin_s = (margin.value() as i64).to_string();
             let delay_s = (delay.value() as i64).to_string();
             backend::tezca(&[
-                "dock", "set",
-                "icon_size", &icon_s,
-                "max_scale", &scale_s,
-                "influence", &infl_s,
-                "gap", &gap_s,
-                "margin_bottom", &margin_s,
-                "hide_delay_ms", &delay_s,
+                "dock",
+                "set",
+                "icon_size",
+                &icon_s,
+                "max_scale",
+                &scale_s,
+                "influence",
+                &infl_s,
+                "gap",
+                &gap_s,
+                "margin_bottom",
+                &margin_s,
+                "hide_delay_ms",
+                &delay_s,
             ]);
         });
     }
@@ -1654,17 +1675,21 @@ fn edit_action(parent: &Window, b: &keybinds::Bind, on_done: Rc<dyn Fn()>) {
 
     let apps = Rc::new(installed_apps());
     let populate: Rc<dyn Fn(&str)> = {
-        let (list, apps, dialog, b, on_done, status) =
-            (list.clone(), apps.clone(), dialog.clone(), b.clone(), on_done.clone(), status.clone());
+        let (list, apps, dialog, b, on_done, status) = (
+            list.clone(),
+            apps.clone(),
+            dialog.clone(),
+            b.clone(),
+            on_done.clone(),
+            status.clone(),
+        );
         Rc::new(move |filter: &str| {
             while let Some(c) = list.first_child() {
                 list.remove(&c);
             }
             let f = filter.trim().to_lowercase();
-            for (name, id) in apps
-                .iter()
-                .filter(|(n, _)| f.is_empty() || n.to_lowercase().contains(&f))
-                .take(300)
+            for (name, id) in
+                apps.iter().filter(|(n, _)| f.is_empty() || n.to_lowercase().contains(&f)).take(300)
             {
                 let btn = Button::with_label(name);
                 btn.add_css_class("tz-approw");
@@ -1753,11 +1778,16 @@ fn apply_action(
 ) {
     let line = b.line.to_string();
     let mut args: Vec<&str> = vec![
-        "keybind", "set-action",
-        "--line", &line,
-        "--action", action,
-        "--expect-mods", &b.mods,
-        "--expect-key", &b.key,
+        "keybind",
+        "set-action",
+        "--line",
+        &line,
+        "--action",
+        action,
+        "--expect-mods",
+        &b.mods,
+        "--expect-key",
+        &b.key,
     ];
     if let Some(d) = desc {
         args.push("--desc");
@@ -1847,12 +1877,18 @@ fn capture_rebind(parent: &Window, b: &keybinds::Bind, on_done: Rc<dyn Fn()>) {
             };
             let line = b.line.to_string();
             let res = backend::tezca_result(&[
-                "keybind", "rebind",
-                "--line", &line,
-                "--expect-mods", &b.mods,
-                "--expect-key", &b.key,
-                "--mods", &mods,
-                "--key", &key,
+                "keybind",
+                "rebind",
+                "--line",
+                &line,
+                "--expect-mods",
+                &b.mods,
+                "--expect-key",
+                &b.key,
+                "--mods",
+                &mods,
+                "--key",
+                &key,
             ]);
             match res.code {
                 0 => {
@@ -1939,7 +1975,8 @@ pub fn sound() -> Widget {
 }
 
 fn populate_sound(c: &Box, status: &Status, rebuild: &RenderCell) {
-    let st = backend::flat(&backend::tezca_out(&["audio", "status", "--machine"]).unwrap_or_default());
+    let st =
+        backend::flat(&backend::tezca_out(&["audio", "status", "--machine"]).unwrap_or_default());
     let get = |k: &str| st.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap_or_default();
 
     // --- Levels -------------------------------------------------------------
@@ -2073,7 +2110,8 @@ const IDLE_CHOICES: &[(&str, u32)] = &[
 ];
 
 fn populate_power(c: &Box, status: &Status, rebuild: &RenderCell) {
-    let st = backend::flat(&backend::tezca_out(&["idle", "status", "--machine"]).unwrap_or_default());
+    let st =
+        backend::flat(&backend::tezca_out(&["idle", "status", "--machine"]).unwrap_or_default());
     let get = |k: &str| st.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap_or_default();
 
     c.append(&section_header("Idle timeouts"));
@@ -2123,10 +2161,7 @@ fn populate_power(c: &Box, status: &Status, rebuild: &RenderCell) {
         let stt = status.clone();
         caffeine.connect_state_set(move |_, on| {
             let r = backend::tezca_result(&["idle", "inhibit", if on { "on" } else { "off" }]);
-            stt.report(
-                &r,
-                if on { "Holding the session awake." } else { "Idle timers resumed." },
-            );
+            stt.report(&r, if on { "Holding the session awake." } else { "Idle timers resumed." });
             glib::Propagation::Proceed
         });
     }
@@ -2435,11 +2470,15 @@ fn pick_startup_app(window: &Window, status: &Status, rebuild: &RenderCell) {
                     ch.set_halign(Align::Start);
                 }
                 let (id, name) = (id.clone(), name.clone());
-                let (dialog, status, rebuild) =
-                    (dialog.clone(), status.clone(), rebuild.clone());
+                let (dialog, status, rebuild) = (dialog.clone(), status.clone(), rebuild.clone());
                 btn.connect_clicked(move |_| {
                     let r = backend::tezca_result(&[
-                        "startup", "add", "--desktop", &id, "--label", &name,
+                        "startup",
+                        "add",
+                        "--desktop",
+                        &id,
+                        "--label",
+                        &name,
                     ]);
                     dialog.close();
                     status.report(&r, &format!("{name} will start at your next login."));
@@ -2615,7 +2654,8 @@ pub fn network(window: &Window) -> Widget {
 }
 
 fn populate_network(c: &Box, window: &Window, status: &Status, rebuild: &RenderCell) {
-    let st = backend::flat(&backend::tezca_out(&["net", "status", "--machine"]).unwrap_or_default());
+    let st =
+        backend::flat(&backend::tezca_out(&["net", "status", "--machine"]).unwrap_or_default());
     let get = |k: &str| st.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap_or_default();
 
     // --- Current connection -------------------------------------------------
@@ -2670,13 +2710,7 @@ fn populate_network(c: &Box, window: &Window, status: &Status, rebuild: &RenderC
     }
 }
 
-fn wifi_section(
-    c: &Box,
-    window: &Window,
-    status: &Status,
-    rebuild: &RenderCell,
-    radio_on: bool,
-) {
+fn wifi_section(c: &Box, window: &Window, status: &Status, rebuild: &RenderCell, radio_on: bool) {
     c.append(&section_header("Wi-Fi"));
 
     let radio = Switch::new();
@@ -3321,9 +3355,8 @@ pub fn system() -> Widget {
     logout.connect_clicked(|_| backend::spawn("wlogout", &["-b", "4"]));
     // Recording lives here rather than on its own page: it is a session action,
     // like locking or logging out. The bar's red dot is the actual indicator.
-    let recording = backend::flat(
-        &backend::tezca_out(&["record", "status", "--machine"]).unwrap_or_default(),
-    );
+    let recording =
+        backend::flat(&backend::tezca_out(&["record", "status", "--machine"]).unwrap_or_default());
     let is_recording = recording.iter().any(|(k, v)| k == "recording" && v == "true");
     let rec = action(if is_recording { "Stop recording" } else { "Record screen" });
     rec.connect_clicked(|_| backend::tezca(&["record", "toggle"]));

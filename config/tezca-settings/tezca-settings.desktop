@@ -6,6 +6,9 @@ Comment=Manage themes, wallpaper, keybinds, gaming and the session
 Exec=tezca-settings
 Icon=preferences-desktop-theme
 Terminal=false
-Categories=Settings;DesktopSettings;GTK;
+Categories=Settings;DesktopSettings;
 Keywords=tezca;theme;wallpaper;keybinds;rice;control;center;
-StartupWMClass=dev.tezca.Settings
+# The Tauri build reports its product name as the app id, where the GTK build
+# reported the application-id. This is what associates the window with this
+# entry, so it has to follow.
+StartupWMClass=tezca-settings

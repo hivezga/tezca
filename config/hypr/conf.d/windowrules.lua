@@ -51,11 +51,21 @@ hl.window_rule({
 })
 
 -- tezca-settings control center (SUPER+SHIFT+A) — float + center like a macOS
--- System Settings pane. GTK4 app_id = the application-id.
+-- System Settings pane.
+--
+-- Two classes because the panel moved from GTK4 to Tauri: GTK reported the
+-- application-id, and the Tauri build reports its product name. Matching both
+-- means the rule keeps working whichever binary is installed, which matters
+-- while the two can still be swapped.
+--
+-- The size is the panel's design size, not a preference: Appearance lays its
+-- five theme cards out in one row and the Displays canvas wants the width, so a
+-- narrower window wraps them. The window's own default size matches — this rule
+-- is what actually decides, since a floated window is sized by the compositor.
 hl.window_rule({
-    match  = { class = "^(dev\\.tezca\\.Settings)$" },
+    match  = { class = "^(dev\\.tezca\\.Settings|tezca-settings)$" },
     float  = true,
-    size   = { 960, 700 },
+    size   = { 1180, 788 },
     center = true,
 })
 

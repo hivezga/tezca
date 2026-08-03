@@ -1,0 +1,1107 @@
+/* tezca-settings — the control center's stylesheet.
+ *
+ * Every value here comes from GAP_AUDIT.md §0.1–0.3 and §1, which measured the
+ * design prototypes against the GTK build. Colours are never written literally:
+ * `theme.rs` parses the live `~/.config/tezca/current/colors.css` and app.js
+ * sets each token twice — `--tz-accent` as the hex, `--tz-accent-rgb` as the
+ * bare triple — so a rule can say `rgba(var(--tz-accent-rgb), .14)` and still
+ * follow a theme switch. The fallbacks below are quetzalcoatl, which is only
+ * what you see for the few milliseconds before the palette arrives.
+ */
+
+:root {
+    --tz-base: #0b0e0f;
+    --tz-base-rgb: 11, 14, 15;
+    --tz-surface: #14191b;
+    --tz-surface-rgb: 20, 25, 27;
+    --tz-text: #e8eaed;
+    --tz-text-rgb: 232, 234, 237;
+    --tz-subtext: #c3c8cc;
+    --tz-muted: #8b9398;
+    --tz-muted-rgb: 139, 147, 152;
+    --tz-faint: #5a6166;
+    --tz-accent: #d2e4e2;
+    --tz-accent-rgb: 210, 228, 226;
+    --tz-accent-dim: #a6c0bd;
+    --tz-on-accent: #0b0e0f;
+    --tz-gold: #c9a24b;
+    --tz-urgent: #e06c75;
+
+    /* The two hairline weights the design distinguishes. */
+    --tz-line: rgba(var(--tz-muted-rgb), 0.16);
+    --tz-line-strong: rgba(var(--tz-muted-rgb), 0.24);
+
+    --tz-radius: 10px;
+    --tz-radius-lg: 14px;
+
+    --tz-font: Inter, system-ui, sans-serif;
+    --tz-mono: "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace, monospace;
+
+    /* Row padding, so compact density is one custom-property change (§0.2). */
+    --tz-row-pad: 13px;
+}
+
+:root[data-density="compact"] {
+    --tz-row-pad: 9px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: var(--tz-font);
+    color: var(--tz-text);
+    /* The window itself is transparent; .win is the glass. */
+    background: transparent;
+    -webkit-font-smoothing: antialiased;
+    /* A settings window is not a document — dragging a label should not start a
+       selection, but the CLI echo and the keybind table are worth copying. */
+    user-select: none;
+    cursor: default;
+}
+
+/* Numeric readouts use tabular figures so a value does not jitter as it
+   updates — the same rule the bar applies to its metrics. */
+.mono {
+    font-family: var(--tz-mono);
+    font-feature-settings: "tnum" 1;
+}
+
+/* ── Window ──────────────────────────────────────────────────────────────── */
+
+.win {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: rgba(var(--tz-base-rgb), 0.86);
+    border: 1px solid var(--tz-line-strong);
+    border-radius: var(--tz-radius-lg);
+    overflow: hidden;
+}
+
+/* Maximised, the rounded corner and border read as a mistake rather than as
+   glass, because there is no desktop behind them to separate from. */
+.win.flush {
+    border-radius: 0;
+    border-color: transparent;
+}
+
+/* ── Title bar (§1.1) ────────────────────────────────────────────────────── */
+
+.titlebar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: none;
+    height: 52px;
+    padding: 0 14px;
+    background: rgba(var(--tz-surface-rgb), 0.62);
+    border-bottom: 1px solid var(--tz-line);
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+}
+
+.brand-mark {
+    width: 20px;
+    height: 20px;
+    flex: none;
+}
+
+.brand-name {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 1.96px; /* .14em at 14px */
+    color: var(--tz-text);
+}
+
+.brand-sub {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 1.61px; /* .14em at 11.5px */
+    text-transform: uppercase;
+    color: var(--tz-muted);
+}
+
+/* The draggable region. Everything interactive in the title bar sits outside
+   it, because a drag handle that swallows clicks is worse than no drag. */
+.titlebar-drag {
+    flex: 1;
+    align-self: stretch;
+    -webkit-app-region: drag;
+}
+
+/* Search omnibox (§1.2) */
+.omni {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    max-width: 520px;
+    height: 32px;
+    padding: 0 10px;
+    background: rgba(var(--tz-base-rgb), 0.6);
+    border: 1px solid var(--tz-line);
+    border-radius: var(--tz-radius);
+    color: var(--tz-muted);
+    cursor: text;
+    transition: border-color 0.13s ease, background 0.13s ease;
+}
+
+.omni:hover {
+    border-color: var(--tz-line-strong);
+}
+
+.omni-label {
+    flex: 1;
+    font-size: 12.5px;
+    text-align: left;
+    color: var(--tz-muted);
+}
+
+.omni-cap {
+    font-family: var(--tz-mono);
+    font-size: 10.5px;
+    padding: 1px 5px;
+    border: 1px solid var(--tz-line);
+    border-radius: 5px;
+    color: var(--tz-faint);
+}
+
+/* Window dots. Close takes the urgent token; the other two stay faint, so the
+   one that loses your work is the one that reads. */
+.dots {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+}
+
+.dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(var(--tz-muted-rgb), 0.34);
+    cursor: pointer;
+    transition: background 0.13s ease, transform 0.13s ease;
+}
+
+.dot:hover {
+    background: rgba(var(--tz-muted-rgb), 0.6);
+}
+
+.dot.close:hover {
+    background: var(--tz-urgent);
+}
+
+/* ── Body ────────────────────────────────────────────────────────────────── */
+
+.body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ── Sidebar (§1.3) ──────────────────────────────────────────────────────── */
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: 224px;
+    background: rgba(var(--tz-surface-rgb), 0.34);
+    border-right: 1px solid var(--tz-line);
+}
+
+.nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+}
+
+.navgroup {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.3px; /* .13em at 10px */
+    text-transform: uppercase;
+    color: var(--tz-faint);
+    padding: 14px 12px 7px;
+}
+
+.navrow {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    padding: 8px 11px;
+    border: none;
+    border-radius: var(--tz-radius);
+    background: transparent;
+    color: var(--tz-subtext);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.13s ease, color 0.13s ease;
+}
+
+.navrow svg {
+    width: 17px;
+    height: 17px;
+    flex: none;
+}
+
+.navrow:hover {
+    background: rgba(var(--tz-muted-rgb), 0.12);
+    color: var(--tz-text);
+}
+
+/* The marker is 2px here and 3px in the launcher, and that is deliberate —
+   the launcher's rows are taller and a 2px rule vanishes on them. */
+.navrow.on {
+    background: rgba(var(--tz-accent-rgb), 0.14);
+    color: var(--tz-text);
+    box-shadow: inset 2px 0 0 0 var(--tz-accent);
+}
+
+/* Sidebar footer card */
+.sidefoot {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex: none;
+    margin: 8px;
+    padding: 10px 11px;
+    background: var(--tz-surface);
+    border: 1px solid var(--tz-line);
+    border-radius: var(--tz-radius);
+}
+
+.sidefoot-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--tz-accent);
+    box-shadow: 0 0 8px rgba(var(--tz-accent-rgb), 0.7);
+}
+
+.sidefoot-host {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tz-text);
+}
+
+.sidefoot-meta {
+    font-family: var(--tz-mono);
+    font-size: 10.5px;
+    color: var(--tz-faint);
+}
+
+/* ── Page (§0.3) ─────────────────────────────────────────────────────────── */
+
+.page {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 26px 34px 34px;
+}
+
+.pagetitle {
+    font-size: 23px;
+    font-weight: 700;
+    color: var(--tz-text);
+    margin-bottom: 2px;
+}
+
+.pagehint {
+    font-size: 12px;
+    color: var(--tz-muted);
+    line-height: 1.45;
+}
+
+/* The rhythm the GTK build was missing entirely: a faint uppercase rule between
+   the 23px page title and the rows, so a page reads as sections rather than as
+   one undifferentiated list. */
+.seclabel {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 1.47px; /* .14em at 10.5px */
+    text-transform: uppercase;
+    color: var(--tz-faint);
+    margin: 22px 0 7px;
+}
+
+/* ── The row (§0.2) ──────────────────────────────────────────────────────── */
+
+.row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: var(--tz-row-pad) 0;
+    border-top: 1px solid rgba(var(--tz-muted-rgb), 0.16);
+}
+
+/* Rows sit directly on the page background and are separated by a hairline, so
+   the first in each section must not draw one — there is nothing above it. */
+.row:first-of-type {
+    border-top: none;
+}
+
+/* The label keeps a floor so a control with many options can never squeeze it
+   down to one word per line — the row wraps instead, which stays readable. */
+.row-label {
+    flex: 1 1 240px;
+    min-width: 220px;
+}
+
+.row-label > .label {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--tz-text);
+}
+
+.row-label > .hint {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.45;
+    color: var(--tz-muted);
+}
+
+.row-control {
+    flex: 0 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-left: auto;
+}
+
+/* A row whose control needs the full width (module lists, canvases). */
+.row.stack {
+    display: block;
+}
+
+.row.stack .row-control {
+    justify-content: flex-start;
+    margin-top: 10px;
+}
+
+/* ── Switch (§1.6) ───────────────────────────────────────────────────────── */
+
+.switch {
+    position: relative;
+    width: 40px;
+    height: 23px;
+    flex: none;
+    padding: 2.5px;
+    border: 1px solid rgba(var(--tz-muted-rgb), 0.16);
+    border-radius: 12px;
+    background: rgba(var(--tz-muted-rgb), 0.22);
+    cursor: pointer;
+    transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.switch .knob {
+    display: block;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: var(--tz-muted);
+    transition: transform 0.16s ease, background 0.16s ease;
+}
+
+.switch.on {
+    background: var(--tz-accent);
+    border-color: var(--tz-accent);
+}
+
+.switch.on .knob {
+    background: var(--tz-on-accent);
+    transform: translateX(17px);
+}
+
+/* ── Segmented (§1.6) ────────────────────────────────────────────────────── */
+
+.seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    flex: 0 1 auto;
+    padding: 3px;
+    background: var(--tz-surface);
+    border: 1px solid var(--tz-line);
+    border-radius: var(--tz-radius);
+}
+
+.seg > button {
+    padding: 5px 12px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--tz-subtext);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.13s ease, color 0.13s ease;
+}
+
+.seg > button:hover {
+    color: var(--tz-text);
+}
+
+.seg > button.on {
+    background: var(--tz-accent);
+    color: var(--tz-on-accent);
+}
+
+/* ── Slider (§1.6) ───────────────────────────────────────────────────────── */
+
+.slider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 250px;
+    flex: none;
+}
+
+.slider input[type="range"] {
+    flex: 1;
+    height: 18px;
+    accent-color: var(--tz-accent);
+    background: transparent;
+    cursor: pointer;
+}
+
+/* The readout is a real mono label at a fixed width, not the toolkit's own
+   value: GTK's was neither monospaced nor tabular, so the row twitched every
+   time a digit changed width. */
+.slider .readout {
+    width: 62px;
+    flex: none;
+    text-align: right;
+    font-family: var(--tz-mono);
+    font-feature-settings: "tnum" 1;
+    font-size: 12px;
+    color: var(--tz-subtext);
+}
+
+/* ── Text field (§1.6) ───────────────────────────────────────────────────── */
+
+.field {
+    padding: 7px 11px;
+    border: 1px solid var(--tz-line);
+    border-radius: var(--tz-radius);
+    background: rgba(var(--tz-base-rgb), 0.6);
+    color: var(--tz-text);
+    font-family: var(--tz-mono);
+    font-size: 12px;
+    min-width: 220px;
+    user-select: text;
+    transition: border-color 0.13s ease;
+}
+
+.field:focus {
+    outline: none;
+    border-color: rgba(var(--tz-accent-rgb), 0.55);
+}
+
+/* ── Theme card (§1.6) ───────────────────────────────────────────────────── */
+
+.themegrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 10px;
+    width: 100%;
+}
+
+.themecard {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 11px;
+    border: 1px solid var(--tz-line);
+    border-radius: var(--tz-radius);
+    background: var(--tz-surface);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    transition: border-color 0.13s ease, box-shadow 0.13s ease;
+}
+
+.themecard:hover {
+    border-color: var(--tz-line-strong);
+}
+
+.themecard.on {
+    border-color: var(--tz-accent);
+    box-shadow: 0 0 0 3px rgba(var(--tz-accent-rgb), 0.22);
+}
+
+/* The swatch strip is the point of the card: it shows what the theme actually
+   looks like rather than asking you to remember what "xipe" means. Weights are
+   2/1/1/1 so the base reads as the dominant colour it is. */
+.swatches {
+    display: flex;
+    gap: 3px;
+    height: 28px;
+}
+
+.swatches > i {
+    display: block;
+    border-radius: 4px;
+}
+
+.swatches > i:nth-child(1) {
+    flex: 2;
+}
+
+.swatches > i:nth-child(2),
+.swatches > i:nth-child(3),
+.swatches > i:nth-child(4) {
+    flex: 1;
+}
+
+.themename {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--tz-text);
+}
+
+.themedesc {
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--tz-muted);
+}
+
+/* ── Drag chip (§1.6) ────────────────────────────────────────────────────── */
+
+.chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+}
+
+.chip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 9px;
+    background: var(--tz-surface);
+    border: 1px solid var(--tz-line);
+    border-radius: 7px;
+    font-family: var(--tz-mono);
+    font-size: 11.5px;
+    color: var(--tz-subtext);
+    cursor: grab;
+}
+
+.chip:active {
+    cursor: grabbing;
+}
+
+.chip .grip {
+    color: var(--tz-faint);
+}
+
+.chip.dragging {
+    opacity: 0.4;
+}
+
+.chip.over {
+    border-color: rgba(var(--tz-accent-rgb), 0.55);
+}
+
+/* The AI module is the one new capability in the bar, and the module editor is
+   where you would go looking for it. */
+.chip.ai {
+    color: var(--tz-accent);
+    border-color: rgba(var(--tz-accent-rgb), 0.35);
+}
+
+/* A separator in a region list draws as the rule it is, not as the word
+   "separator". */
+.chip.sep {
+    width: 26px;
+    padding: 6px 0;
+    justify-content: center;
+    color: var(--tz-faint);
+}
+
+.chip.sep::after {
+    content: "";
+    display: block;
+    width: 1px;
+    height: 12px;
+    background: rgba(var(--tz-muted-rgb), 0.4);
+}
+
+.adddrop {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 9px;
+    border: 1px dashed var(--tz-line-strong);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--tz-faint);
+    font-family: var(--tz-mono);
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.adddrop:hover {
+    color: var(--tz-accent);
+    border-color: rgba(var(--tz-accent-rgb), 0.45);
+}
+
+/* ── Generic buttons ─────────────────────────────────────────────────────── */
+
+.btn {
+    padding: 7px 13px;
+    border: 1px solid var(--tz-line);
+    border-radius: var(--tz-radius);
+    background: var(--tz-surface);
+    color: var(--tz-subtext);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.13s ease, color 0.13s ease, border-color 0.13s ease;
+}
+
+.btn:hover {
+    color: var(--tz-text);
+    border-color: var(--tz-line-strong);
+}
+
+.btn.accent {
+    background: var(--tz-accent);
+    border-color: var(--tz-accent);
+    color: var(--tz-on-accent);
+}
+
+.btn.danger:hover {
+    color: var(--tz-urgent);
+    border-color: rgba(224, 108, 117, 0.5);
+    border-color: color-mix(in srgb, var(--tz-urgent) 50%, transparent);
+}
+
+.btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* ── CLI echo footer (§1.5) ──────────────────────────────────────────────── */
+
+.echo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    height: 34px;
+    padding: 6px 16px;
+    background: rgba(var(--tz-surface-rgb), 0.62);
+    border-top: 1px solid var(--tz-line);
+}
+
+.echo-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 1.14px; /* .12em at 9.5px */
+    color: var(--tz-faint);
+    flex: none;
+}
+
+/* This is the teaching mechanism: every control writes the CLI equivalent of
+   what you just did here, so the GUI is a way of learning the CLI rather than
+   an alternative to it. */
+.echo-cmd {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--tz-mono);
+    font-size: 11.5px;
+    color: var(--tz-accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: text;
+}
+
+.echo-state {
+    flex: none;
+    font-family: var(--tz-mono);
+    font-size: 11px;
+    color: var(--tz-faint);
+}
+
+.echo-state.err {
+    color: var(--tz-urgent);
+}
+
+.echo-state.ok {
+    color: var(--tz-accent);
+}
+
+/* ── Command palette (§1.4) ──────────────────────────────────────────────── */
+
+.scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(var(--tz-base-rgb), 0.62);
+    backdrop-filter: blur(3px);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    z-index: 40;
+}
+
+.palette {
+    width: 620px;
+    max-width: calc(100% - 48px);
+    margin-top: 118px;
+    background: rgba(var(--tz-surface-rgb), 0.96);
+    border: 1px solid var(--tz-line-strong);
+    border-radius: var(--tz-radius-lg);
+    box-shadow: 0 30px 90px -12px rgba(0, 0, 0, 0.8);
+    overflow: hidden;
+    animation: tzpop 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@keyframes tzpop {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.985);
+    }
+}
+
+/* A header row, not a bordered entry above a list: the magnifier is the affordance
+   and the input carries no chrome of its own. */
+.palette-head {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 15px 17px;
+}
+
+.palette-head svg {
+    width: 17px;
+    height: 17px;
+    flex: none;
+    color: var(--tz-accent);
+}
+
+.palette-head input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--tz-text);
+    font-family: inherit;
+    font-size: 14.5px;
+    user-select: text;
+}
+
+.palette-head input:focus {
+    outline: none;
+}
+
+.palette-head input::placeholder {
+    color: var(--tz-muted);
+}
+
+.palette-list {
+    max-height: 440px;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+}
+
+.palette-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 9px 11px;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.palette-row.on,
+.palette-row:hover {
+    background: rgba(var(--tz-accent-rgb), 0.14);
+}
+
+/* Fixed rather than sized in characters: a proportional font makes "Appearance"
+   and "Bar" different widths, and the label column then fails to line up. */
+.palette-page {
+    width: 78px;
+    flex: none;
+    font-family: var(--tz-mono);
+    font-size: 11px;
+    color: var(--tz-faint);
+}
+
+.palette-label {
+    flex: 1;
+    font-size: 13.5px;
+    color: var(--tz-text);
+}
+
+.palette-value {
+    flex: none;
+    font-family: var(--tz-mono);
+    font-size: 11px;
+    color: var(--tz-muted);
+}
+
+.palette-foot {
+    display: flex;
+    gap: 16px;
+    padding: 9px 17px;
+    background: var(--tz-surface);
+    border-top: 1px solid var(--tz-line);
+    font-family: var(--tz-mono);
+    font-size: 10.5px;
+    color: var(--tz-faint);
+}
+
+.palette-empty {
+    padding: 14px 19px 20px;
+    font-size: 13px;
+    color: var(--tz-muted);
+}
+
+/* ── Displays canvas ─────────────────────────────────────────────────────── */
+
+.arrange {
+    position: relative;
+    width: 100%;
+    height: 230px;
+    background: rgba(var(--tz-base-rgb), 0.5);
+    border: 1px solid var(--tz-line);
+    border-radius: var(--tz-radius-lg);
+    overflow: hidden;
+}
+
+.mon {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: rgba(var(--tz-muted-rgb), 0.14);
+    border: 1px solid var(--tz-line-strong);
+    border-radius: 8px;
+    cursor: grab;
+    overflow: hidden;
+    transition: border-color 0.13s ease, background 0.13s ease;
+}
+
+.mon:hover {
+    background: rgba(var(--tz-muted-rgb), 0.2);
+}
+
+.mon.on {
+    border-color: var(--tz-accent);
+    background: rgba(var(--tz-accent-rgb), 0.16);
+}
+
+.mon.dragging {
+    cursor: grabbing;
+    z-index: 2;
+}
+
+.mon.clash {
+    border-color: var(--tz-urgent);
+    background: rgba(224, 108, 117, 0.18);
+    background: color-mix(in srgb, var(--tz-urgent) 18%, transparent);
+}
+
+.mon.off {
+    opacity: 0.45;
+}
+
+.mon-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--tz-text);
+}
+
+.mon-detail {
+    font-family: var(--tz-mono);
+    font-size: 10px;
+    color: var(--tz-muted);
+}
+
+.arrange-status {
+    font-family: var(--tz-mono);
+    font-size: 11px;
+    color: var(--tz-faint);
+}
+
+.arrange-status.warn {
+    color: var(--tz-gold);
+}
+
+/* Confirm-or-revert: applying a layout you cannot see the result of is how you
+   end up with a black screen and no way back. */
+.revert {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 11px 13px;
+    background: var(--tz-surface);
+    border: 1px solid rgba(var(--tz-gold-rgb, 201, 162, 75), 0.45);
+    border-radius: var(--tz-radius);
+}
+
+.revert-text {
+    flex: 1;
+    font-size: 12.5px;
+    color: var(--tz-text);
+}
+
+/* ── Keybind table ───────────────────────────────────────────────────────── */
+
+.keylist {
+    width: 100%;
+    border-collapse: collapse;
+    user-select: text;
+}
+
+.keylist td {
+    padding: 9px 0;
+    border-top: 1px solid rgba(var(--tz-muted-rgb), 0.16);
+    font-size: 13px;
+    vertical-align: baseline;
+}
+
+.keylist tr:first-child td {
+    border-top: none;
+}
+
+.keylist .combo {
+    width: 230px;
+    font-family: var(--tz-mono);
+    font-size: 11.5px;
+    color: var(--tz-accent);
+    white-space: nowrap;
+}
+
+.keylist .desc {
+    color: var(--tz-text);
+}
+
+.keylist .action {
+    font-family: var(--tz-mono);
+    font-size: 11px;
+    color: var(--tz-faint);
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 260px;
+}
+
+/* ── Wallpaper ───────────────────────────────────────────────────────────── */
+
+.wallpreview {
+    width: 100%;
+    height: 250px;
+    border-radius: var(--tz-radius-lg);
+    border: 1px solid var(--tz-line);
+    background-color: var(--tz-surface);
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+.wallgrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+}
+
+.wallcard {
+    height: 74px;
+    border: 1px solid var(--tz-line);
+    border-radius: var(--tz-radius);
+    background-size: cover;
+    background-position: center;
+    cursor: pointer;
+    transition: border-color 0.13s ease, box-shadow 0.13s ease;
+}
+
+.wallcard:hover {
+    border-color: var(--tz-line-strong);
+}
+
+.wallcard.on {
+    border-color: var(--tz-accent);
+    box-shadow: 0 0 0 3px rgba(var(--tz-accent-rgb), 0.22);
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(var(--tz-muted-rgb), 0.28);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--tz-muted-rgb), 0.45);
+    background-clip: content-box;
+}
+
+/* ── Misc ────────────────────────────────────────────────────────────────── */
+
+.muted {
+    color: var(--tz-muted);
+}
+
+.stackcol {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+.rowline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}

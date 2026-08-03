@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tezca Settings</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="win" id="win">
+      <!-- Title bar (§1.1). The drag region is the empty space either side of
+           the omnibox, so nothing interactive is swallowed by it. -->
+      <header class="titlebar">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="var(--tz-accent)" stroke-width="1.7">
+            <circle cx="12" cy="12" r="9"></circle>
+            <circle cx="12" cy="12" r="3.4" fill="var(--tz-accent)" stroke="none"></circle>
+            <path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21"></path>
+          </svg>
+          <span class="brand-name">TEZCA</span>
+          <span class="brand-sub">Settings</span>
+        </div>
+
+        <div class="titlebar-drag" data-tauri-drag-region></div>
+
+        <button class="omni" id="omni" type="button">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7">
+            <circle cx="11" cy="11" r="6.5"></circle>
+            <path d="m16 16 4.5 4.5"></path>
+          </svg>
+          <span class="omni-label">Search all settings…</span>
+          <span class="omni-cap">⌘K</span>
+        </button>
+
+        <div class="titlebar-drag" data-tauri-drag-region></div>
+
+        <div class="dots">
+          <button class="dot" id="min" type="button" title="Minimise" aria-label="Minimise"></button>
+          <button class="dot" id="max" type="button" title="Maximise" aria-label="Maximise"></button>
+          <button class="dot close" id="close" type="button" title="Close" aria-label="Close"></button>
+        </div>
+      </header>
+
+      <div class="body">
+        <nav class="sidebar">
+          <div class="nav" id="nav"></div>
+          <div class="sidefoot">
+            <span class="sidefoot-dot"></span>
+            <div>
+              <div class="sidefoot-host" id="footTheme">—</div>
+              <div class="sidefoot-meta mono" id="footMeta">—</div>
+            </div>
+          </div>
+        </nav>
+
+        <main class="page" id="page"></main>
+      </div>
+
+      <!-- The teaching mechanism: what your last click would have been at a
+           shell prompt, and whether it worked. -->
+      <footer class="echo">
+        <span class="echo-tag">CLI</span>
+        <span class="echo-cmd" id="echoCmd">tezca settings</span>
+        <span class="echo-state" id="echoState"></span>
+      </footer>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

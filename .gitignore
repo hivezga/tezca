@@ -3,6 +3,11 @@
 **/target
 Cargo.lock.orig
 
+# Tauri writes the capability JSON schemas here on every build. They are derived
+# from the permissions the crate actually uses, so they are build output, not
+# source — the checked-in thing is capabilities/default.json.
+crates/tezca-settings/gen/
+
 # tezca link backups (should never be committed)
 *.bak.*
 *.tezca-backup

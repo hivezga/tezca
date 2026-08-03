@@ -2,12 +2,11 @@
 //! work itself — every action is a `tezca` / hyprctl / script call, the same
 //! thing the keybinds do, so the GUI and keyboard paths stay identical.
 
-use gtk4::gio;
-use gtk4::glib;
-use std::cell::RefCell;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::rc::Rc;
+use std::sync::{Mutex, OnceLock};
+use tauri::{AppHandle, Emitter};
 
 /// Absolute path to the `tezca` binary — prefer ~/.local/bin (where install.sh
 /// puts it; not always on a GUI process's PATH), else fall back to PATH lookup.
@@ -26,19 +25,20 @@ pub fn tezca_bin() -> String {
 // ---------------------------------------------------------------------------
 
 /// What became of the command the echo footer is showing.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum EchoState {
     /// Spawned detached — we deliberately never learn the outcome, so the
     /// footer must not claim one.
     Sent,
-    /// Running off the main thread. A second echo follows with the verdict.
+    /// Running off the caller's thread. A second echo follows with the verdict.
     Running,
     Applied,
     Failed,
 }
 
 /// One line for the CLI-echo footer.
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct Echo {
     /// The command as a user could retype it, e.g. `tezca bar set height 40`.
     pub line: String,
@@ -47,37 +47,63 @@ pub struct Echo {
     pub detail: String,
 }
 
-type EchoSink = Rc<dyn Fn(Echo)>;
+/// The window every mutating command reports to.
+///
+/// A process-wide handle rather than the GTK build's thread-local sink: Tauri
+/// runs commands on a pool, so the thread that shells out is rarely the thread
+/// that would have installed a sink. `Emitter::emit` is itself thread-safe and
+/// marshals to the webview, which is the whole reason the sink existed.
+static ECHO_SINK: OnceLock<AppHandle> = OnceLock::new();
 
-thread_local! {
-    static ECHO_SINK: RefCell<Option<EchoSink>> = const { RefCell::new(None) };
-}
+/// The event name the footer listens on.
+pub const ECHO_EVENT: &str = "tezca://echo";
 
-/// Route every *mutating* command this module runs to `f` — the footer that
-/// shows you which `tezca` invocation your click just made.
+/// Route every *mutating* command this module runs to the front end — the
+/// footer that shows you which `tezca` invocation your click just made.
 ///
 /// Only the action paths report. [`tezca_out`] and [`output`] are pure reads and
 /// would otherwise bury the change you actually made under a stream of
 /// `display list --machine`.
-///
-/// Thread-local by design: the sink touches widgets, so only the GTK main
-/// thread may hold one. [`capture`] running on the `gio` pool finds no sink and
-/// silently skips — which is what we want, since the wrapper that dispatched it
-/// echoes from the main thread on both sides of the await.
-pub fn set_echo_sink<F: Fn(Echo) + 'static>(f: F) {
-    let f: EchoSink = Rc::new(f);
-    ECHO_SINK.with(|s| *s.borrow_mut() = Some(f));
+pub fn set_echo_sink(app: AppHandle) {
+    let _ = ECHO_SINK.set(app);
 }
 
 fn echo(cmd: &str, args: &[&str], state: EchoState, detail: &str) {
-    // Clone the handle out before calling: a sink that itself runs a command
-    // would otherwise re-enter the RefCell while it is still borrowed.
-    let sink = ECHO_SINK.with(|s| s.borrow().clone());
-    let Some(sink) = sink else { return };
-    sink(Echo { line: command_line(cmd, args), state, detail: detail.to_string() });
+    let Some(app) = ECHO_SINK.get() else { return };
+    let _ = app.emit(
+        ECHO_EVENT,
+        Echo { line: command_line(cmd, args), state, detail: detail.to_string() },
+    );
+}
+
+/// Commands whose echo is suppressed for the duration of a call.
+///
+/// The readers a page runs on open are mutating in no sense, but a few of them
+/// go through [`capture`] because we need their exit code. Without this the
+/// footer would show `display list --machine` every time you changed tab,
+/// burying the change you actually made.
+static QUIET: Mutex<usize> = Mutex::new(0);
+
+fn quiet() -> bool {
+    QUIET.lock().map(|g| *g > 0).unwrap_or(false)
+}
+
+/// Run `f` with echo suppressed. Used by the bulk readers.
+pub fn without_echo<T>(f: impl FnOnce() -> T) -> T {
+    if let Ok(mut g) = QUIET.lock() {
+        *g += 1;
+    }
+    let out = f();
+    if let Ok(mut g) = QUIET.lock() {
+        *g = g.saturating_sub(1);
+    }
+    out
 }
 
 fn echo_result(cmd: &str, args: &[&str], r: &CmdResult) {
+    if quiet() {
+        return;
+    }
     if r.ok() {
         echo(cmd, args, EchoState::Applied, "");
     } else {
@@ -101,24 +127,6 @@ fn command_line(cmd: &str, args: &[&str]) -> String {
         }
     }
     s
-}
-
-/// Absolute path to `tezca-bar`, next to the `tezca` binary.
-///
-/// The bar owns the only HTTP code and the only host allowlist in this project,
-/// so the panel's place search drives it rather than opening a second network
-/// path of its own.
-pub fn bar_bin() -> String {
-    let t = tezca_bin();
-    match t.rsplit_once('/') {
-        Some((dir, _)) => format!("{dir}/tezca-bar"),
-        None => "tezca-bar".to_string(),
-    }
-}
-
-/// Spawn `tezca <args>` detached, ignoring output (theme set, game toggle, …).
-pub fn tezca(args: &[&str]) {
-    spawn(&tezca_bin(), args);
 }
 
 /// Run `tezca <args>` and capture trimmed stdout (theme names, …).
@@ -160,17 +168,6 @@ fn config_tezca(rel: &str) -> Option<PathBuf> {
     Some(base.join("tezca").join(rel))
 }
 
-/// The active curated theme name — `current/theme.state` holds "obsidian" or
-/// "dynamic:/path". Returns the curated name, or None when dynamic/unset.
-pub fn active_theme() -> Option<String> {
-    let s = std::fs::read_to_string(config_tezca("current/theme.state")?).ok()?.trim().to_string();
-    if s.is_empty() || s.starts_with("dynamic:") {
-        None
-    } else {
-        Some(s)
-    }
-}
-
 /// Current wallpaper path from `current/wallpaper`.
 pub fn current_wallpaper() -> Option<PathBuf> {
     let s = std::fs::read_to_string(config_tezca("current/wallpaper")?).ok()?.trim().to_string();
@@ -179,6 +176,53 @@ pub fn current_wallpaper() -> Option<PathBuf> {
     } else {
         Some(PathBuf::from(s))
     }
+}
+
+/// One curated theme as `tezca theme info` reports it — enough to draw its card
+/// without the panel having to know where the repo's `themes/` directory lives.
+#[derive(Clone, Default, Serialize)]
+pub struct ThemeInfo {
+    pub name: String,
+    pub label: String,
+    pub description: String,
+    pub active: bool,
+    pub base: String,
+    pub accent: String,
+    pub gold: String,
+}
+
+pub fn themes() -> Vec<ThemeInfo> {
+    let Some(out) = tezca_out(&["theme", "info"]) else { return Vec::new() };
+    records(&out)
+        .iter()
+        .map(|r| ThemeInfo {
+            name: rec(r, "name"),
+            label: rec(r, "label"),
+            description: rec(r, "description"),
+            active: rec_bool(r, "active"),
+            base: rec(r, "base"),
+            accent: rec(r, "accent"),
+            gold: rec(r, "gold"),
+        })
+        .filter(|t| !t.name.is_empty())
+        .collect()
+}
+
+/// The stored wallpaper fit mode (`fill` · `fit` · `stretch` · `center`).
+pub fn wallpaper_fit() -> String {
+    tezca_out(&["wallpaper", "fit"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "fill".into())
+}
+
+/// Every image the picker can offer, in the CLI's order.
+pub fn wallpaper_library() -> Vec<PathBuf> {
+    tezca_out(&["wallpaper", "library"])
+        .map(|out| {
+            out.lines().map(str::trim).filter(|l| !l.is_empty()).map(PathBuf::from).collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Whether game mode is on — `game.state` contains "on" when active.
@@ -226,7 +270,7 @@ pub fn run_script(name: &str, args: &[&str]) {
 // ---------------------------------------------------------------------------
 
 /// Result of a `tezca` invocation we need to branch on (e.g. rebind conflicts).
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub struct CmdResult {
     pub code: i32,
     pub stdout: String,
@@ -288,100 +332,33 @@ pub fn capture(cmd: &str, args: &[&str]) -> CmdResult {
     r
 }
 
-/// Run a command **off the GTK main thread**, then hand the result back on it.
+/// Announce a command that is about to run, before it runs.
 ///
-/// Everything else in this module blocks the caller, which is fine for the
-/// millisecond-scale reads the older pages do. It is not fine for the tools the
-/// connectivity pages drive: `nmcli device wifi list --rescan yes` takes seconds,
-/// `bluetoothctl scan` takes exactly as long as you ask it to, and `ddcutil`
-/// is slow enough to feel. Run those here or the whole window (and, in the bar,
-/// the clock) freezes for the duration.
+/// The slow tools the connectivity pages drive — `nmcli device wifi list
+/// --rescan yes`, `bluetoothctl scan`, `ddcutil` — take long enough that a
+/// footer which only spoke on completion would look broken. Callers echo
+/// `Running` here, then let [`capture`] echo the verdict.
 ///
-/// `gio::spawn_blocking` puts the work on GIO's shared I/O thread pool and
-/// `spawn_future_local` resumes on the main context, so `on_done` can touch
-/// widgets directly. The pool is shared and rate-limited, so callers must keep
-/// their commands bounded (pass `--timeout`, never block indefinitely).
-pub fn run_async<F>(cmd: &str, args: &[&str], on_done: F)
-where
-    F: FnOnce(CmdResult) + 'static,
-{
-    let cmd = cmd.to_string();
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    {
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        echo(&cmd, &refs, EchoState::Running, "");
-    }
-    glib::spawn_future_local(async move {
-        let worker = {
-            let cmd = cmd.clone();
-            let args = args.clone();
-            gio::spawn_blocking(move || {
-                let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-                capture(&cmd, &refs)
-            })
-        };
-        let r = match worker.await {
-            Ok(r) => r,
-            // The worker panicked. Report it rather than dropping the callback,
-            // or the UI sits on "Scanning…" forever.
-            Err(_) => CmdResult {
-                code: -1,
-                stdout: String::new(),
-                stderr: "the background task panicked".to_string(),
-            },
-        };
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        echo_result(&cmd, &refs, &r);
-        on_done(r);
-    });
+/// In the GTK build this was `run_async`, which had to hop threads by hand
+/// because the sink touched widgets. Tauri already runs commands off the UI
+/// thread, so the hop is gone and only the announcement remains.
+pub fn echo_running(cmd: &str, args: &[&str]) {
+    echo(cmd, args, EchoState::Running, "");
 }
 
-/// [`run_async`] for the `tezca` CLI itself.
-pub fn tezca_async<F>(args: &[&str], on_done: F)
-where
-    F: FnOnce(CmdResult) + 'static,
-{
-    run_async(&tezca_bin(), args, on_done);
-}
-
-/// Run `tezca <args>` with `input` on its stdin, off the main thread.
+/// Run `tezca <args>` with `input` on its stdin.
 ///
 /// This is how a Wi-Fi password gets from the dialog to NetworkManager: down a
 /// pipe. Passing it as an argument instead would publish it in `/proc/<pid>/cmdline`,
 /// which every process on the machine can read — `ps` would print the
 /// pre-shared key of the network the user just joined.
-pub fn tezca_async_stdin<F>(args: &[&str], input: String, on_done: F)
-where
-    F: FnOnce(CmdResult) + 'static,
-{
+pub fn tezca_stdin(args: &[&str], input: &str) -> CmdResult {
     let cmd = tezca_bin();
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    {
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        echo(&cmd, &refs, EchoState::Running, "");
-    }
-    glib::spawn_future_local(async move {
-        let worker = {
-            let cmd = cmd.clone();
-            let args = args.clone();
-            // `input` is the secret; it goes down the pipe and is never echoed.
-            gio::spawn_blocking(move || {
-                let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-                capture_stdin(&cmd, &refs, &input)
-            })
-        };
-        let r = match worker.await {
-            Ok(r) => r,
-            Err(_) => CmdResult {
-                code: -1,
-                stdout: String::new(),
-                stderr: "the background task panicked".to_string(),
-            },
-        };
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        echo_result(&cmd, &refs, &r);
-        on_done(r);
-    });
+    echo_running(&cmd, args);
+    // `input` is the secret; it goes down the pipe and is never echoed.
+    let r = capture_stdin(&cmd, args, input);
+    echo_result(&cmd, args, &r);
+    r
 }
 
 fn capture_stdin(cmd: &str, args: &[&str], input: &str) -> CmdResult {
@@ -441,14 +418,6 @@ pub fn rec_bool(r: &[(String, String)], key: &str) -> bool {
     rec(r, key) == "true"
 }
 
-/// Parse a flat (record-less) `--machine` block, e.g. `net status --machine`.
-pub fn flat(out: &str) -> Vec<(String, String)> {
-    out.lines()
-        .filter_map(|l| l.split_once('='))
-        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-        .collect()
-}
-
 /// One connected monitor, from `tezca display list --machine`.
 ///
 /// Mirrors every field the CLI prints. `vrr` and `bitdepth` are the *effective*
@@ -457,7 +426,7 @@ pub fn flat(out: &str) -> Vec<(String, String)> {
 /// configured. The configured value comes from `tezca display config`, which
 /// reads the override store; a control seeded from the compositor would flip back
 /// to "off" every time VRR happened not to be engaged.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub struct Monitor {
     pub name: String,
     pub desc: String,

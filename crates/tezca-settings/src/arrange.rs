@@ -1,4 +1,4 @@
-//! The drag-to-arrange display canvas.
+//! Geometry for the drag-to-arrange display canvas.
 //!
 //! Monitors are drawn to scale and dragged into place, with their edges snapping
 //! to one another — the interaction wdisplays, wlay and nwg-displays all settle
@@ -20,39 +20,31 @@
 //! by scale, with 90°/270° rotations swapping width and height. That is the
 //! space monitor positions are expressed in, so it is the only one where "these
 //! two edges touch" is a true statement. Screen coordinates appear solely inside
-//! [`View`], which maps logical → widget pixels for drawing and hit-testing.
+//! [`View`], which maps logical → canvas pixels for drawing and hit-testing.
+//!
+//! ## Why this is still Rust
+//!
+//! The canvas itself is drawn by the webview now, but the arithmetic stayed
+//! here. It is the one part of the Displays page with a real test suite, it is
+//! the part where being wrong means writing a bad layout to the compositor, and
+//! reimplementing `snap` in JavaScript would give two definitions of "flush"
+//! that drift apart. The front end calls [`snap_at`] on each drag frame.
 
-use gtk4::cairo::{FontSlant, FontWeight};
-use gtk4::gdk::RGBA;
-use gtk4::prelude::*;
-use gtk4::{Align, Box, Button, DrawingArea, EventControllerKey, GestureDrag, Orientation};
-use std::cell::RefCell;
-use std::rc::Rc;
+use serde::{Deserialize, Serialize};
 
 use crate::backend;
 
-/// How close two edges must come, in *widget* pixels, before one grabs the
+/// How close two edges must come, in *canvas* pixels, before one grabs the
 /// other. Kept in screen space so the pull feels the same however far the view
 /// is zoomed out — a logical-space threshold would be unusable on a 3-monitor
 /// span and twitchy on one screen.
-const SNAP_SCREEN_PX: f64 = 12.0;
+pub const SNAP_SCREEN_PX: f64 = 12.0;
 
-/// Canvas height. Wide-and-short suits the arrangements people actually have
-/// (monitors side by side) without eating the page.
-const CANVAS_H: i32 = 230;
-
-/// Breathing room around the arrangement, in widget pixels.
+/// Breathing room around the arrangement, in canvas pixels.
 const PAD: f64 = 16.0;
 
-/// Called with every monitor whose position changed, as `(name, x, y)`.
-///
-/// One call for the whole layout rather than one per drag: applying each drop
-/// separately would stack a confirm-or-revert dialog per monitor, and a layout
-/// is one decision.
-pub type Commit = Rc<dyn Fn(Vec<(String, i32, i32)>)>;
-
 /// One monitor in logical coordinates.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Rect {
     pub name: String,
     pub detail: String,
@@ -72,17 +64,17 @@ impl Rect {
         self.y + self.h
     }
 
-    fn overlaps(&self, o: &Rect) -> bool {
+    pub fn overlaps(&self, o: &Rect) -> bool {
         self.x < o.right() && o.x < self.right() && self.y < o.bottom() && o.y < self.bottom()
     }
 }
 
-/// logical → widget-pixel transform for the current allocation.
-#[derive(Clone, Copy, Debug)]
-struct View {
-    scale: f64,
-    ox: f64,
-    oy: f64,
+/// logical → canvas-pixel transform for the current allocation.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct View {
+    pub scale: f64,
+    pub ox: f64,
+    pub oy: f64,
 }
 
 impl Default for View {
@@ -91,6 +83,10 @@ impl Default for View {
     }
 }
 
+/// The transform is applied in the front end — two multiplies per rectangle,
+/// which is not worth an IPC round trip per drag frame. These exist so the
+/// arithmetic the webview repeats is pinned by a test on this side.
+#[allow(dead_code)]
 impl View {
     fn sx(&self, x: i32) -> f64 {
         x as f64 * self.scale + self.ox
@@ -100,7 +96,7 @@ impl View {
         y as f64 * self.scale + self.oy
     }
 
-    /// Widget pixels back to logical, for hit-testing a click.
+    /// Canvas pixels back to logical, for hit-testing a click.
     fn lx(&self, x: f64) -> i32 {
         ((x - self.ox) / self.scale).round() as i32
     }
@@ -110,272 +106,28 @@ impl View {
     }
 }
 
-struct State {
-    rects: Vec<Rect>,
-    /// Positions as first read, so "what changed" is answerable at Apply time
-    /// and Revert does not need to re-query the compositor.
-    original: Vec<(i32, i32)>,
-    selected: Option<usize>,
-    /// `(index, logical x, logical y)` captured when a drag began. Deltas are
-    /// applied to this rather than accumulated, so a drag that snaps and then
-    /// pulls away does not drift.
-    dragging: Option<(usize, i32, i32)>,
-    view: View,
+/// Which monitors sit somewhere other than where they were read, as
+/// `(name, x, y)`.
+///
+/// One answer for the whole layout rather than one per drag: applying each drop
+/// separately would stack a confirm-or-revert countdown per monitor, and a
+/// layout is one decision.
+pub fn changed(rects: &[Rect], original: &[(i32, i32)]) -> Vec<(String, i32, i32)> {
+    rects
+        .iter()
+        .zip(original)
+        .filter(|(r, (ox, oy))| r.x != *ox || r.y != *oy)
+        .map(|(r, _)| (r.name.clone(), r.x, r.y))
+        .collect()
 }
 
-impl State {
-    fn changed(&self) -> Vec<(String, i32, i32)> {
-        self.rects
-            .iter()
-            .zip(&self.original)
-            .filter(|(r, (ox, oy))| r.x != *ox || r.y != *oy)
-            .map(|(r, _)| (r.name.clone(), r.x, r.y))
-            .collect()
-    }
-
-    fn any_overlap(&self) -> bool {
-        self.rects
-            .iter()
-            .enumerate()
-            .any(|(i, r)| self.rects.iter().enumerate().any(|(j, o)| j != i && r.overlaps(o)))
-    }
-
-    /// One line answering "is what I see on screen what the compositor is
-    /// doing?" — the question the canvas otherwise leaves open, since a dragged
-    /// rectangle looks identical whether or not it has been applied.
-    fn status(&self) -> String {
-        if self.any_overlap() {
-            return "⚠ two screens overlap".to_string();
-        }
-        match self.changed().len() {
-            0 => "layout matches the compositor".to_string(),
-            n => format!("{n} moved · not applied"),
-        }
-    }
+/// True when any two screens cover the same logical pixel.
+pub fn any_overlap(rects: &[Rect]) -> bool {
+    rects
+        .iter()
+        .enumerate()
+        .any(|(i, r)| rects.iter().enumerate().any(|(j, o)| j != i && r.overlaps(o)))
 }
-
-/// Build the arrangement section: the canvas plus its actions.
-pub fn canvas(mons: &[backend::Monitor], on_commit: Commit) -> Box {
-    let rects = rects_of(mons);
-    let original: Vec<(i32, i32)> = rects.iter().map(|r| (r.x, r.y)).collect();
-    let state = Rc::new(RefCell::new(State {
-        rects,
-        original,
-        selected: None,
-        dragging: None,
-        view: View::default(),
-    }));
-
-    let wrap = Box::new(Orientation::Vertical, 8);
-
-    let status = gtk4::Label::new(None);
-    status.add_css_class("tz-arrange-status");
-    status.set_halign(Align::Start);
-    status.set_xalign(0.0);
-    status.set_hexpand(true);
-
-    // Called after every mutation, next to the redraw it accompanies. The draw
-    // handler cannot do this itself — it holds `state` mutably while it runs.
-    let sync: Rc<dyn Fn()> = {
-        let state = state.clone();
-        let status = status.clone();
-        Rc::new(move || {
-            let st = state.borrow();
-            let text = st.status();
-            let overlap = st.any_overlap();
-            drop(st);
-            status.set_text(&text);
-            if overlap {
-                status.add_css_class("tz-warn");
-            } else {
-                status.remove_css_class("tz-warn");
-            }
-        })
-    };
-
-    let area = DrawingArea::new();
-    area.add_css_class("tz-arrange");
-    area.set_content_height(CANVAS_H);
-    area.set_hexpand(true);
-    area.set_focusable(true);
-
-    {
-        let state = state.clone();
-        area.set_draw_func(move |area, cr, w, h| {
-            let mut st = state.borrow_mut();
-            st.view = view_for(&st.rects, w as f64, h as f64);
-            let view = st.view;
-            let colors = Palette::of(area);
-
-            for (i, r) in st.rects.iter().enumerate() {
-                let overlapping = st.rects.iter().enumerate().any(|(j, o)| j != i && r.overlaps(o));
-                draw_rect(cr, r, &view, &colors, st.selected == Some(i), overlapping);
-            }
-        });
-    }
-
-    // --- drag ---------------------------------------------------------------
-    let drag = GestureDrag::new();
-    {
-        let state = state.clone();
-        let area_ref = area.clone();
-        drag.connect_drag_begin(move |_, x, y| {
-            let mut st = state.borrow_mut();
-            let view = st.view;
-            let (lx, ly) = (view.lx(x), view.ly(y));
-            // Topmost first: later rects are drawn over earlier ones, so the one
-            // you can see is the one you grab.
-            let hit = st
-                .rects
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|(_, r)| lx >= r.x && lx < r.right() && ly >= r.y && ly < r.bottom())
-                .map(|(i, r)| (i, r.x, r.y));
-            st.selected = hit.map(|(i, _, _)| i);
-            st.dragging = hit;
-            drop(st);
-            area_ref.queue_draw();
-        });
-    }
-    {
-        let state = state.clone();
-        let area_ref = area.clone();
-        let sync = sync.clone();
-        drag.connect_drag_update(move |_, dx, dy| {
-            let mut st = state.borrow_mut();
-            let Some((i, sx, sy)) = st.dragging else { return };
-            let view = st.view;
-            let want_x = sx + (dx / view.scale).round() as i32;
-            let want_y = sy + (dy / view.scale).round() as i32;
-            let tol = (SNAP_SCREEN_PX / view.scale).round() as i32;
-            let (x, y) = snap(&st.rects, i, want_x, want_y, tol);
-            st.rects[i].x = x;
-            st.rects[i].y = y;
-            drop(st);
-            area_ref.queue_draw();
-            sync();
-        });
-    }
-    {
-        let state = state.clone();
-        drag.connect_drag_end(move |_, _, _| {
-            state.borrow_mut().dragging = None;
-        });
-    }
-    area.add_controller(drag);
-
-    // --- keyboard nudge -----------------------------------------------------
-    // A drag is fine for "roughly there" and hopeless for "exactly 1 px left".
-    let keys = EventControllerKey::new();
-    {
-        let state = state.clone();
-        let area_ref = area.clone();
-        let sync = sync.clone();
-        keys.connect_key_pressed(move |_, key, _, modifier| {
-            use gtk4::gdk::Key;
-            let step = if modifier.contains(gtk4::gdk::ModifierType::SHIFT_MASK) { 10 } else { 1 };
-            let (dx, dy) = match key {
-                Key::Left => (-step, 0),
-                Key::Right => (step, 0),
-                Key::Up => (0, -step),
-                Key::Down => (0, step),
-                _ => return glib_propagate(),
-            };
-            let mut st = state.borrow_mut();
-            let Some(i) = st.selected else { return glib_propagate() };
-            st.rects[i].x += dx;
-            st.rects[i].y += dy;
-            drop(st);
-            area_ref.queue_draw();
-            sync();
-            gtk4::glib::Propagation::Stop
-        });
-    }
-    area.add_controller(keys);
-
-    wrap.append(&area);
-    wrap.append(&hint_row());
-
-    // --- actions ------------------------------------------------------------
-    let actions = Box::new(Orientation::Horizontal, 6);
-
-    let tidy = Button::with_label("Tidy up");
-    tidy.add_css_class("tz-small");
-    {
-        let state = state.clone();
-        let area_ref = area.clone();
-        let sync = sync.clone();
-        tidy.connect_clicked(move |_| {
-            let mut st = state.borrow_mut();
-            tidy_up(&mut st.rects);
-            drop(st);
-            area_ref.queue_draw();
-            sync();
-        });
-    }
-
-    let revert = Button::with_label("Revert");
-    revert.add_css_class("tz-small");
-    {
-        let state = state.clone();
-        let area_ref = area.clone();
-        let sync = sync.clone();
-        revert.connect_clicked(move |_| {
-            let mut st = state.borrow_mut();
-            let original = st.original.clone();
-            for (r, (x, y)) in st.rects.iter_mut().zip(original) {
-                r.x = x;
-                r.y = y;
-            }
-            drop(st);
-            area_ref.queue_draw();
-            sync();
-        });
-    }
-
-    let apply = Button::with_label("Apply layout");
-    apply.add_css_class("tz-action");
-    {
-        let state = state.clone();
-        apply.connect_clicked(move |_| {
-            let changed = state.borrow().changed();
-            if !changed.is_empty() {
-                on_commit(changed);
-            }
-        });
-    }
-
-    actions.append(&status);
-    actions.append(&tidy);
-    actions.append(&revert);
-    actions.append(&apply);
-    wrap.append(&actions);
-
-    sync();
-    wrap
-}
-
-fn glib_propagate() -> gtk4::glib::Propagation {
-    gtk4::glib::Propagation::Proceed
-}
-
-fn hint_row() -> gtk4::Label {
-    let l = gtk4::Label::new(Some(
-        "Drag a monitor to move it — edges snap to their neighbours. \
-         Arrow keys nudge by 1 px, Shift+arrow by 10. Red means two screens overlap.",
-    ));
-    l.add_css_class("tz-hint");
-    l.set_halign(Align::Start);
-    l.set_xalign(0.0);
-    l.set_wrap(true);
-    l.set_max_width_chars(72);
-    l
-}
-
-// ---------------------------------------------------------------------------
-// Geometry
-// ---------------------------------------------------------------------------
 
 /// Logical rectangles for every monitor the compositor reported.
 pub fn rects_of(mons: &[backend::Monitor]) -> Vec<Rect> {
@@ -426,6 +178,7 @@ fn trim_rate(r: &str) -> String {
     }
 }
 
+/// The logical extent the whole arrangement occupies.
 fn bounds(rects: &[Rect]) -> (i32, i32, i32, i32) {
     let minx = rects.iter().map(|r| r.x).min().unwrap_or(0);
     let miny = rects.iter().map(|r| r.y).min().unwrap_or(0);
@@ -517,119 +270,46 @@ fn tidy_up(rects: &mut [Rect]) {
 }
 
 // ---------------------------------------------------------------------------
-// Painting
+// What the front end calls
 // ---------------------------------------------------------------------------
 
-/// The theme tokens the canvas draws with, resolved from the live stylesheet so
-/// a theme switch repaints correctly instead of baking obsidian's palette in.
-struct Palette {
-    surface: RGBA,
-    text: RGBA,
-    muted: RGBA,
-    accent: RGBA,
-    urgent: RGBA,
-}
-
-impl Palette {
-    fn of(w: &DrawingArea) -> Palette {
-        Palette {
-            surface: token(w, "tz_surface", (0.08, 0.10, 0.11)),
-            text: token(w, "tz_text", (0.91, 0.92, 0.93)),
-            muted: token(w, "tz_muted", (0.55, 0.58, 0.60)),
-            accent: token(w, "tz_accent", (0.25, 0.72, 0.69)),
-            urgent: token(w, "tz_urgent", (0.88, 0.42, 0.46)),
-        }
-    }
-}
-
-/// Resolve one `@define-color` token by name.
+/// Snap one monitor's proposed position, in the shape the front end calls it:
+/// the whole arrangement, which rectangle moved, and where the pointer put it.
 ///
-/// `lookup_color` is deprecated and has no replacement that can read a
-/// user-defined token: the themes in `~/.config/tezca/current/colors.css` are
-/// exactly such tokens, and the alternative — hardcoding obsidian's hex values —
-/// would leave the canvas the one widget in the app that ignores the theme.
-#[allow(deprecated)]
-fn token(w: &DrawingArea, name: &str, fallback: (f64, f64, f64)) -> RGBA {
-    w.style_context()
-        .lookup_color(name)
-        .unwrap_or_else(|| RGBA::new(fallback.0 as f32, fallback.1 as f32, fallback.2 as f32, 1.0))
-}
-
-fn set_rgba(cr: &gtk4::cairo::Context, c: RGBA, alpha: f64) {
-    cr.set_source_rgba(c.red() as f64, c.green() as f64, c.blue() as f64, alpha);
-}
-
-fn draw_rect(
-    cr: &gtk4::cairo::Context,
-    r: &Rect,
-    view: &View,
-    p: &Palette,
-    selected: bool,
-    overlapping: bool,
-) {
-    let (x, y) = (view.sx(r.x), view.sy(r.y));
-    let (w, h) = (r.w as f64 * view.scale, r.h as f64 * view.scale);
-
-    // Body.
-    set_rgba(cr, p.surface, if r.disabled { 0.35 } else { 0.92 });
-    cr.rectangle(x, y, w, h);
-    let _ = cr.fill();
-
-    // Border carries the state: red for an overlap (almost always a mistake),
-    // accent for the selection, muted otherwise.
-    let (edge, width) = match (overlapping, selected) {
-        (true, _) => (p.urgent, 2.0),
-        (false, true) => (p.accent, 2.0),
-        (false, false) => (p.muted, 1.0),
-    };
-    set_rgba(cr, edge, if r.disabled { 0.5 } else { 1.0 });
-    cr.set_line_width(width);
-    cr.rectangle(x + width / 2.0, y + width / 2.0, w - width, h - width);
-    let _ = cr.stroke();
-
-    // Labels, centred, and skipped entirely when the rect is too small to hold
-    // them — a clipped half-word is worse than nothing.
-    if w < 46.0 || h < 26.0 {
-        return;
+/// `tol` arrives in logical units — the caller converts [`SNAP_SCREEN_PX`]
+/// through the current [`View`] scale, so the pull stays the same size on
+/// screen however far out the arrangement is zoomed.
+pub fn snap_at(rects: &[Rect], i: usize, x: i32, y: i32, tol: i32) -> (i32, i32) {
+    if i >= rects.len() {
+        return (x, y);
     }
-    // Text is never allowed past the monitor's own edges — a detail line
-    // overhanging into the neighbouring rect reads as belonging to it.
-    let inner = w - 8.0;
-
-    cr.select_font_face("Sans", FontSlant::Normal, FontWeight::Bold);
-    cr.set_font_size(13.0);
-    set_rgba(cr, if r.disabled { p.muted } else { p.text }, 1.0);
-    centre_text(cr, &r.name, x + w / 2.0, y + h / 2.0 - 3.0, inner);
-
-    if h >= 44.0 {
-        cr.select_font_face("Sans", FontSlant::Normal, FontWeight::Normal);
-        cr.set_font_size(10.0);
-        set_rgba(cr, p.muted, 1.0);
-        let detail = if r.disabled { "off".to_string() } else { r.detail.clone() };
-        // Falls back to just the resolution, then to nothing, rather than
-        // spilling: on a narrow rect "2560x1440" alone is still worth having.
-        let short = detail.split(" · ").next().unwrap_or("").to_string();
-        for candidate in [detail, short] {
-            if centre_text(cr, &candidate, x + w / 2.0, y + h / 2.0 + 13.0, inner) {
-                break;
-            }
-        }
-    }
+    snap(rects, i, x, y, tol)
 }
 
-/// Draw `text` centred on `(cx, cy)`, or draw nothing and return false if it
-/// would be wider than `max_w`.
-fn centre_text(cr: &gtk4::cairo::Context, text: &str, cx: f64, cy: f64, max_w: f64) -> bool {
-    let Ok(e) = cr.text_extents(text) else { return false };
-    if e.width() > max_w {
-        return false;
-    }
-    cr.move_to(cx - e.width() / 2.0 - e.x_bearing(), cy);
-    let _ = cr.show_text(text);
-    true
+/// Pack the monitors left to right, exposed for the Tidy up button.
+pub fn tidy(rects: &mut [Rect]) {
+    tidy_up(rects);
 }
 
-// ---------------------------------------------------------------------------
+/// The transform that fits `rects` into a `w × h` canvas, plus the snap
+/// tolerance in logical units.
+///
+/// The tolerance is derived here rather than in the front end so
+/// [`SNAP_SCREEN_PX`] keeps its meaning: twelve pixels *on screen*, whatever
+/// the arrangement is scaled to. A fixed logical threshold would be unusable
+/// across a three-monitor span and twitchy on a single screen.
+#[derive(Serialize)]
+pub struct Fit {
+    #[serde(flatten)]
+    pub view: View,
+    pub tol: i32,
+}
+
+pub fn fit(rects: &[Rect], w: f64, h: f64) -> Fit {
+    let view = view_for(rects, w, h);
+    let tol = if view.scale > 0.0 { (SNAP_SCREEN_PX / view.scale).round() as i32 } else { 0 };
+    Fit { view, tol }
+}
 
 #[cfg(test)]
 mod tests {

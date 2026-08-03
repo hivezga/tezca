@@ -1,9 +1,15 @@
-# tezca-settings — the GTK4 control center (Phase 8).
+# tezca-settings — the Project:Tezca control center.
 #
-# The DESIGN.md §8 "future GUI control-center" — a real obsidian-glass window to
-# manage themes, wallpaper, keybinds, gaming and the session. Like tezca-dock it
-# carries the GTK stack and is a separate workspace member, so those deps never
-# touch the std-only `tezca` CLI. It shells out to `tezca` for all real work.
+# Migrated from GTK4 to Tauri. Eighty-odd controls across thirteen pages, a ⌘K
+# palette and a drag-to-arrange canvas are a layout problem CSS is good at and
+# GTK CSS is not — the gap audit's settings findings were almost entirely
+# CSS-expressiveness gaps: no hairline row idiom, no working type scale, no
+# `gap`, no entry animation. The bar stays GTK for the opposite reason, that it
+# runs forever on every output and needs wlr-layer-shell rather than layout.
+#
+# The backend does not change shape. It shells out to `tezca` for all real work,
+# so the GUI and the keybinds drive the same code paths and the footer can show
+# you the invocation your click just made.
 [package]
 name = "tezca-settings"
 version.workspace = true
@@ -11,15 +17,18 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "GTK4 control center for Project:Tezca (themes, wallpaper, keybinds, gaming, session)"
+description = "Control center for Project:Tezca (themes, wallpaper, displays, keybinds, gaming, session)"
 
 [[bin]]
 name = "tezca-settings"
 path = "src/main.rs"
 
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
 [dependencies]
-gtk4 = { version = "0.11", features = ["v4_10"] }
-# Only for the Displays page's "Identify" overlay: a label drawn on each physical
-# screen has to sit above everything, which under Wayland means the overlay layer
-# rather than a window the compositor is free to place wherever it likes.
-gtk4-layer-shell = "0.8"
+# `protocol-asset` is what lets the Appearance page render the real wallpaper
+# file rather than a stand-in. Scoped to $HOME in tauri.conf.json.
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

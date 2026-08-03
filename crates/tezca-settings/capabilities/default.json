@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the control center's window is allowed to do to itself. The design draws its own title bar, so the three dots and the drag region need the window commands the decorations would otherwise have provided. Nothing here reaches outside this process.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:webview:allow-internal-toggle-devtools"
+  ]
+}

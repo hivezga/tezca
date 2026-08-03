@@ -707,6 +707,10 @@ struct Surface {
     np_box: GtkBox,
     np_title: Label,
     np_artist: Label,
+    np_art_pic: gtk4::Image,
+    /// The art URL currently loaded, so a two-second tick on an unchanged track
+    /// doesn't re-decode the same JPEG.
+    np_art_url: RefCell<String>,
 
     cpu_spark: Sparkline,
     cpu_val: Label,
@@ -888,8 +892,28 @@ impl Surface {
         let np_box = GtkBox::new(Orientation::Horizontal, 10);
         np_box.add_css_class("nowplaying");
         np_box.set_halign(Align::Center);
+        // The thumbnail. Stays a gradient placeholder until the player names a
+        // local cover file; the picture is swapped in on a track change rather
+        // than every tick, which is what `np_art_url` remembers.
         let art = GtkBox::new(Orientation::Horizontal, 0);
         art.add_css_class("np-art");
+        // Centred, not filled: the default `Fill` stretches the box to the
+        // pill's full inner height, which turns the 26px square into a tall
+        // rectangle with the gradient showing above and below the cover.
+        art.set_valign(Align::Center);
+        // Clip children to the box's own border-radius, so the cover gets the
+        // rounded corners the gradient placeholder already has.
+        art.set_overflow(gtk4::Overflow::Hidden);
+        // A GtkImage rather than a GtkPicture: `pixel_size` makes it measure
+        // exactly 26×26 whatever the texture's dimensions are, so cover art can
+        // never drive the pill's size — and through it the bar's. A Picture
+        // reports the paintable's own size as its natural size, and a
+        // layer-shell surface sized to its content then grows to match.
+        // `art_texture` hands over a square, so nothing is letterboxed.
+        let np_art_pic = gtk4::Image::new();
+        np_art_pic.set_pixel_size(26);
+        np_art_pic.set_visible(false);
+        art.append(&np_art_pic);
         let np_text = GtkBox::new(Orientation::Vertical, 0);
         let np_title = Label::new(None);
         np_title.add_css_class("np-title");
@@ -1012,7 +1036,7 @@ impl Surface {
         // AI provider usage — hidden until the poll thread reports something
         // worth showing (see ai.rs). Sits beside the tray because that is where
         // "ambient status from elsewhere" lives on this bar.
-        let ai_box = GtkBox::new(Orientation::Horizontal, 6);
+        let ai_box = GtkBox::new(Orientation::Horizontal, 7);
         ai_box.add_css_class("ai");
         ai_box.set_valign(Align::Center);
         let ai_glyph = Label::new(Some(G_AI));
@@ -1033,7 +1057,7 @@ impl Surface {
 
         // Weather — like the AI module, hidden until its poll thread reports
         // something. Off entirely unless configured; see weather.rs.
-        let weather_box = GtkBox::new(Orientation::Horizontal, 6);
+        let weather_box = GtkBox::new(Orientation::Horizontal, 7);
         weather_box.add_css_class("weather");
         weather_box.set_valign(Align::Center);
         let weather_glyph = Label::new(Some(G_WEATHER));
@@ -1055,7 +1079,7 @@ impl Surface {
         // popover: the thing you want from this module is a conversation, and
         // that does not fit — or survive — inside a popover that closes on the
         // first click outside it.
-        let llm_box = GtkBox::new(Orientation::Horizontal, 6);
+        let llm_box = GtkBox::new(Orientation::Horizontal, 7);
         llm_box.add_css_class("llm");
         llm_box.add_css_class("clickable");
         llm_box.set_valign(Align::Center);
@@ -1063,8 +1087,11 @@ impl Surface {
         llm_glyph.add_css_class("glyph");
         let llm_val = Label::new(None);
         llm_val.add_css_class("control-val");
+        // The accelerator badge, not a generic sub-value: it carries its own
+        // colour rule (accent on GPU, gold otherwise) rather than following the
+        // module the way a second number would.
         let llm_sub = Label::new(None);
-        llm_sub.add_css_class("control-sub");
+        llm_sub.add_css_class("llm-accel");
         llm_sub.set_visible(false);
         llm_box.append(&llm_glyph);
         llm_box.append(&llm_val);
@@ -1142,6 +1169,7 @@ impl Surface {
         // Brightness (display-only; hidden on desktops with no backlight).
         let bri_ctl = GtkBox::new(Orientation::Horizontal, 6);
         bri_ctl.add_css_class("control");
+        bri_ctl.set_valign(Align::Center);
         let bri_glyph = Label::new(Some(G_BRIGHT));
         bri_glyph.add_css_class("glyph");
         let bri_val = Label::new(None);
@@ -1151,8 +1179,9 @@ impl Surface {
         bri_ctl.set_visible(false);
 
         // Battery (hidden on desktops with no battery).
-        let bat_ctl = GtkBox::new(Orientation::Horizontal, 6);
+        let bat_ctl = GtkBox::new(Orientation::Horizontal, 7);
         bat_ctl.add_css_class("control");
+        bat_ctl.set_valign(Align::Center);
         let bat_glyph = Label::new(Some(G_BATT));
         bat_glyph.add_css_class("glyph");
         let bat_val = Label::new(None);
@@ -1180,6 +1209,7 @@ impl Surface {
         bell_overlay.add_overlay(&bell_dot);
         let bell_btn = Button::new();
         bell_btn.add_css_class("bell");
+        bell_btn.set_valign(Align::Center);
         bell_btn.set_child(Some(&bell_overlay));
         bell_btn.connect_clicked(|_| notify::toggle_panel());
         let bell_right = gtk4::GestureClick::new();
@@ -1190,6 +1220,7 @@ impl Surface {
         // Clock (button → calendar popover).
         let clock_btn = Button::new();
         clock_btn.add_css_class("clock");
+        clock_btn.set_valign(Align::Center);
         let clock_label = Label::new(None);
         clock_btn.set_child(Some(&clock_label));
         let cal_pop = popovers::calendar(&clock_btn);
@@ -1221,10 +1252,10 @@ impl Surface {
         // Each is a chip that stands in for a run of modules, plus the box the
         // run actually lives in. Clicking either swaps which one is showing;
         // the members keep their own auto-hide logic untouched inside the box.
-        let (priv_chip, priv_chip_val) = cluster_chip("", "priv-chip");
+        let (priv_chip, priv_chip_val) = cluster_chip("", "priv-chip", 7);
         let priv_box = GtkBox::new(Orientation::Horizontal, 0);
         priv_box.add_css_class("cluster");
-        let (sys_chip, sys_chip_val) = cluster_chip(G_SYS_LABEL, "sys-chip");
+        let (sys_chip, sys_chip_val) = cluster_chip(G_SYS_LABEL, "sys-chip", 9);
         let sys_box = GtkBox::new(Orientation::Horizontal, 0);
         sys_box.add_css_class("cluster");
 
@@ -1359,6 +1390,8 @@ impl Surface {
             np_box,
             np_title,
             np_artist,
+            np_art_pic,
+            np_art_url: RefCell::new(String::new()),
             cpu_spark,
             cpu_val,
             cpu_sub,
@@ -1707,9 +1740,9 @@ impl Surface {
                 let size = r.size_text();
                 self.llm_val.set_text(if size.is_empty() { &r.name } else { &size });
                 set_sub(&self.llm_sub, r.accel().unwrap_or(""));
-                // A partial offload is the one state worth colouring: it is why
-                // a model that was fast yesterday is slow today.
-                Self::toggle_class(&self.llm_box, "warn", r.accel() == Some("split"));
+                // Gold for both states that leave work on the CPU — see
+                // `Resident::accel_degraded`. The tooltip names which one.
+                Self::toggle_class(&self.llm_box, "warn", r.accel_degraded());
             }
             None => {
                 self.llm_val.set_text("idle");
@@ -1867,7 +1900,24 @@ impl Surface {
         match np {
             Some(t) => {
                 self.np_title.set_text(&t.title);
-                self.np_artist.set_text(&t.artist);
+                // The sub-line carries the elapsed time beside the artist, so
+                // the pill answers "how far in am I" without opening anything.
+                self.np_artist.set_text(&t.subtitle());
+                if *self.np_art_url.borrow() != t.art_url {
+                    self.np_art_url.replace(t.art_url.clone());
+                    match nowplaying::art_texture(&t.art_url) {
+                        Some(tex) => {
+                            self.np_art_pic.set_paintable(Some(&tex));
+                            self.np_art_pic.set_visible(true);
+                        }
+                        // Back to the gradient — a stale cover over a new track
+                        // is worse than none.
+                        None => {
+                            self.np_art_pic.set_paintable(gtk4::gdk::Paintable::NONE);
+                            self.np_art_pic.set_visible(false);
+                        }
+                    }
+                }
                 self.np_box.set_visible(true);
             }
             None => self.np_box.set_visible(false),
@@ -1920,8 +1970,12 @@ fn open_llm_panel() {
 
 /// A collapsed-cluster chip: an optional fixed label, the live summary, and a
 /// chevron saying it opens. Returns the chip and the label to fill each tick.
-fn cluster_chip(label: &str, class: &str) -> (GtkBox, Label) {
-    let b = GtkBox::new(Orientation::Horizontal, 7);
+///
+/// `gap` is per-chip rather than shared: the SYS chip's summary is a run of
+/// numbers separated by interpuncts and needs more air between them than the
+/// privacy chip's dot-and-phrase does.
+fn cluster_chip(label: &str, class: &str, gap: i32) -> (GtkBox, Label) {
+    let b = GtkBox::new(Orientation::Horizontal, gap);
     b.add_css_class("cluster-chip");
     b.add_css_class(class);
     b.add_css_class("clickable");
@@ -2257,6 +2311,7 @@ fn set_pct(l: &Label, v: Option<u32>) {
 fn metric(label: &str, spark: &gtk4::DrawingArea, val: &Label, sub: &Label) -> GtkBox {
     let b = GtkBox::new(Orientation::Horizontal, 7);
     b.add_css_class("metric");
+    b.set_valign(Align::Center);
     let l = Label::new(Some(label));
     l.add_css_class("metric-label");
     b.append(&l);
@@ -2312,6 +2367,7 @@ fn attach_detail(widget: &impl IsA<gtk4::Widget>, pop: gtk4::Popover) {
 fn control_button() -> (Button, Label, Label) {
     let b = Button::new();
     b.add_css_class("control");
+    b.set_valign(Align::Center);
     let inner = GtkBox::new(Orientation::Horizontal, 6);
     let glyph = Label::new(None);
     glyph.add_css_class("glyph");
@@ -2328,7 +2384,8 @@ fn control_button() -> (Button, Label, Label) {
 fn control_button_stacked() -> (Button, Label, Label, Label) {
     let b = Button::new();
     b.add_css_class("control");
-    let inner = GtkBox::new(Orientation::Horizontal, 6);
+    b.set_valign(Align::Center);
+    let inner = GtkBox::new(Orientation::Horizontal, 7);
     let glyph = Label::new(None);
     glyph.add_css_class("glyph");
 
@@ -2365,6 +2422,10 @@ fn ws_button(id: i32, label: &str, active: bool, occupied: bool, mayan: bool) ->
         Button::with_label(label)
     };
     b.add_css_class("ws");
+    // Centred, not filled: `min-height: 26px` in CSS is only a floor, and a
+    // pill left to fill grows to the bar's full inner height — a rounded square
+    // rather than the design's 26px pill.
+    b.set_valign(Align::Center);
     if drawn {
         b.add_css_class("mayan");
     }

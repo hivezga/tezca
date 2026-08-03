@@ -110,7 +110,7 @@ impl Osd {
         window.set_namespace(Some("tezca-osd"));
         // Anchor to the bottom only → the compositor centres us horizontally.
         window.set_anchor(Edge::Bottom, true);
-        window.set_margin(Edge::Bottom, 140);
+        window.set_margin(Edge::Bottom, 38);
         window.set_visible(false);
 
         Rc::new(Osd {

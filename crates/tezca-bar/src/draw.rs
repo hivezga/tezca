@@ -81,8 +81,8 @@ const SPARK_POINTS: usize = 24;
 
 pub fn sparkline(pal: &SharedPalette, color: SparkColor) -> Sparkline {
     let area = DrawingArea::new();
-    area.set_content_width(34);
-    area.set_content_height(14);
+    area.set_content_width(26);
+    area.set_content_height(13);
     area.set_valign(gtk4::Align::Center);
     let history: Rc<RefCell<VecDeque<f64>>> = Rc::new(RefCell::new(VecDeque::new()));
 
@@ -125,7 +125,7 @@ pub fn sparkline(pal: &SharedPalette, color: SparkColor) -> Sparkline {
             }
         }
         set_src(cr, col, 1.0);
-        cr.set_line_width(1.4);
+        cr.set_line_width(1.3);
         cr.set_line_join(gtk4::cairo::LineJoin::Round);
         cr.set_line_cap(gtk4::cairo::LineCap::Round);
         let _ = cr.stroke();
@@ -147,12 +147,22 @@ impl Sparkline {
     }
 }
 
+/// The design's `tzeq`: a 1.1s cycle between [`EQ_MIN_H`] and [`EQ_MAX_H`], the
+/// four bars staggered a fifth of a period apart.
+const EQ_PERIOD: f64 = 1.1;
+const EQ_DELAYS: [f64; 4] = [0.0, 0.18, 0.36, 0.54];
+const EQ_BAR_W: f64 = 2.0;
+const EQ_GAP: f64 = 1.5;
+const EQ_MIN_H: f64 = 3.0;
+const EQ_MAX_H: f64 = 11.0;
+
 /// The 4-bar now-playing equaliser — self-animating on the frame clock while
-/// mapped. Heights breathe 4↔13px on staggered phases, exactly like the mock.
+/// mapped.
 pub fn equalizer(pal: &SharedPalette) -> DrawingArea {
     let area = DrawingArea::new();
-    area.set_content_width(18);
-    area.set_content_height(14);
+    // Four bars and the three gaps between them: 4·2 + 3·1.5.
+    area.set_content_width((EQ_BAR_W * 4.0 + EQ_GAP * 3.0).ceil() as i32);
+    area.set_content_height(EQ_MAX_H as i32);
     area.set_valign(gtk4::Align::Center);
 
     let phase = Rc::new(RefCell::new(0.0_f64));
@@ -162,17 +172,18 @@ pub fn equalizer(pal: &SharedPalette) -> DrawingArea {
         let p = pal_c.borrow();
         let t = *phase_c.borrow();
         let h = h as f64;
-        let bar_w = 2.5;
-        let gap = 2.5;
-        let offsets = [0.0, 0.2, 0.45, 0.65];
         set_src(cr, p.accent, 1.0);
-        for (i, off) in offsets.iter().enumerate() {
-            // 0.9s period; map sine to a 4..13px height.
-            let s = ((t / 0.9 + off) * 2.0 * PI).sin() * 0.5 + 0.5;
-            let bh = 4.0 + s * 9.0;
-            let x = i as f64 * (bar_w + gap);
+        for (i, delay) in EQ_DELAYS.iter().enumerate() {
+            // A raised cosine — 0 at the top of the cycle, 1 at the half —
+            // which is the shape CSS traces alternating a `ease-in-out` between
+            // two keyframes. The delay *subtracts* because a CSS
+            // `animation-delay` puts a bar behind the one before it, so the
+            // wave travels left to right the way the mock does.
+            let s = (1.0 - (((t - delay) / EQ_PERIOD) * 2.0 * PI).cos()) * 0.5;
+            let bh = EQ_MIN_H + s * (EQ_MAX_H - EQ_MIN_H);
+            let x = i as f64 * (EQ_BAR_W + EQ_GAP);
             let y = h - bh;
-            rounded_rect(cr, x, y, bar_w, bh, 1.0);
+            rounded_rect(cr, x, y, EQ_BAR_W, bh, 1.0);
             let _ = cr.fill();
         }
     });

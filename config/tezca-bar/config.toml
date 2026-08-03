@@ -212,7 +212,7 @@ osd_enabled = true
 
 # How long the pill stays up before it fades out, milliseconds (clamped 400 …
 # 10000). Each new change resets the timer, so holding volume-up keeps it up.
-osd_timeout_ms = 1400
+osd_timeout_ms = 2600
 
 # --- Right cluster ---------------------------------------------------------
 # Twenty-odd modules is a lot of bar. There is no single right answer to that —

@@ -304,7 +304,7 @@ impl Default for Config {
             weather: WeatherConfig::default(),
             llm: LlmConfig::default(),
             osd_enabled: true,
-            osd_timeout_ms: 1400,
+            osd_timeout_ms: 2600,
             clutter: Clutter::All,
             layout_left: default_layout_left(),
             layout_center: default_layout_center(),

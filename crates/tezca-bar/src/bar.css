@@ -46,7 +46,7 @@ window.tezca-bar {
 
 /* Edge shape — full-width, square, a single bottom hairline. */
 .bar.edge {
-    background: alpha(@tz_base, 0.82);
+    background: alpha(@tz_base, 0.86);
     border: none;
     border-bottom: 1px solid alpha(@tz_accent, 0.18);
     border-radius: 0;
@@ -54,8 +54,8 @@ window.tezca-bar {
 
 /* Submap (resize) — bar border goes gold with an inset ring. */
 .bar.submap {
-    border-color: alpha(@tz_gold, 0.32);
-    box-shadow: inset 0 0 0 1px alpha(@tz_gold, 0.12);
+    border-color: alpha(@tz_gold, 0.42);
+    box-shadow: inset 0 0 0 1px alpha(@tz_gold, 0.14);
 }
 
 /* ── Tezca "mirror" menu button ─────────────────────────────────────────── */
@@ -126,14 +126,25 @@ button.ws:hover {
 button.ws.mayan {
     padding: 0 8px;
 }
+/* Occupied-but-not-focused: a step brighter than empty, a step below active.
+   Without this a workspace holding windows is indistinguishable from one that
+   does not, which is most of what the row is for. */
+button.ws.occupied {
+    color: @tz_subtext;
+}
 button.ws.active {
     color: @tz_on_accent;
     background: @tz_accent;
     font-weight: 600;
     box-shadow: 0 0 12px alpha(@tz_accent, 0.55);
 }
+/* White, not @tz_on_urgent: every dark theme defines that token as the near-black
+   #0B0E0F, which on the urgent red reads as a hole rather than a warning. The
+   named colour keeps the no-new-hex rule — bar.css already uses `black` the same
+   way — and white clears contrast on both the dark themes' #E06C75 and smoke's
+   #B23A44. */
 button.ws.urgent {
-    color: @tz_on_accent;
+    color: white;
     background: @tz_urgent;
 }
 
@@ -151,13 +162,13 @@ button.ws.urgent {
 }
 .np-artist {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
-    font-size: 10px;
+    font-size: 9.5px;
     color: @tz_muted;
 }
 .np-art {
-    border-radius: 7px;
-    min-width: 24px;
-    min-height: 24px;
+    border-radius: 6px;
+    min-width: 26px;
+    min-height: 26px;
     background: linear-gradient(135deg, @tz_accent_dim, @tz_gold);
     box-shadow: 0 2px 8px alpha(black, 0.4);
 }
@@ -166,8 +177,9 @@ button.ws.urgent {
 .metric-label {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
     font-size: 9.5px;
-    letter-spacing: 0.6px;
-    color: @tz_muted;
+    /* .06em at 9.5px. */
+    letter-spacing: 0.57px;
+    color: @tz_faint;
 }
 .metric-val,
 .control-val,
@@ -342,15 +354,26 @@ button.cluster-collapse:hover {
     color: @tz_subtext;
 }
 
-/* ── Local AI (Ollama) ─────────────────────────────────────────────────────
-   Gold only for a split offload — the one state that explains why generation
-   went slow. A fully-resident model is unremarkable and is styled that way. */
+/* ── Local AI (Ollama) ───────────────────────────────────────────────────── */
 .llm {
     color: @tz_subtext;
 }
-.llm.warn,
-.llm.warn .control-val,
-.llm.warn .control-sub {
+/* The accelerator badge — which backend the resident model is actually running
+   on. This is the only part of the module that changes colour: gold when the
+   model is not fully on the GPU, accent when it is. CPU-only and a split
+   offload are both worth flagging (they are the two states that explain why
+   generation went slow) and the tooltip says which one you have. Golding the
+   whole module instead would put a warning colour on the model size and the
+   generation rate, neither of which is what went wrong. */
+.llm-accel {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 9.5px;
+    /* .06em at 9.5px. */
+    letter-spacing: 0.57px;
+    text-transform: uppercase;
+    color: @tz_accent;
+}
+.llm.warn .llm-accel {
     color: @tz_gold;
 }
 
@@ -564,7 +587,7 @@ window.tezca-osd {
     background: transparent;
 }
 .osd {
-    background: alpha(@tz_base, 0.82);
+    background: alpha(@tz_base, 0.86);
     border: 1px solid alpha(@tz_accent, 0.20);
     border-radius: 18px;
     padding: 14px 20px;
@@ -630,7 +653,7 @@ popover.tz-popover > contents {
     border: 1px solid alpha(@tz_accent, 0.18);
     border-radius: 14px;
     padding: 16px;
-    box-shadow: 0 20px 50px alpha(black, 0.55);
+    box-shadow: 0 20px 50px alpha(black, 0.6);
     color: @tz_text;
 }
 .pop-title {
@@ -650,7 +673,7 @@ popover.tz-popover > contents {
 }
 /* Hairline between provider sections in the AI popover. */
 .pop-sep {
-    background: alpha(@tz_text, 0.10);
+    background: alpha(@tz_muted, 0.14);
     margin: 2px 0;
 }
 .pop-mono-val {
@@ -674,6 +697,12 @@ popover.tz-popover > contents {
     font-weight: 400;
     color: @tz_text;
     font-feature-settings: "tnum" 1;
+}
+/* Weather's temperature runs larger than battery's charge: it is the only
+   figure on that panel and it carries a degree sign, so at 30px it reads
+   smaller than the battery percentage it is meant to match. */
+.pop-big.tz-xl {
+    font-size: 34px;
 }
 /* Per-core grid and the battery trace: many small vertical bars read as one
    shape, so they get no gap of their own beyond the box spacing. */
@@ -722,7 +751,7 @@ calendar.tz-cal.highlight {
 levelbar.mix trough {
     min-height: 5px;
     border-radius: 3px;
-    background: alpha(@tz_text, 0.08);
+    background: alpha(@tz_muted, 0.14);
 }
 levelbar.mix block.filled {
     border-radius: 3px;

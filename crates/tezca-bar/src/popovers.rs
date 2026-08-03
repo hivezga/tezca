@@ -801,6 +801,7 @@ pub fn weather_detail(
         head.set_valign(Align::End);
         let big = Label::new(Some(&s.temp_text()));
         big.add_css_class("pop-big");
+        big.add_css_class("tz-xl");
         head.append(&big);
         let col = GtkBox::new(Orientation::Vertical, 2);
         col.set_valign(Align::End);

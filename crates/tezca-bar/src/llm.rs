@@ -156,6 +156,18 @@ impl Resident {
         })
     }
 
+    /// Whether the accelerator badge should read as a warning.
+    ///
+    /// True for both states that leave work on the CPU: a fully CPU-resident
+    /// model, and a partial offload. They are different problems — one is a
+    /// model too big for the card, the other a card too full — but they have the
+    /// same symptom, which is that generation is slower than the hardware
+    /// implies, and the badge exists to say so. `None` (llama.cpp, which
+    /// publishes no split) is not a warning; it is an absence of information.
+    pub fn accel_degraded(&self) -> bool {
+        matches!(self.accel(), Some("CPU" | "split"))
+    }
+
     /// `18.9G`, or empty when the size is unknown.
     pub fn size_text(&self) -> String {
         if self.size == 0 {
@@ -214,11 +226,19 @@ impl Status {
         // Only Ollama reports the GPU/CPU split. llama.cpp exposes no offload
         // figure over its API, so nothing is claimed for it rather than a
         // guess dressed up as a reading.
-        if let Some(a) = p.accel() {
-            s.push_str(&format!(" · {a}"));
-            if let Some(pct) = p.offload_pct() {
-                s.push_str(&format!(" · {pct}% on GPU"));
+        //
+        // Each state gets its own sentence rather than the bare word the badge
+        // shows, because the badge's colour is the question the tooltip is
+        // being opened to answer: two of these three render gold, and "CPU"
+        // alone does not say why that matters.
+        match (p.accel(), p.offload_pct()) {
+            (Some("CPU"), _) => s.push_str(" · running on CPU — no GPU offload"),
+            (Some("split"), Some(pct)) => {
+                s.push_str(&format!(" · split offload — {pct}% on GPU"));
             }
+            (Some("split"), None) => s.push_str(" · split offload"),
+            (Some("GPU"), _) => s.push_str(" · fully resident on GPU"),
+            _ => {}
         }
         if p.context > 0 {
             s.push_str(&format!(" · {} ctx", ctx_short(p.context)));
@@ -680,6 +700,25 @@ mod tests {
             Resident { size: 1000, size_vram: 0, reports_offload: false, ..Default::default() };
         assert_eq!(quiet.accel(), None);
         assert_eq!(quiet.offload_pct(), None);
+    }
+
+    #[test]
+    fn the_badge_warns_on_both_states_that_leave_work_on_the_cpu() {
+        let r = |vram| Resident {
+            size: 1000,
+            size_vram: vram,
+            reports_offload: true,
+            ..Default::default()
+        };
+        // A model too big for the card and a card too full to take it are
+        // different problems with the same symptom, so both go gold.
+        assert!(r(0).accel_degraded());
+        assert!(r(400).accel_degraded());
+        assert!(!r(1000).accel_degraded());
+        // No reading is not a warning.
+        let quiet =
+            Resident { size: 1000, size_vram: 0, reports_offload: false, ..Default::default() };
+        assert!(!quiet.accel_degraded());
     }
 
     #[test]

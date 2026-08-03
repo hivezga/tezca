@@ -520,6 +520,13 @@ impl Bar {
         }
     }
 
+    /// Apply a generation rate pushed by the AI panel. Zero means it stopped.
+    pub fn apply_llm_rate(&self, tps: f64) {
+        for s in &self.surfaces {
+            s.set_llm_rate(tps);
+        }
+    }
+
     /// Apply an AI usage snapshot from the poll thread. The module shows the
     /// single highest window utilisation across every provider — the number
     /// that actually constrains you — and colours itself at the configured
@@ -771,6 +778,7 @@ struct Surface {
     llm_box: GtkBox,
     llm_val: Label,
     llm_sub: Label,
+    llm_tps: Label,
 
     /// The two collapsible runs: chip, its summary label, and the box the
     /// members live in. `grouped_*` is which of the pair is currently showing.
@@ -1093,9 +1101,16 @@ impl Surface {
         let llm_sub = Label::new(None);
         llm_sub.add_css_class("llm-accel");
         llm_sub.set_visible(false);
+        // The live generation rate, pushed by the panel. Hidden while nothing
+        // is generating rather than parking `idle` on the bar — the module
+        // already says a model is loaded, and "0 tok/s" is not news.
+        let llm_tps = Label::new(None);
+        llm_tps.add_css_class("control-sub");
+        llm_tps.set_visible(false);
         llm_box.append(&llm_glyph);
         llm_box.append(&llm_val);
         llm_box.append(&llm_sub);
+        llm_box.append(&llm_tps);
         llm_box.set_visible(false);
         llm_box.set_has_tooltip(true);
         {
@@ -1438,6 +1453,7 @@ impl Surface {
             llm_box,
             llm_val,
             llm_sub,
+            llm_tps,
             priv_chip,
             priv_chip_val,
             priv_box,
@@ -1753,6 +1769,19 @@ impl Surface {
         self.llm_box.set_tooltip_text(Some(&st.tooltip()));
     }
 
+    /// The rate the panel is generating at, in the module's third slot.
+    ///
+    /// Accent while it is moving, because a number that is changing is the one
+    /// worth looking at; hidden at zero.
+    fn set_llm_rate(&self, tps: f64) {
+        let live = tps > 0.0;
+        set_sub(
+            &self.llm_tps,
+            &if live { format!("{} tok/s", tps.round() as i64) } else { String::new() },
+        );
+        Self::toggle_class(&self.llm_tps, "on", live);
+    }
+
     fn set_custom(&self, out: &custom::Output) {
         if let Some(cell) = self.custom.get(&out.name) {
             cell.set(out);
@@ -1955,17 +1984,10 @@ const G_COLLAPSE: &str = "\u{F0143}"; // nf-md-chevron_up
 
 /// Open (or close) the SUPER+I lateral panel.
 ///
-/// Re-runs this binary with `--llm-panel`; GApplication uniqueness makes the
-/// second invocation reach the first and close it, so click and keybind are the
-/// same toggle and cannot disagree.
+/// Open or close the AI panel — the same toggle `SUPER I` runs, so the click
+/// and the keybind cannot disagree about whether it is open.
 fn open_llm_panel() {
-    let exe = std::env::current_exe().unwrap_or_else(|_| "tezca-bar".into());
-    let _ = std::process::Command::new(exe)
-        .arg("--llm-panel")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+    crate::toggle_ai_panel();
 }
 
 /// A collapsed-cluster chip: an optional fixed label, the live summary, and a

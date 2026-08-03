@@ -115,7 +115,7 @@ hl.bind(mod .. " + SHIFT + A", hl.dsp.exec_cmd("$HOME/.local/bin/tezca settings"
 -- area reflows around it rather than being covered. The same command opens and
 -- closes it — the panel is a single-instance GtkApplication, so pressing this
 -- again reaches the running one and it closes itself.
-hl.bind(mod .. " + I",         hl.dsp.exec_cmd("$HOME/.local/bin/tezca-bar --llm-panel"))         -- local AI chat panel (Ollama)
+hl.bind(mod .. " + I",         hl.dsp.exec_cmd("$HOME/.local/bin/tezca-chat"))                    -- local AI chat panel (Ollama)
 
 -- ============================== Hardware — audio =============================
 -- HyDE binds the bare F10-F12 keys as well. These grab those keys globally, so

@@ -15,6 +15,8 @@
 //! the module hides itself), all the slow work happens off the GTK thread, and
 //! the UI only ever applies a finished value.
 
+pub mod rate;
+
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -99,6 +101,13 @@ pub struct LlmConfig {
     pub model: String,
     /// Prepended to every conversation. Empty = none.
     pub system: String,
+}
+
+impl LlmConfig {
+    /// `auto`, or the backend the user pinned — what the settings drawer shows.
+    pub fn backend_name(&self) -> String {
+        self.backend.map(|b| b.label().to_string()).unwrap_or_else(|| "auto".into())
+    }
 }
 
 impl Default for LlmConfig {
@@ -277,6 +286,12 @@ pub fn poll_once(cfg: &LlmConfig) -> Status {
 ///
 /// An explicit `backend` skips the probe entirely — which matters when both are
 /// installed and you want the bar pinned to one of them.
+/// Which backend and port a request should go to, for callers outside this
+/// crate — the AI panel resolves once and then streams to what it found.
+pub fn resolve_public(cfg: &LlmConfig) -> Option<(Backend, u16)> {
+    resolve(cfg)
+}
+
 fn resolve(cfg: &LlmConfig) -> Option<(Backend, u16)> {
     if let Some(b) = cfg.backend {
         let port = if cfg.port == 0 { b.default_port() } else { cfg.port };
@@ -626,8 +641,14 @@ fn get(url: &str) -> Option<String> {
     if !url.starts_with(&format!("http://{HOST}:")) {
         return None;
     }
+    // `--fail` is what makes this a *probe* rather than a liveness check on the
+    // port. Without it curl succeeds on any response at all, so the health path
+    // returning a 404 page counts as "the backend is up" — any HTTP server on
+    // 8080 or 11434 gets reported as llama.cpp or Ollama, complete with an
+    // accent status dot and a backend name. A static file server on the wrong
+    // port is enough to do it.
     let out = Command::new("curl")
-        .args(["-sS", "--max-time", "4", "--noproxy", "*", url])
+        .args(["-sS", "--fail", "--max-time", "4", "--noproxy", "*", url])
         .output()
         .ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).to_string())
@@ -816,5 +837,36 @@ mod tests {
         let down = Status { backend: Some(Backend::LlamaCpp), ..Default::default() };
         assert_eq!(down.tooltip(), "llama.cpp is not running");
         assert!(!Status { up: true, ..Default::default() }.is_empty());
+    }
+
+    /// A server that answers on the port but not on the health path is not a
+    /// backend.
+    ///
+    /// Found by pointing the panel at a box with a static file server on 8080:
+    /// its 404 page satisfied a bare `curl`, so the panel reported llama.cpp as
+    /// running, with a live status dot and a backend name. Anything that speaks
+    /// HTTP on either default port would have done it.
+    #[test]
+    fn a_port_that_answers_with_a_404_is_not_a_running_backend() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(2) {
+                let Ok(mut s) = stream else { continue };
+                let mut buf = [0u8; 512];
+                let _ = s.read(&mut buf);
+                let body = "<html>404 not found</html>";
+                let _ = write!(
+                    s,
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+
+        let cfg = LlmConfig { backend: Some(Backend::LlamaCpp), port, ..Default::default() };
+        assert_eq!(resolve(&cfg), None, "a 404 must not resolve as a live backend");
+        assert!(!poll_once(&cfg).up);
     }
 }

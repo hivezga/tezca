@@ -1,0 +1,23 @@
+# tezca-llm — the local-model client, shared by the bar and the AI panel.
+#
+# Extracted from tezca-bar when the panel moved to Tauri. Both surfaces have to
+# agree about which backend is up, which model is resident and how fast it is
+# generating, and two clients would be two answers. It has no toolkit dependency
+# of its own: `curl` does the HTTP, std does the rest, and callers get chunks
+# over an async-channel they already own.
+[package]
+name = "tezca-llm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Ollama / llama.cpp client for Project:Tezca (status polling and streaming chat)"
+
+[lib]
+name = "tezca_llm"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = "1"
+async-channel = "2"

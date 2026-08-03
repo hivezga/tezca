@@ -14,8 +14,6 @@ mod config;
 mod custom;
 mod draw;
 mod hypr;
-mod llm;
-mod llmpanel;
 mod mic;
 mod notify;
 mod nowplaying;
@@ -27,6 +25,8 @@ mod theme;
 mod tray;
 mod weather;
 
+use tezca_llm as llm;
+
 use gtk4::gdk::Display;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -34,6 +34,54 @@ use gtk4::Application;
 use signal_hook::consts::{SIGUSR1, SIGUSR2};
 
 const APP_ID: &str = "dev.tezca.bar";
+
+/// Open the AI panel, or close the one that is already open.
+///
+/// The GTK panel got this free from `GApplication` uniqueness — a second launch
+/// reached the first instance, whose `activate` closed it. A separate binary has
+/// no such channel, so the toggle is explicit: find our own `tezca-chat` and
+/// signal it, otherwise start one. Scanning `/proc` rather than shelling out to
+/// `pkill` keeps it to processes this user owns and avoids matching a shell
+/// whose command line merely mentions the name.
+pub fn toggle_ai_panel() {
+    if let Some(pid) = running_ai_panel() {
+        // SIGTERM, not SIGKILL: the panel should get to close its window.
+        unsafe { kill(pid, 15) };
+        return;
+    }
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("tezca-chat")))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| "tezca-chat".into());
+    let _ = std::process::Command::new(exe)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// The pid of a running `tezca-chat`, if this user has one.
+fn running_ai_panel() -> Option<i32> {
+    let me = std::process::id();
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<i32>() else { continue };
+        if pid as u32 == me {
+            continue;
+        }
+        // `comm` is the executable name, truncated to 15 bytes — never the
+        // arguments, so a terminal running `vim tezca-chat.rs` does not match.
+        let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) else { continue };
+        if comm.trim() == "tezca-chat" {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
 
 /// Put the directory this binary lives in onto `PATH`.
 ///
@@ -74,12 +122,13 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::SUCCESS;
     }
 
-    // `--llm-panel`: run only the SUPER+I chat panel, as its own application
-    // instance. Toggling is GApplication uniqueness — a second launch reaches
-    // the first and closes it — so the keybind needs no IPC of its own.
+    // `--llm-panel`: kept as an alias so a shipped keybind still works. The
+    // panel is its own binary now — a real Hyprland window rather than the
+    // layer surface this used to open, so the tiled area reflows around it
+    // instead of losing an edge to an exclusive zone.
     if std::env::args().any(|a| a == "--llm-panel") {
-        let cfg = config::Config::load();
-        return llmpanel::run(cfg.llm);
+        toggle_ai_panel();
+        return glib::ExitCode::SUCCESS;
     }
 
     // `--llm-dump`: what Ollama is holding right now, without opening a window.
@@ -282,6 +331,22 @@ fn activate(app: &Application) {
         async move {
             while let Ok(st) = llm_rx.recv().await {
                 bar.apply_llm(st);
+            }
+        }
+    ));
+
+    // The generation rate, pushed by the AI panel rather than measured here.
+    // The design wants the module and the panel footer to show one number, and
+    // two processes measuring the same generation independently is exactly how
+    // they would end up showing two. See `tezca_llm::rate`.
+    let (rate_tx, rate_rx) = async_channel::unbounded::<llm::rate::Rate>();
+    llm::rate::listen(rate_tx);
+    glib::spawn_future_local(glib::clone!(
+        #[strong]
+        bar,
+        async move {
+            while let Ok(r) = rate_rx.recv().await {
+                bar.apply_llm_rate(r.tps);
             }
         }
     ));

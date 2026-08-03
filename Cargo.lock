@@ -3876,7 +3876,20 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
+ "tezca-llm",
  "zbus",
+]
+
+[[package]]
+name = "tezca-chat"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tezca-llm",
 ]
 
 [[package]]
@@ -3893,6 +3906,14 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
+]
+
+[[package]]
+name = "tezca-llm"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "serde_json",
 ]
 
 [[package]]

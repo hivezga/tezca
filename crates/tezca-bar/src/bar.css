@@ -376,6 +376,12 @@ button.cluster-collapse:hover {
 .llm.warn .llm-accel {
     color: @tz_gold;
 }
+/* The live generation rate, pushed by the panel over the rate socket. Accent
+   while it is moving: a number that is changing is the one worth looking at,
+   and it is the only thing on this module that ever does. */
+.control-sub.on {
+    color: @tz_accent;
+}
 
 /* ── The SUPER+I lateral panel ─────────────────────────────────────────────
    A docked column, not a floating window: square on the anchored edges, with

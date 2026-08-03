@@ -76,6 +76,9 @@
 
 .notification .body {
     font-size: 13px;
+    /* Notification bodies wrap far more often than summaries do, and at 13px
+       the default single spacing runs the lines together. */
+    line-height: 1.45;
     color: @tz_subtext;
 }
 
@@ -107,6 +110,9 @@
 }
 
 .notification-action {
+    /* A step below the 14px the toast inherits: an action is a control, not a
+       second summary, and at equal size the two compete. */
+    font-size: 13px;
     margin: 4px;
     padding: 6px 10px;
     border: 1px solid alpha(@tz_accent, 0.18);

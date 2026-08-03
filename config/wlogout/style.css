@@ -7,8 +7,8 @@
  *
  * Colors come from the theme engine — reference ONLY the @tz_* tokens. The
  * relative import resolves against ~/.config/wlogout/ → ~/.config/tezca/current/
- * colors.css. The button glyphs are wlogout's stock white PNGs (fixed white,
- * read fine on obsidian). Launched with `-b 4` so all four tiles sit in one row.
+ * colors.css. The button glyphs are icon-theme symbolics so they can take a
+ * token colour. Launched with `-b 4` so all four tiles sit in one row.
  */
 
 @import url("../tezca/current/colors.css");
@@ -48,13 +48,35 @@ button:hover {
     box-shadow: 0 0 24px alpha(@tz_accent, 0.28);
 }
 
-/* Icon per action (wlogout stock white glyphs). */
-#lock     { background-image: image(url("/usr/share/wlogout/icons/lock.png")); }
-#logout   { background-image: image(url("/usr/share/wlogout/icons/logout.png")); }
-#reboot   { background-image: image(url("/usr/share/wlogout/icons/reboot.png")); }
-#shutdown { background-image: image(url("/usr/share/wlogout/icons/shutdown.png")); }
+/* Icon per action.
+ *
+ * Symbolic icons rather than wlogout's stock glyphs: the stock set is flat
+ * white PNGs, which no stylesheet can reach, and the design colours the glyph.
+ * `-gtk-icontheme` resolves a symbolic SVG, which GTK tints with the node's own
+ * `color` — so the glyph follows the theme for free. All four names resolve in
+ * both breeze and Adwaita, so there is a fallback whichever icon theme is set. */
+#lock     { background-image: -gtk-icontheme("system-lock-screen-symbolic"); }
+#logout   { background-image: -gtk-icontheme("system-log-out-symbolic"); }
+#reboot   { background-image: -gtk-icontheme("system-reboot-symbolic"); }
+#shutdown { background-image: -gtk-icontheme("system-shutdown-symbolic"); }
 
-/* Shutdown gets the brand-gold hover — the one destructive-adjacent accent. */
+/* Shutdown is gold *at rest* — it is the one tile whose consequence you cannot
+   take back, and it should read that way before you hover it. Only the glyph
+   goes gold; the label stays subtext with the others, because a gold word beside
+   three grey ones reads as "selected" rather than as "careful". */
+#shutdown {
+    color: @tz_gold;
+}
+#shutdown label {
+    color: @tz_subtext;
+}
+#shutdown:focus label,
+#shutdown:hover label {
+    color: @tz_text;
+}
+
+/* The tile chrome keeps the gold for hover — the resting border stays accent
+   like every other tile, so the row still reads as one set. */
 #shutdown:focus,
 #shutdown:hover {
     border-color: alpha(@tz_gold, 0.55);

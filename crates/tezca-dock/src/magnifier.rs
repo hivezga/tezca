@@ -418,7 +418,7 @@ impl Magnifier {
             graphene::Rect::new(pill_x as f32, pill_y as f32, pill_w as f32, pill_h as f32);
         let rr = gsk::RoundedRect::from_rect(pill_rect, radius);
         snapshot.push_rounded_clip(&rr);
-        snapshot.append_color(&theme::with_alpha(pal.base, 0.72), &pill_rect);
+        snapshot.append_color(&theme::with_alpha(pal.base, 0.70), &pill_rect);
         snapshot.pop();
         let border_col = theme::with_alpha(pal.accent, 0.16);
         snapshot.append_border(&rr, &[1.0; 4], &[border_col; 4]);

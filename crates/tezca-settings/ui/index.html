@@ -42,6 +42,7 @@
       </header>
 
       <div class="body">
+        <nav class="rail" id="rail" hidden></nav>
         <nav class="sidebar">
           <div class="nav" id="nav"></div>
           <div class="sidefoot">
@@ -65,6 +66,20 @@
       </footer>
     </div>
 
+    <!-- Registered before the module loads, because a module that throws while
+         being *evaluated* aborts before any listener inside it exists — the
+         window then stays hidden and the process stays alive, which looks
+         exactly like the binary doing nothing. -->
+    <script>
+      window.addEventListener('error', (e) => {
+        const msg = `${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`;
+        window.__TAURI__?.core?.invoke('tz_log', { level: 'fatal', message: msg });
+        const w = window.__TAURI__?.window?.getCurrentWindow?.();
+        w?.show?.();
+        document.body.textContent = msg;
+        document.body.style.cssText = 'padding:24px;font:12px monospace;color:#e06c75';
+      });
+    </script>
     <script type="module" src="app.js"></script>
   </body>
 </html>

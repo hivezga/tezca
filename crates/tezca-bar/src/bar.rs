@@ -782,16 +782,18 @@ struct Surface {
 
     /// The two collapsible runs: chip, its summary label, and the box the
     /// members live in. `grouped_*` is which of the pair is currently showing.
+    priv_chip_rev: gtk4::Revealer,
+    priv_box_rev: gtk4::Revealer,
+    sys_chip_rev: gtk4::Revealer,
+    sys_box_rev: gtk4::Revealer,
     priv_chip: GtkBox,
     priv_chip_val: Label,
-    priv_box: GtkBox,
     grouped_priv: Cell<bool>,
     /// Whether each privacy source is live right now, so the chip can say how
     /// many without asking the three modules what they are displaying.
     priv_live: Cell<(bool, bool, bool)>,
     sys_chip: GtkBox,
     sys_chip_val: Label,
-    sys_box: GtkBox,
     grouped_sys: Cell<bool>,
     /// `(cpu, mem, gpu)` as last rendered, for the collapsed summary. Each tick
     /// owns one field, so the chip is rebuilt from the three most recent.
@@ -1274,6 +1276,33 @@ impl Surface {
         let sys_box = GtkBox::new(Orientation::Horizontal, 0);
         sys_box.add_css_class("cluster");
 
+        // Each half of a cluster lives in a revealer so expanding is a slide
+        // rather than a jump. GTK4 cannot transition `max-width` the way the
+        // design's CSS does, and a run of modules appearing between two
+        // neighbours in one frame reads as the bar having been rebuilt; the
+        // revealer animates the width it occupies, which is the same effect.
+        //
+        // The pair slides in opposite directions on purpose: the chip leaves
+        // towards where its members are about to appear, so the two read as one
+        // thing unfolding rather than two swapping.
+        let rev = |child: &GtkBox, dir: gtk4::RevealerTransitionType| {
+            // The revealer decides whether this is on screen now, so the child
+            // must not also be hiding itself — `cluster_chip` builds its chip
+            // invisible, which used to be undone by the `show` call that
+            // `set_reveal_child` replaced.
+            child.set_visible(true);
+            let r = gtk4::Revealer::new();
+            r.set_child(Some(child));
+            r.set_transition_type(dir);
+            r.set_transition_duration(CLUSTER_MS);
+            r.set_valign(Align::Center);
+            r
+        };
+        let priv_chip_rev = rev(&priv_chip, gtk4::RevealerTransitionType::SlideRight);
+        let priv_box_rev = rev(&priv_box, gtk4::RevealerTransitionType::SlideLeft);
+        let sys_chip_rev = rev(&sys_chip, gtk4::RevealerTransitionType::SlideRight);
+        let sys_box_rev = rev(&sys_box, gtk4::RevealerTransitionType::SlideLeft);
+
         // ── Place modules per the configured layout ──────────────────────
         // Resolve a slot to the widget built above. Separators are handled by
         // `place_region`; every built-in maps to exactly one widget, so a
@@ -1331,8 +1360,10 @@ impl Surface {
         let drop_tier3 = cfg.clutter == Clutter::Tiers;
         // Only the right cluster is long enough to be worth collapsing, and it
         // is the only region the design groups.
-        let clusters =
-            ClusterSlots { privacy: (&priv_chip, &priv_box), system: (&sys_chip, &sys_box) };
+        let clusters = ClusterSlots {
+            privacy: (&priv_chip_rev, &priv_box_rev),
+            system: (&sys_chip_rev, &sys_box_rev),
+        };
         place_region(&left, &cfg.layout_left, compact, drop_tier3, None, &resolve);
         place_region(&center, &cfg.layout_center, compact, drop_tier3, None, &resolve);
         place_region(&right, &cfg.layout_right, compact, drop_tier3, Some(&clusters), &resolve);
@@ -1454,14 +1485,16 @@ impl Surface {
             llm_val,
             llm_sub,
             llm_tps,
+            priv_chip_rev,
+            priv_box_rev,
+            sys_chip_rev,
+            sys_box_rev,
             priv_chip,
             priv_chip_val,
-            priv_box,
             grouped_priv,
             priv_live: Cell::new((false, false, false)),
             sys_chip,
             sys_chip_val,
-            sys_box,
             grouped_sys,
             sys_parts: RefCell::new(Default::default()),
             osd,
@@ -1535,8 +1568,10 @@ impl Surface {
         let live = u32::from(cam) + u32::from(mic) + u32::from(rec);
         let pg = self.grouped_priv.get();
         self.priv_chip_val.set_text(&format!("{live} capturing"));
-        self.show(&self.priv_chip, pg && live > 0);
-        self.show(&self.priv_box, !pg);
+        // `set_reveal_child`, not `set_visible`: hiding outright would skip the
+        // transition the revealer exists for.
+        self.priv_chip_rev.set_reveal_child(pg && live > 0);
+        self.priv_box_rev.set_reveal_child(!pg);
 
         let sg = self.grouped_sys.get();
         let p = self.sys_parts.borrow();
@@ -1546,8 +1581,8 @@ impl Surface {
             .collect();
         self.sys_chip_val.set_text(&summary.join(" · "));
         drop(p);
-        self.show(&self.sys_chip, sg);
-        self.show(&self.sys_box, !sg);
+        self.sys_chip_rev.set_reveal_child(sg);
+        self.sys_box_rev.set_reveal_child(!sg);
     }
 
     fn set_workspaces(&self, snap: &hypr::Snapshot) {
@@ -1970,10 +2005,18 @@ const G_CPU_LABEL: &str = "CPU";
 const G_MEM_LABEL: &str = "MEM";
 const G_GPU_LABEL: &str = "GPU";
 const G_SYS_LABEL: &str = "SYS";
+/// How long a cluster takes to fold or unfold, ms. The design's own module
+/// transition is `.2s`; matching it keeps the expand in the same tempo as every
+/// hover on the bar.
+const CLUSTER_MS: u32 = 200;
 /// How many charge samples the battery trace keeps. At the 2-second controls
 /// tick that is about two minutes — enough to see a trend start, and small
 /// enough that the strip stays legible at popover width.
 const BATTERY_POINTS: usize = 60;
+/// How many throughput samples the network chart keeps — the design's 24 bars.
+/// At the 2-second controls tick that is the last ~48 seconds, which is the
+/// window in which "is something downloading right now" is a live question.
+const NET_POINTS: usize = 24;
 /// The chevron on a cluster chip — down to open a collapsed run, and the
 /// collapse control that closes it again.
 const G_EXPAND: &str = "\u{F0140}"; // nf-md-chevron_down
@@ -2154,12 +2197,12 @@ fn cluster_of(slot: &Slot) -> Option<Cluster> {
 
 /// The chip + members container for each collapsible run.
 struct ClusterSlots<'a> {
-    privacy: (&'a GtkBox, &'a GtkBox),
-    system: (&'a GtkBox, &'a GtkBox),
+    privacy: (&'a gtk4::Revealer, &'a gtk4::Revealer),
+    system: (&'a gtk4::Revealer, &'a gtk4::Revealer),
 }
 
 impl ClusterSlots<'_> {
-    fn get(&self, c: Cluster) -> (&GtkBox, &GtkBox) {
+    fn get(&self, c: Cluster) -> (&gtk4::Revealer, &gtk4::Revealer) {
         match c {
             Cluster::Privacy => self.privacy,
             Cluster::System => self.system,
@@ -2223,7 +2266,10 @@ fn place_region(
                     used.push(c);
                     open = Some(c);
                 }
-                members.append(&w);
+                // Into the box the revealer wraps, not the revealer itself.
+                if let Some(b) = members.child().and_downcast::<GtkBox>() {
+                    b.append(&w);
+                }
             }
             _ => {
                 open = None;

@@ -565,6 +565,17 @@ async function system(ctx) {
     out.push(row('Tezca', version || 'unknown', null));
     out.push(row('Session', ctx.session[1] || '—', null));
 
+    // How this window looks, as opposed to how the machine is configured —
+    // hence the panel's own store rather than a `tezca` key. See `prefs` in
+    // app.js.
+    out.push(section('This panel'));
+    out.push(row('Sidebar', 'Rail puts the three groups on an icon column and shows only the active one.',
+        segmented([['grouped', 'grouped'], ['rail', 'rail']], ctx.prefs.shell,
+            (v) => ctx.prefs.set('shell', v))));
+    out.push(row('Density', 'Compact drops every row from 13px of padding to 9px.',
+        segmented([['comfortable', 'comfortable'], ['compact', 'compact']], ctx.prefs.density,
+            (v) => ctx.prefs.set('density', v))));
+
     out.push(section('Session'));
     const actions = [
         ['Lock', ['idle', 'inhibit', 'off'], 'loginctl lock-session'],

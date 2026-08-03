@@ -82,6 +82,12 @@ const ctx = {
     hypr: async (opts) => new Map(await invoke('tz_hypr', { opts })),
     reload: () => render(),
 
+    // A getter, not a field: `prefs` is declared further down, so reading it
+    // while this object literal is being built hits the temporal dead zone.
+    get prefs() {
+        return prefs;
+    },
+
     /** Session actions ask first — they end what you are doing. */
     confirmShell(label, shell) {
         const ok = window.confirm(`${label}?\n\nThis runs:  ${shell}`);
@@ -91,9 +97,58 @@ const ctx = {
 
 /* ── Navigation ──────────────────────────────────────────────────────────── */
 
+/* ── Presentation preferences ────────────────────────────────────────────── */
+
+/**
+ * `shell` and `density` are how this window looks, not how the machine is
+ * configured, so they live in the webview's own store rather than in
+ * ~/.config/tezca. Nothing outside this panel reads them, and giving them a
+ * `tezca` key would imply the bar or the CLI cared.
+ */
+const prefs = {
+    get shell() {
+        return localStorage.getItem('tz.shell') === 'rail' ? 'rail' : 'grouped';
+    },
+    get density() {
+        return localStorage.getItem('tz.density') === 'compact' ? 'compact' : 'comfortable';
+    },
+    set(key, value) {
+        localStorage.setItem(`tz.${key}`, value);
+        applyPrefs();
+        renderNav();
+    },
+};
+
+function applyPrefs() {
+    document.documentElement.dataset.shell = prefs.shell;
+    document.documentElement.dataset.density = prefs.density;
+}
+
+/** Which group owns a page — the rail's selected state follows the page. */
+const groupOf = (id) => GROUPS.findIndex(([, ids]) => ids.includes(id));
+
 function renderNav() {
+    const rail = $('rail');
+    const isRail = prefs.shell === 'rail';
+    rail.hidden = !isRail;
+    clear(rail);
+    if (isRail) {
+        GROUPS.forEach(([title, ids], i) => {
+            const b = el('button.railbtn', { type: 'button', title },
+                navIcon(ids[0]), el('span', title.split(' ')[0]));
+            b.classList.toggle('on', i === groupOf(page));
+            // Jumping to a group means its first page — a rail button that
+            // selected nothing would leave the sidebar showing another group's.
+            b.addEventListener('click', () => go(ids[0]));
+            rail.append(b);
+        });
+    }
+
     const nav = clear($('nav'));
     for (const [title, ids] of GROUPS) {
+        // In rail mode the sidebar shows only the active group; the rail is what
+        // switches between them.
+        if (isRail && !ids.includes(page)) continue;
         nav.append(el('div.navgroup', title));
         for (const id of ids) {
             const b = el('button.navrow', { type: 'button' }, navIcon(id), el('span', LABELS[id]));
@@ -270,6 +325,7 @@ async function main() {
     // technically ready to paint.
     boot = await invoke('tz_boot');
     applyTokens(boot.tokens);
+    applyPrefs();
     if (boot.page) page = boot.page;
     paintFooter();
     renderNav();

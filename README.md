@@ -55,8 +55,9 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
   extracts a Material-You palette and re-skins the bar, swaync, Walker, Alacritty,
   Hyprland borders, and the lock screen live — no restarts, no hand-syncing hex codes.
 - **`tezca-bar`** — a bespoke **Rust + GTK4 + layer-shell** top menubar replacing
-  Waybar: inline CPU/MEM/GPU sparklines, an MPRIS now-playing widget, a system tray,
-  per-output workspaces, and glass popovers for the clock, mixer, and network. Adaptive
+  Waybar: inline CPU/MEM/GPU sparklines, an MPRIS now-playing widget with a transport
+  popover, a system tray, per-output workspaces, and glass popovers for the clock,
+  mixer, network, Bluetooth, battery, weather and the session menu. Adaptive
   per monitor — the ultrawide shows the full cluster, a narrower screen tightens.
 - **`tezca-dock`** — a bespoke **Rust + GTK4** magnifying macOS dock (cosine
   magnification, glass blur, running dots, autohide).
@@ -166,7 +167,7 @@ takes `--help`.
 |---|---|
 | `tezca link` | put `config/*` in place under `~/.config` (backs up existing; `--dry-run` previews) |
 | `tezca doctor` | verify NVIDIA env, modeset, monitors, dependencies, config validity |
-| `tezca theme list \| names \| set <name> \| wallpaper <img> \| reload` | wallpaper-driven theming |
+| `tezca theme list \| names \| info \| set <name> \| wallpaper <img> \| derive on\|off \| reload` | wallpaper-driven theming (`derive` decides whether a new picture also re-derives the palette) |
 | `tezca bar status \| start \| stop \| restart \| toggle \| config \| set` | control the top menubar |
 | `tezca dock status \| start \| stop \| restart \| toggle \| config \| set` | control the magnifying dock |
 | `tezca display list \| set <name> … \| reset <name> \| config \| profile … \| brightness <name> [0-100]` | per-monitor mode/scale/position/rotation, VRR, 10-bit, mirroring, saved layout profiles, DDC/CI brightness |
@@ -177,7 +178,7 @@ takes `--help`.
 | `tezca idle status \| set --lock N \| apply \| inhibit on\|off` | idle lock/blank/suspend timeouts + keep-awake |
 | `tezca night status \| on \| off \| temp <K> \| schedule <from> <to>` | night light / blue-light filter (hyprsunset) |
 | `tezca record start \| stop \| toggle \| status` | screen recording to `~/Videos/Tezca` |
-| `tezca wallpaper set <img> --monitor <name> \| clear \| list \| apply` | per-monitor wallpaper overrides (global image → `tezca theme`) |
+| `tezca wallpaper set <img> --monitor <name> \| clear \| list \| library \| fit <mode> \| apply` | per-monitor wallpaper overrides, the picker's image library, and how images are scaled (global image → `tezca theme`) |
 | `tezca hypr get \| set <opt> <val>… \| reset \| list` | live Hyprland option tuning that persists across reloads |
 | `tezca keybind list \| rebind --line N … \| set-action --line N … \| restore \| reset` | inspect + rebind keybindings safely |
 | `tezca game status \| on \| off \| toggle \| run -- <cmd>` | gaming profile (tearing, blur off, MangoHud) |

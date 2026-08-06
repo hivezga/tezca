@@ -79,11 +79,7 @@ pub fn tokens() -> Tokens {
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     let light = colors.get("base").map(|b| is_light(b)).unwrap_or(false);
-    Tokens {
-        light,
-        name: if name.starts_with("dynamic:") { String::new() } else { name },
-        colors,
-    }
+    Tokens { light, name: if name.starts_with("dynamic:") { String::new() } else { name }, colors }
 }
 
 #[cfg(test)]

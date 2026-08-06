@@ -243,6 +243,10 @@ pub struct Config {
     pub net_interval: u32,
     /// strftime-style clock format (glib::DateTime::format).
     pub clock_format: String,
+    /// Extra time zones for the clock popover, as `Label=Area/City` entries
+    /// (the label is optional and defaults to the city). Empty hides the
+    /// section rather than inventing zones nobody asked for.
+    pub clock_zones: Vec<(String, String)>,
     /// Monitors narrower than this (px) render the compact layout: no per-app
     /// menu bar, tighter padding. The ultrawide primary stays full.
     pub compact_width: i32,
@@ -295,6 +299,7 @@ impl Default for Config {
             gpu_interval: 3,
             net_interval: 5,
             clock_format: "%a %d %b   %H:%M".to_string(),
+            clock_zones: Vec::new(),
             compact_width: 3000,
             numerals: Numerals::Arabic,
             ws_assign: HashMap::new(),
@@ -367,6 +372,7 @@ impl Config {
                 "gpu_interval" => set_u32(&mut self.gpu_interval, v),
                 "net_interval" => set_u32(&mut self.net_interval, v),
                 "clock_format" => self.clock_format = v.to_string(),
+                "clock_zones" => self.clock_zones = parse_zones(v),
                 "compact_width" => set_i32(&mut self.compact_width, v),
                 "workspace_numerals" | "numerals" => {
                     if let Some(n) = Numerals::parse(v) {
@@ -535,12 +541,49 @@ fn set_bool(dst: &mut bool, v: &str) {
     }
 }
 
+/// `Berlin=Europe/Berlin, UTC` → `[("Berlin","Europe/Berlin"), ("UTC","UTC")]`.
+///
+/// The label is optional because most zone names already end in the name you
+/// would write anyway; without one, the city half of the tz id is used, with
+/// underscores turned back into spaces.
+fn parse_zones(v: &str) -> Vec<(String, String)> {
+    v.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|entry| match entry.split_once('=') {
+            Some((label, zone)) => (label.trim().to_string(), zone.trim().to_string()),
+            None => {
+                let city = entry.rsplit('/').next().unwrap_or(entry);
+                (city.replace('_', " "), entry.to_string())
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn m(x: Mod) -> Slot {
         Slot::Mod(x)
+    }
+
+    #[test]
+    fn a_zone_labels_itself_with_its_city_when_no_label_is_given() {
+        assert_eq!(
+            parse_zones("Berlin=Europe/Berlin, America/Los_Angeles, UTC"),
+            vec![
+                ("Berlin".to_string(), "Europe/Berlin".to_string()),
+                ("Los Angeles".to_string(), "America/Los_Angeles".to_string()),
+                ("UTC".to_string(), "UTC".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_zone_list_stays_empty_rather_than_becoming_one_blank_entry() {
+        assert!(parse_zones("").is_empty());
+        assert!(parse_zones("  ,  ").is_empty());
     }
 
     #[test]

@@ -7,7 +7,7 @@
  * from the first. This file is the interaction; Rust is the geometry.
  */
 
-import { el, row, section, segmented, toggle, asBool, asNum } from './lib.js';
+import { el, clear, row, section, segmented, slider, toggle, asBool, asNum } from './lib.js';
 
 /** How long a new mode has to be confirmed before it reverts itself. */
 const REVERT_SECONDS = 12;
@@ -166,6 +166,27 @@ export async function displaysPage(ctx) {
         out.push(row('Colour depth', '10-bit needs the link bandwidth to carry it.',
             segmented([['8', '8-bit'], ['10', '10-bit']], String(asNum(m.bitdepth, 8)),
                 (v) => ctx.run(['display', 'set', m.name, '--bitdepth', v]))));
+        // Brightness is the monitor's own backlight over DDC/CI, not a gamma
+        // filter — which is why it survives a reboot without tezca storing
+        // anything, and why a panel with no DDC channel gets a hint instead of a
+        // slider that would silently do nothing.
+        //
+        // The row is appended empty and fills itself in: `ddcutil` talks over
+        // I²C, and awaiting one probe per monitor before drawing would hold the
+        // whole page on the slowest panel.
+        const bri = el('div');
+        bri.append(el('span.hint', 'reading…'));
+        out.push(row('Brightness', 'The monitor’s own backlight, over DDC/CI. The panel remembers it.', bri));
+        ctx.invoke('tz_brightness', { name: m.name }).then((v) => {
+            clear(bri);
+            if (v === null || v === undefined) {
+                bri.append(el('span.hint', 'No DDC/CI channel — not supported on this input.'));
+                return;
+            }
+            bri.append(slider({ min: 0, max: 100, value: v, unit: '%' },
+                (x) => ctx.run(['display', 'brightness', m.name, String(x)])));
+        });
+
         // DPMS, not an enable flag: `tezca display` has no --enable/--disable,
         // and blanking is the reversible thing you actually want from a panel
         // you might be looking at. It is deliberately not persisted.

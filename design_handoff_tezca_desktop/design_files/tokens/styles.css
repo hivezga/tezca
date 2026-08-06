@@ -1,0 +1,16 @@
+/* Tezca design tokens — mirrors themes/<name>/colors.css from hivezga/tezca.
+   Default set = quetzalcoatl (the theme in use). */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+:root{
+  --tz-base:#0B0E0F;--tz-surface:#14191B;--tz-text:#E8EAED;--tz-subtext:#C3C8CC;
+  --tz-muted:#8B9398;--tz-faint:#5A6166;--tz-accent:#D2E4E2;--tz-accent-dim:#A6C0BD;
+  --tz-on-accent:#0B0E0F;--tz-gold:#C9A24B;--tz-urgent:#E06C75;--tz-on-urgent:#0B0E0F;
+  --tz-line:rgba(139,147,152,.16);--tz-line-strong:rgba(139,147,152,.24);
+  --tz-radius:10px;--tz-radius-lg:14px;
+  --tz-font:Inter,system-ui,sans-serif;
+  --tz-mono:"JetBrains Mono",ui-monospace,monospace; /* @kind font */
+}
+[data-tz-theme="obsidian"]{--tz-accent:#3FB8AF;--tz-accent-dim:#2A8C86}
+[data-tz-theme="cyber"]{--tz-base:#05080A;--tz-surface:#0A1618;--tz-text:#DFF7F2;--tz-subtext:#A9DDD5;--tz-muted:#5F8F89;--tz-faint:#3E6A66;--tz-accent:#2BE8C8;--tz-accent-dim:#17A78F;--tz-on-accent:#031312;--tz-gold:#F0C25A;--tz-urgent:#FF5C7A;--tz-line:rgba(43,232,200,.14);--tz-line-strong:rgba(43,232,200,.28);--tz-radius:4px;--tz-radius-lg:6px;--tz-font:"JetBrains Mono",ui-monospace,monospace}
+a{color:var(--tz-accent);text-decoration:none}
+a:hover{color:var(--tz-accent-dim);text-decoration:underline}

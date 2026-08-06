@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<!-- @template name="Tezca Settings" description="Redesigned Tezca control center — grouped nav, command palette, CLI echo, three visual directions." --><helmet><script src="./ds-base.js"></script><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"><style>*{box-sizing:border-box}body{margin:0;background:#07090a;font-family:Inter,sans-serif}::-webkit-scrollbar{width:11px}::-webkit-scrollbar-thumb{background:rgba(139,147,152,.3);border-radius:8px;border:3px solid transparent;background-clip:content-box}::-webkit-scrollbar-track{background:transparent}input,button{font:inherit;color:inherit}@keyframes tzpop{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}@keyframes tzfade{from{opacity:0}to{opacity:1}}
+[data-tzroot]{--base:rgba(11,14,15,.94);--chrome:rgba(20,25,27,.62);--pagebg:transparent;--railbg:rgba(20,25,27,.42);--sidebar:rgba(20,25,27,.34);--card:rgba(20,25,27,.55);--elev:rgba(20,25,27,.8);--field:rgba(11,14,15,.6);--palette:rgba(17,22,24,.96);--text:#E8EAED;--sub:#C3C8CC;--muted:#8B9398;--faint:#5A6166;--line:rgba(139,147,152,.16);--linex:rgba(139,147,152,.24);--accent:#D2E4E2;--accentline:rgba(210,228,226,.45);--onacc:#0B0E0F;--gold:#C9A24B;--urgent:#E06C75;--track:rgba(139,147,152,.22);--hov:rgba(139,147,152,.12);--selbg:rgba(210,228,226,.14);--r:10px;--r2:14px;--rwin:14px;--font:Inter,sans-serif;--mono:"JetBrains Mono",monospace;--rp:13px;--rowh:auto;--blur:saturate(1.2) blur(18px);--swr:12px;--swkr:50%;--segp:5px 12px;--segr:7px;--navp:8px 11px;--tcr:10px;--sbw:224px;--swglow:none;--segglow:none;--railglow:none;--tcglow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent);--backdrop:radial-gradient(1200px 700px at 20% -10%,rgba(210,228,226,.09),transparent 60%),radial-gradient(900px 600px at 95% 110%,rgba(201,162,75,.07),transparent 60%),linear-gradient(160deg,#0a0d0e,#070909)}
+[data-tzroot][data-look="flat"]{--base:#09090B;--chrome:#0E0E11;--pagebg:#09090B;--railbg:#0E0E11;--sidebar:#0E0E11;--card:#161619;--elev:#161619;--field:#161619;--palette:#131316;--text:#FAFAFA;--sub:#D4D4D8;--muted:#A1A1AA;--faint:#71717A;--line:#232327;--linex:#2C2C31;--gold:#D6B15E;--urgent:#EF6C75;--track:#27272A;--hov:#18181B;--selbg:#1F1F23;--r:8px;--r2:12px;--rwin:12px;--blur:none;--swr:12px;--segr:7px;--tcr:8px;--backdrop:linear-gradient(180deg,#0d0d10,#08080a)}
+[data-tzroot][data-look="cyber"]{--base:rgba(5,10,11,.92);--chrome:rgba(8,20,21,.7);--railbg:rgba(8,20,21,.5);--sidebar:rgba(8,18,19,.44);--card:rgba(10,24,25,.6);--elev:rgba(8,20,21,.85);--field:rgba(4,10,11,.7);--palette:rgba(7,18,19,.97);--text:#DFF7F2;--sub:#A9DDD5;--muted:#5F8F89;--faint:#3E6A66;--line:rgba(43,232,200,.14);--linex:rgba(43,232,200,.28);--accent:#2BE8C8;--accentline:rgba(43,232,200,.6);--onacc:#031312;--gold:#F0C25A;--urgent:#FF5C7A;--track:rgba(43,232,200,.16);--hov:rgba(43,232,200,.09);--selbg:rgba(43,232,200,.13);--r:4px;--r2:6px;--rwin:6px;--font:"JetBrains Mono",monospace;--blur:saturate(1.3) blur(16px);--swr:3px;--swkr:2px;--segr:3px;--tcr:4px;--swglow:0 0 12px -2px var(--accent);--segglow:0 0 10px -2px var(--accent);--railglow:0 0 18px -4px var(--accent);--tcglow:0 0 16px -4px var(--accent);--backdrop:radial-gradient(900px 600px at 15% -5%,rgba(43,232,200,.13),transparent 62%),radial-gradient(800px 520px at 100% 105%,rgba(240,194,90,.09),transparent 60%),repeating-linear-gradient(0deg,rgba(43,232,200,.035) 0 1px,transparent 1px 46px),repeating-linear-gradient(90deg,rgba(43,232,200,.035) 0 1px,transparent 1px 46px),linear-gradient(160deg,#04090a,#020506)}
+[data-tzroot][data-accent="#3FB8AF"]{--accent:#3FB8AF;--accentline:rgba(63,184,175,.55);--onacc:#04100F}
+[data-tzroot][data-accent="#2BE8C8"]{--accent:#2BE8C8;--accentline:rgba(43,232,200,.55);--onacc:#031312}
+[data-tzroot][data-accent="#C9A24B"]{--accent:#C9A24B;--accentline:rgba(201,162,75,.55);--onacc:#120D02}
+[data-tzroot][data-density="compact"]{--rp:9px;--segp:4px 10px;--navp:6px 11px}
+[data-tzroot][data-shell="rail"]{--sbw:196px}
+[data-sw]{width:40px;height:23px;flex:none;border-radius:var(--swr);padding:2.5px;cursor:pointer;display:flex;justify-content:flex-start;background:var(--track);border:1px solid var(--linex);transition:background .16s,border-color .16s}
+[data-sw="true"]{justify-content:flex-end;background:var(--accent);border-color:var(--accent);box-shadow:var(--swglow)}
+[data-sw]>i{display:block;width:17px;height:17px;border-radius:var(--swkr);background:var(--muted);transition:background .16s}
+[data-sw="true"]>i{background:var(--onacc)}
+[data-seg]{padding:var(--segp);border-radius:var(--segr);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .14s;color:var(--sub);background:transparent}
+[data-seg][data-on="true"]{color:var(--onacc);background:var(--accent);box-shadow:var(--segglow)}
+[data-nav]{display:flex;align-items:center;gap:11px;margin:1px 8px;padding:var(--navp);border-radius:var(--r);font-size:13px;font-weight:600;cursor:pointer;color:var(--sub);transition:background .14s,color .14s}
+[data-nav]:hover{background:var(--hov);color:var(--text)}
+[data-nav][data-on="true"]{color:var(--text);background:var(--selbg);box-shadow:inset 2px 0 0 0 var(--accent)}
+[data-rail]{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:var(--r);cursor:pointer;color:var(--muted);transition:background .14s,color .14s}
+[data-rail]:hover{color:var(--text)}
+[data-rail][data-on="true"]{color:var(--text);background:var(--selbg);box-shadow:var(--railglow)}
+[data-tc]{display:flex;flex-direction:column;gap:9px;padding:11px;cursor:pointer;border-radius:var(--tcr);background:var(--elev);border:1px solid var(--line);transition:all .14s}
+[data-tc][data-on="true"]{background:var(--selbg);border-color:var(--accent);box-shadow:var(--tcglow)}
+[data-pal]{display:flex;align-items:center;gap:12px;padding:9px 11px;border-radius:var(--r);cursor:pointer}
+[data-pal][data-on="true"],[data-pal]:hover{background:var(--selbg)}
+[data-slider]{flex:1;min-width:0;height:18px;accent-color:var(--accent);cursor:pointer}
+[data-row]{display:flex;align-items:center;gap:18px;padding:var(--rp) 0;border-top:1px solid var(--line)}
+[data-row]:first-of-type{border-top:none}</style></helmet><div data-tzroot="" data-look="{{ look }}" data-accent="{{ accent }}" data-density="{{ density }}" data-shell="{{ shellKey }}" style="min-height:100vh;width:100%;display:flex;align-items:center;justify-content:center;padding:28px 20px;position:relative;font-family:var(--font);color:var(--text);background:var(--backdrop);-webkit-font-smoothing:antialiased"><div style="position:relative;width:min(1180px,100%);height:min(788px,calc(100vh - 56px));display:flex;flex-direction:column;overflow:hidden;border-radius:var(--rwin);background:var(--base);border:1px solid var(--linex);box-shadow:0 40px 120px -20px rgba(0,0,0,.85)"><div style="display:flex;align-items:center;gap:14px;height:52px;padding:0 14px 0 18px;background:var(--chrome);border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:center;gap:9px;width:214px;flex:none"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3.6" fill="var(--accent)" stroke="none"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg><div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:14px;font-weight:800;letter-spacing:.14em;color:var(--text)">TEZCA</span><span style="font-size:11.5px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase">Settings</span></div></div><div onClick="{{ openPalette }}" style="flex:1;max-width:520px;margin:0 auto;display:flex;align-items:center;gap:9px;height:32px;padding:0 11px;border-radius:var(--r);background:var(--field);border:1px solid var(--line);cursor:text" style-hover="border-color:var(--accentline)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><span style="flex:1;font-size:12.5px;color:var(--muted)">Search all settings…</span><span style="font:600 10.5px/1 var(--mono);color:var(--faint);padding:3px 6px;border-radius:5px;border:1px solid var(--line);background:var(--elev)">⌘K</span></div><div style="width:214px;flex:none;display:flex;justify-content:flex-end;gap:9px"><div style="width:12px;height:12px;border-radius:50%;background:var(--faint)"></div><div style="width:12px;height:12px;border-radius:50%;background:var(--faint)"></div><div style="width:12px;height:12px;border-radius:50%;background:var(--urgent)"></div></div></div><div style="flex:1;display:flex;min-height:0"><sc-if value="{{ isRail }}" hint-placeholder-val="{{ false }}"><div style="width:64px;flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 0;background:var(--railbg);border-right:1px solid var(--line)"><div onClick="{{ goGroup.look }}" data-rail="" data-on="{{ railOn.look }}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"></path></svg></div><div onClick="{{ goGroup.devices }}" data-rail="" data-on="{{ railOn.devices }}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2" y="4" width="20" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg></div><div onClick="{{ goGroup.system }}" data-rail="" data-on="{{ railOn.system }}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"></path></svg></div></div></sc-if><div style="flex:none;display:flex;flex-direction:column;background:var(--sidebar);border-right:1px solid var(--line);backdrop-filter:var(--blur);overflow-y:auto;width:var(--sbw)"><sc-if value="{{ showLook }}" hint-placeholder-val="{{ true }}"><div style="font:600 10px/1 var(--font);letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:14px 12px 7px">Look &amp; feel</div><div onClick="{{ go.appearance }}" data-nav="" data-on="{{ navOn.appearance }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"></path></svg><span style="flex:1">Appearance</span></div><div onClick="{{ go.bar }}" data-nav="" data-on="{{ navOn.bar }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="6" rx="2"></rect><path d="M6.5 7h3M14.5 7h3"></path></svg><span style="flex:1">Bar</span></div><div onClick="{{ go.dock }}" data-nav="" data-on="{{ navOn.dock }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="14" width="18" height="6" rx="3"></rect><path d="M8 17h.01M12 17h.01M16 17h.01"></path></svg><span style="flex:1">Dock</span></div></sc-if><sc-if value="{{ showDevices }}" hint-placeholder-val="{{ true }}"><div style="font:600 10px/1 var(--font);letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:16px 12px 7px">Devices</div><div onClick="{{ go.displays }}" data-nav="" data-on="{{ navOn.displays }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2" y="4" width="20" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg><span style="flex:1">Displays</span></div><div onClick="{{ go.sound }}" data-nav="" data-on="{{ navOn.sound }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 5 6.5 9H3v6h3.5L11 19z"></path><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18 7a7 7 0 0 1 0 10"></path></svg><span style="flex:1">Sound</span></div><div onClick="{{ go.input }}" data-nav="" data-on="{{ navOn.input }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="7.5" y="3" width="9" height="18" rx="4.5"></rect><path d="M12 7v3.5"></path></svg><span style="flex:1">Input</span></div><div onClick="{{ go.network }}" data-nav="" data-on="{{ navOn.network }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4.5 11a11 11 0 0 1 15 0M8 14.5a6 6 0 0 1 8 0"></path><circle cx="12" cy="18.5" r="1.1" fill="currentColor"></circle></svg><span style="flex:1">Network</span></div><div onClick="{{ go.power }}" data-nav="" data-on="{{ navOn.power }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2" y="7" width="16" height="10" rx="2.5"></rect><path d="M21.5 10.5v3"></path><rect x="4.5" y="9.5" width="7" height="5" rx="1" fill="currentColor" stroke="none"></rect></svg><span style="flex:1">Power</span></div></sc-if><sc-if value="{{ showSystem }}" hint-placeholder-val="{{ true }}"><div style="font:600 10px/1 var(--font);letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:16px 12px 7px">System</div><div onClick="{{ go.startup }}" data-nav="" data-on="{{ navOn.startup }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3.5v9M8.5 7 12 3.5 15.5 7"></path><path d="M4.5 14v4.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V14"></path></svg><span style="flex:1">Startup</span></div><div onClick="{{ go.keybinds }}" data-nav="" data-on="{{ navOn.keybinds }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"></path></svg><span style="flex:1">Keybinds</span></div><div onClick="{{ go.gaming }}" data-nav="" data-on="{{ navOn.gaming }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2" y="6.5" width="20" height="11" rx="5.5"></rect><path d="M6.5 12h3.5M8.25 10.25v3.5M15.5 11h.01M18 13h.01"></path></svg><span style="flex:1">Gaming</span></div><div onClick="{{ go.system }}" data-nav="" data-on="{{ navOn.system }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"></path></svg><span style="flex:1">System</span></div></sc-if><div style="flex:1;min-height:14px"></div><div style="margin:10px;padding:11px 12px;border-radius:var(--r);background:var(--card);border:1px solid var(--line)"><div style="display:flex;align-items:center;gap:7px"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)"></span><span style="font:600 11px/1 var(--font);color:var(--sub)">quetzalcoatl</span></div><div style="font:400 10.5px/1.45 var(--mono);color:var(--faint);margin-top:6px">Hyprland 0.51 · 3 displays</div></div></div><div style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--pagebg)"><div style="flex:1;overflow-y:auto;padding:26px 34px 34px"><div style="max-width:768px;margin:0 auto"><dc-import name="PageLook" wallFile="{{ wallFile }}" v="{{ v }}" sel="{{ sel }}" pick="{{ pick }}" tog="{{ tog }}" setSl="{{ setSl }}" txt="{{ txt }}" setTx="{{ setTx }}" tcOn="{{ tcOn }}" is-appearance="{{ p.appearance }}" is-bar="{{ p.bar }}" is-dock="{{ p.dock }}" hint-size="100%,0px"></dc-import><dc-import name="PageDisplays" onCmd="{{ emit }}" is-displays="{{ p.displays }}" hint-size="100%,0px"></dc-import><dc-import name="PageDevices" v="{{ v }}" sel="{{ sel }}" pick="{{ pick }}" tog="{{ tog }}" setSl="{{ setSl }}" txt="{{ txt }}" setTx="{{ setTx }}" is-sound="{{ p.sound }}" is-input="{{ p.input }}" is-network="{{ p.network }}" is-power="{{ p.power }}" hint-size="100%,0px"></dc-import><dc-import name="PageSystem" v="{{ v }}" sel="{{ sel }}" pick="{{ pick }}" tog="{{ tog }}" setSl="{{ setSl }}" txt="{{ txt }}" is-startup="{{ p.startup }}" is-keybinds="{{ p.keybinds }}" is-gaming="{{ p.gaming }}" is-system="{{ p.system }}" hint-size="100%,0px"></dc-import></div></div><sc-if value="{{ showEcho }}" hint-placeholder-val="{{ true }}"><div style="flex:none;display:flex;align-items:center;gap:10px;height:34px;padding:0 16px;background:var(--chrome);border-top:1px solid var(--line)"><span style="font:700 9.5px/1 var(--font);letter-spacing:.12em;color:var(--faint)">CLI</span><span style="font:500 11.5px/1 var(--mono);color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">{{ lastCmd }}</span><span style="font:500 11px/1 var(--mono);color:var(--faint);white-space:nowrap">✓ applied</span></div></sc-if></div></div><sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}"><div onClick="{{ closePalette }}" style="position:absolute;inset:0;background:rgba(3,6,7,.62);backdrop-filter:blur(3px);display:flex;justify-content:center;padding-top:118px;animation:tzfade .12s ease;border-radius:var(--rwin)"><div onClick="{{ stop }}" style="width:620px;align-self:flex-start;max-height:440px;display:flex;flex-direction:column;border-radius:var(--r2);background:var(--palette);border:1px solid var(--linex);box-shadow:0 30px 90px -12px rgba(0,0,0,.8);overflow:hidden;animation:tzpop .16s cubic-bezier(.2,.8,.3,1)"><div style="display:flex;align-items:center;gap:11px;padding:15px 17px;border-bottom:1px solid var(--line)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input value="{{ q }}" onInput="{{ onQ }}" placeholder="Jump to a setting, theme, or keybind…" style="flex:1;background:none;border:none;outline:none;font-size:14.5px;color:var(--text)"></div><div style="overflow-y:auto;padding:7px"><sc-for list="{{ results }}" as="r" hint-placeholder-count="4"><div onClick="{{ r.go }}" data-pal="" data-on="{{ r.on }}"><span style="font:600 11px/1 var(--mono);color:var(--faint);width:78px;flex:none">{{ r.page }}</span><span style="flex:1;font-size:13.5px;color:var(--text)">{{ r.label }}</span><span style="font:500 11px/1 var(--mono);color:var(--muted)">{{ r.hint }}</span></div></sc-for></div><div style="display:flex;gap:16px;padding:9px 15px;border-top:1px solid var(--line);background:var(--elev)"><span style="font:500 10.5px/1 var(--mono);color:var(--faint)">↑↓ navigate</span><span style="font:500 10.5px/1 var(--mono);color:var(--faint)">↵ open</span><span style="font:500 10.5px/1 var(--mono);color:var(--faint)">esc close</span></div></div></div></sc-if></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;look&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;obsidian&quot;,&quot;flat&quot;,&quot;cyber&quot;],&quot;default&quot;:&quot;obsidian&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Visual direction&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#D2E4E2&quot;,&quot;#3FB8AF&quot;,&quot;#2BE8C8&quot;,&quot;#C9A24B&quot;],&quot;default&quot;:&quot;#C9A24B&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Visual direction&quot;},&quot;shell&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;grouped&quot;,&quot;rail&quot;],&quot;default&quot;:&quot;grouped&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Navigation&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;compact&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;showEcho&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layout&quot;}}">
+const GROUP = { appearance:'look', bar:'look', dock:'look', displays:'devices', sound:'devices', input:'devices', network:'devices', power:'devices', startup:'system', keybinds:'system', gaming:'system', system:'system' };
+
+const TOGGLES = {
+  followWall:true, animations:true, blur:true,
+  osd:true, hideEmpty:true, compactWs:true, aiEnabled:true, tray:true, vrr:true,
+  micBoost:false, popRemoval:true,
+  naturalScroll:true, tapClick:true, numlock:false,
+  wifi:true, bluetooth:true, airplane:false, vpn:false,
+  caffeine:false, dimIdle:true, lidSleep:true,
+  svcBar:true, svcDock:true, svcIdle:true, svcNotify:true,
+  gameMode:false, gmDisableAnim:true, gmNotifSilence:true, gmGamescope:false,
+  autoUpdate:true,
+  shadows:true, forceNoAccel:false, focusFollows:true, hideCursorTyping:true, softwareCursors:false
+};
+const SEGS = {
+  theme:'quetzalcoatl', wall:'obsidianTeal', wallMode:'fill', barShape:'floating', numerals:'mayan',
+  audioOut:'speakers', kbLayout:'us', accelProfile:'flat', pointerSpeed:'medium',
+  sleepAfter:'30m', powerProfile:'balanced'
+};
+const SLIDERS = {
+  barHeight:{v:40,min:24,max:64,unit:'px'}, barMargin:{v:6,min:0,max:24,unit:'px'},
+  dockIcon:{v:48,min:32,max:80,unit:'px'}, dockScale:{v:160,min:100,max:250,unit:'%'}, dockInfluence:{v:110,min:40,max:220,unit:'px'},
+  volume:{v:64,min:0,max:100,unit:'%'}, micLevel:{v:82,min:0,max:100,unit:'%'},
+  keyRepeat:{v:35,min:10,max:80,unit:'/s'}, keyDelay:{v:250,min:120,max:600,unit:'ms'}, cursorSize:{v:24,min:16,max:48,unit:'px'},
+  idleDim:{v:5,min:1,max:30,unit:'min'}, idleLock:{v:10,min:1,max:60,unit:'min'}, rounding:{v:12,min:0,max:28,unit:'px'},
+  barSide:{v:10,min:0,max:40,unit:'px'}, osdTimeout:{v:1400,min:400,max:10000,unit:'ms'},
+  cpuPoll:{v:3,min:1,max:30,unit:'s'}, memPoll:{v:5,min:1,max:30,unit:'s'}, gpuPoll:{v:3,min:1,max:30,unit:'s'},
+  netPoll:{v:5,min:1,max:30,unit:'s'}, compactWidth:{v:3000,min:1000,max:5000,unit:'px'},
+  dockGap:{v:10,min:0,max:32,unit:'px'}, dockMargin:{v:8,min:0,max:40,unit:'px'}, dockDelay:{v:350,min:0,max:2000,unit:'ms'},
+  innerGaps:{v:5,min:0,max:40,unit:'px'}, outerGaps:{v:10,min:0,max:60,unit:'px'}, borderSize:{v:2,min:0,max:8,unit:'px'},
+  activeOpacity:{v:100,min:50,max:100,unit:'%'}, inactiveOpacity:{v:92,min:30,max:100,unit:'%'},
+  blurSize:{v:8,min:1,max:20,unit:''}, blurPasses:{v:2,min:1,max:5,unit:''},
+  sensitivity:{v:0,min:-100,max:100,unit:''}, scrollSpeed:{v:100,min:20,max:300,unit:'%'}
+};
+const TEXTS = { clockFormat:'%a %d %b   %H:%M', kbVariant:'', kbOptions:'caps:escape' };
+const CMD = {
+  theme:'tezca theme set', wall:'tezca wall set', wallMode:'tezca wall mode', barShape:'tezca bar set shape', numerals:'tezca bar set workspace_numerals',
+  audioOut:'tezca audio out', kbLayout:'tezca input layout', accelProfile:'tezca input accel',
+  pointerSpeed:'tezca input speed', sleepAfter:'tezca power idle', powerProfile:'tezca power profile',
+  barHeight:'tezca bar set height', barMargin:'tezca bar set margin_top', dockIcon:'tezca dock set icon_size',
+  dockScale:'tezca dock set max_scale', dockInfluence:'tezca dock set influence', volume:'tezca audio volume', micLevel:'tezca audio mic', keyRepeat:'tezca input repeat-rate',
+  keyDelay:'tezca input repeat-delay', cursorSize:'tezca input cursor-size', idleDim:'tezca power dim-after',
+  idleLock:'tezca power lock-after', rounding:'tezca desktop rounding',
+  followWall:'tezca theme follow-wallpaper', animations:'tezca desktop animations', blur:'tezca desktop blur',
+  osd:'tezca bar set osd_enabled', hideEmpty:'tezca bar set workspace_hide_empty', compactWs:'tezca bar set workspace_compact',
+  aiEnabled:'tezca bar set ai_enabled', tray:'tezca bar module tray',
+  vrr:'tezca display vrr', micBoost:'tezca audio mic-boost', popRemoval:'tezca audio pop-removal',
+  naturalScroll:'tezca input natural-scroll', tapClick:'tezca input tap-to-click', numlock:'tezca input numlock',
+  wifi:'tezca net wifi', bluetooth:'tezca net bluetooth', airplane:'tezca net airplane', vpn:'tezca net vpn',
+  caffeine:'tezca power caffeine', dimIdle:'tezca power dim', lidSleep:'tezca power lid-sleep',
+  svcBar:'tezca service bar', svcDock:'tezca service dock', svcIdle:'tezca service hypridle', svcNotify:'tezca service swaync',
+  gameMode:'tezca game', gmDisableAnim:'tezca game set disable_anim', gmNotifSilence:'tezca game set silence_notifications',
+  gmGamescope:'tezca game set gamescope', autoUpdate:'tezca update auto',
+  barSide:'tezca bar set margin_side', osdTimeout:'tezca bar set osd_timeout_ms',
+  cpuPoll:'tezca bar set cpu_interval', memPoll:'tezca bar set mem_interval', gpuPoll:'tezca bar set gpu_interval',
+  netPoll:'tezca bar set net_interval', compactWidth:'tezca bar set compact_width',
+  dockGap:'tezca dock set gap', dockMargin:'tezca dock set margin_bottom', dockDelay:'tezca dock set hide_delay_ms',
+  innerGaps:'tezca desktop set general:gaps_in', outerGaps:'tezca desktop set general:gaps_out',
+  borderSize:'tezca desktop set general:border_size',
+  activeOpacity:'tezca desktop set decoration:active_opacity', inactiveOpacity:'tezca desktop set decoration:inactive_opacity',
+  blurSize:'tezca desktop set decoration:blur:size', blurPasses:'tezca desktop set decoration:blur:passes',
+  shadows:'tezca desktop set decoration:shadow:enabled',
+  sensitivity:'tezca desktop set input:sensitivity', scrollSpeed:'tezca desktop set input:touchpad:scroll_factor',
+  forceNoAccel:'tezca desktop set input:force_no_accel', focusFollows:'tezca desktop set input:follow_mouse',
+  hideCursorTyping:'tezca desktop set cursor:hide_on_key_press', softwareCursors:'tezca desktop set cursor:no_hardware_cursors',
+  clockFormat:'tezca bar set clock_format', kbVariant:'tezca input variant', kbOptions:'tezca input options'
+};
+
+const PALETTE_ITEMS = [
+  ['appearance','Appearance','Theme','quetzalcoatl'],
+  ['appearance','Appearance','Wallpaper','2 installed'],
+  ['appearance','Appearance','Window gaps','10 px'],
+  ['bar','Bar','Bar shape','floating'],
+  ['bar','Bar','Workspace numerals','mayan'],
+  ['bar','Bar','Bar modules','21 active'],
+  ['bar','Bar','AI usage module','on'],
+  ['dock','Dock','Magnification','1.6×'],
+  ['dock','Dock','Pinned favourites','4 apps'],
+  ['displays','Displays','Night light','off'],
+  ['displays','Displays','Refresh rate','165 Hz'],
+  ['sound','Sound','Output device','speakers'],
+  ['input','Input','Keyboard layout','us'],
+  ['input','Input','Cursor size','24 px'],
+  ['network','Network','Wi-Fi','Coatlicue-5G'],
+  ['network','Network','Bluetooth','2 devices'],
+  ['power','Power','Idle timeouts','dim 5m · lock 10m'],
+  ['keybinds','Keybinds','SUPER + RETURN','terminal'],
+  ['keybinds','Keybinds','SUPER + SHIFT + A','settings'],
+  ['gaming','Gaming','Game mode','off'],
+  ['startup','Startup','Tezca services','4 running'],
+  ['system','System','Log out','SUPER + SHIFT + Q']
+];
+
+const WALLFILE = { obsidianTeal:'obsidian-teal.jpg', smokeLight:'smoke-light.jpg' };
+const OPTS = { theme:['obsidian','quetzalcoatl','huitzilopochtli','xipe','smoke'], wall:['obsidianTeal','smokeLight'], wallMode:['fill','fit','stretch','tile'],
+  barShape:['floating','edge'], numerals:['arabic','mayan'],
+  audioOut:['speakers','headphones','hdmi'], kbLayout:['us','es','latam'], accelProfile:['flat','adaptive'],
+  pointerSpeed:['slow','medium','fast'], sleepAfter:['15m','30m','1h','never'], powerProfile:['power-saver','balanced','performance'] };
+
+class Component extends DCLogic {
+  state = { page:'appearance', palette:false, q:'', v:{...TOGGLES, ...SEGS, ...TEXTS, ...Object.fromEntries(Object.entries(SLIDERS).map(([k,s])=>[k,s.v]))}, cmd:'tezca settings --page appearance' };
+
+  set(k, val){ const shown = k==='wall' ? WALLFILE[val] : val;
+    this.setState(s=>({ v:{...s.v,[k]:val}, cmd:(CMD[k]||('tezca set '+k))+' '+shown })); }
+  toggle(k){ const nv = !this.state.v[k]; this.setState(s=>({ v:{...s.v,[k]:nv}, cmd:(CMD[k]||('tezca set '+k))+' '+(nv?'on':'off') })); }
+
+  renderVals(){
+    const isRail = (this.props.shell || 'grouped') === 'rail';
+    const g = GROUP[this.state.page];
+
+    const navOn = {}, go = {}, railOn = {}, goGroup = {};
+    Object.keys(GROUP).forEach(id => { navOn[id] = this.state.page===id; go[id] = () => this.setState({ page:id, palette:false, cmd:'tezca settings --page '+id }); });
+    ['look','devices','system'].forEach(gr => { railOn[gr] = g===gr;
+      goGroup[gr] = () => { const first = Object.keys(GROUP).find(k=>GROUP[k]===gr); this.setState({ page:first, cmd:'tezca settings --page '+first }); }; });
+
+    const tog = {};
+    Object.keys(TOGGLES).forEach(k => { tog[k] = () => this.toggle(k); });
+
+    const sel = {}, pick = {};
+    Object.entries(OPTS).forEach(([k, vals]) => { sel[k] = {}; pick[k] = {};
+      vals.forEach(val => { sel[k][val] = this.state.v[k]===val; pick[k][val] = () => this.set(k,val); }); });
+
+    const setSl = {}, txt = {};
+    Object.entries(SLIDERS).forEach(([k, s]) => {
+      setSl[k] = (e) => this.set(k, Number(e.target.value));
+      const val = this.state.v[k];
+      txt[k] = k==='dockScale' ? (val/100).toFixed(2)+'×'
+        : k==='sensitivity' ? (val/100).toFixed(2)
+        : s.unit ? val+' '+s.unit : String(val);
+    });
+    const setTx = {};
+    Object.keys(TEXTS).forEach(k => { setTx[k] = (e) => this.set(k, e.target.value); });
+
+    const tcOn = {};
+    OPTS.theme.forEach(name => { tcOn[name] = this.state.v.theme===name; });
+
+    const p = {}; Object.keys(GROUP).forEach(id => { p[id] = this.state.page===id; });
+
+    const q = this.state.q.trim().toLowerCase();
+    const results = PALETTE_ITEMS.filter(it => !q || (it[1]+' '+it[2]+' '+it[3]).toLowerCase().includes(q)).slice(0,7).map((it,i) => ({
+      page: it[1], label: it[2], hint: it[3], on: i===0,
+      go: () => this.setState({ page:it[0], palette:false, q:'', cmd:'tezca settings --page '+it[0] })
+    }));
+
+    return {
+      look: this.props.look || 'obsidian', accent: this.props.accent || '', density: this.props.density || 'comfortable',
+      shellKey: isRail ? 'rail' : 'grouped',
+      navOn, go, railOn, goGroup, tog, sel, pick, setSl, txt, setTx, tcOn, v:this.state.v, p,
+      emit: (cmd) => this.setState({ cmd }),
+      isRail, showLook: !isRail || g==='look', showDevices: !isRail || g==='devices', showSystem: !isRail || g==='system',
+      paletteOpen: this.state.palette,
+      openPalette: () => this.setState({ palette:true }),
+      closePalette: () => this.setState({ palette:false, q:'' }),
+      stop: (e) => e.stopPropagation(),
+      q: this.state.q, onQ: (e) => this.setState({ q:e.target.value }), results,
+      wallFile: WALLFILE[this.state.v.wall],
+      showEcho: this.props.showEcho !== false,
+      lastCmd: '$ ' + this.state.cmd
+    };
+  }
+
+  componentDidMount(){
+    this._k = (e) => {
+      if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='k') { e.preventDefault(); this.setState(s=>({palette:!s.palette})); }
+      if (e.key==='Escape') this.setState({palette:false, q:''});
+    };
+    window.addEventListener('keydown', this._k);
+  }
+  componentWillUnmount(){ window.removeEventListener('keydown', this._k); }
+}
+</script>
+</body>
+</html>

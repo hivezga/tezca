@@ -643,36 +643,126 @@ pub struct Stream {
 /// its output is a tree with a "Streams:" section under Audio. Parsed
 /// defensively — a format change should cost the list, not the popover.
 pub fn streams() -> Vec<Stream> {
-    let Some(out) = wpctl(&["status"]) else { return Vec::new() };
-    let mut ids: Vec<(u32, String)> = Vec::new();
-    let mut in_streams = false;
-    for line in out.lines() {
-        let t = line.trim_start_matches(['│', ' ', '\u{2502}']).trim();
-        if t.starts_with("Streams:") {
-            in_streams = true;
-            continue;
-        }
-        // Any other section header ends the streams block.
-        if in_streams && t.ends_with(':') && !t.starts_with("Streams:") {
-            break;
-        }
-        if !in_streams {
-            continue;
-        }
-        // "  53. Firefox" — an id, a dot, then the application name.
-        let Some((id, rest)) = t.split_once('.') else { continue };
-        let Ok(id) = id.trim().parse::<u32>() else { continue };
-        let name = rest.trim();
-        if !name.is_empty() {
-            ids.push((id, name.to_string()));
-        }
-    }
-    ids.into_iter()
-        .filter_map(|(id, name)| {
-            let a = audio_of(&id.to_string())?;
-            Some(Stream { name, volume: a.volume, muted: a.muted })
+    wpctl_section("Streams:")
+        .into_iter()
+        .filter_map(|d| {
+            let a = audio_of(&d.id.to_string())?;
+            Some(Stream { name: d.name, volume: a.volume, muted: a.muted })
         })
         .collect()
+}
+
+/// One routable PipeWire node — a sink or a source — from `wpctl status`.
+pub struct Device {
+    pub id: u32,
+    pub name: String,
+    /// Carries the `*` marker: this is what `@DEFAULT_AUDIO_SINK@` resolves to.
+    pub default: bool,
+}
+
+/// The playback devices PipeWire advertises, in `wpctl status` order.
+pub fn sinks() -> Vec<Device> {
+    wpctl_section("Sinks:")
+}
+
+/// The capture devices PipeWire advertises.
+pub fn sources() -> Vec<Device> {
+    wpctl_section("Sources:")
+}
+
+/// Route playback to `id`.
+///
+/// WirePlumber's default policy re-homes any stream that has not asked for a
+/// specific target, so this moves what is already playing as well as what
+/// connects next. There is no `wpctl move` to fall back on if a stream has
+/// pinned itself — that one keeps its device, which is what it asked for.
+pub fn set_default_sink(id: u32) {
+    let _ = Command::new("wpctl").args(["set-default", &id.to_string()]).status();
+}
+
+fn wpctl_section(header: &str) -> Vec<Device> {
+    wpctl(&["status"]).map(|out| parse_wpctl_section(&out, header)).unwrap_or_default()
+}
+
+/// Read one `wpctl status` section as id / name / default rows.
+///
+/// The output is a tree, so every line carries box-drawing glyphs that have to
+/// come off before the `<id>. <name>` shape is visible, and the default node is
+/// marked with a `*`. Parsed defensively: an unrecognised line costs that row,
+/// not the section.
+fn parse_wpctl_section(out: &str, header: &str) -> Vec<Device> {
+    let mut rows = Vec::new();
+    let mut inside = false;
+    for line in out.lines() {
+        let t =
+            line.trim_matches(|c: char| c.is_whitespace() || matches!(c, '│' | '├' | '└' | '─'));
+        if t.starts_with(header) {
+            inside = true;
+            continue;
+        }
+        if inside && t.ends_with(':') {
+            break;
+        }
+        if !inside {
+            continue;
+        }
+        // Under Streams:, each client node is followed by its individual ports
+        // ("82. output_FL  > ALCS1200A Analog:playback_FL"). Those are links,
+        // not things you can set a volume on, and listing them in the mixer put
+        // an `output_FL` row under every application.
+        if t.contains('>') {
+            continue;
+        }
+        let (default, t) = match t.strip_prefix('*') {
+            Some(rest) => (true, rest.trim()),
+            None => (false, t),
+        };
+        let Some((id, rest)) = t.split_once('.') else { continue };
+        let Ok(id) = id.trim().parse::<u32>() else { continue };
+        // "Analog Stereo [vol: 0.10]" — the level already has its own row.
+        let name = rest.split(" [vol:").next().unwrap_or(rest).trim();
+        if !name.is_empty() {
+            rows.push(Device { id, name: name.to_string(), default });
+        }
+    }
+    rows
+}
+
+/// What the audio server calls itself, and the format it is running at.
+///
+/// Both come from `pactl info`; either line may be missing on a server that
+/// isn't PipeWire-through-pulse, in which case the row is simply omitted.
+#[derive(Default)]
+pub struct AudioServer {
+    pub server: String,
+    pub spec: String,
+}
+
+pub fn audio_server() -> AudioServer {
+    let mut s = AudioServer::default();
+    let Some(out) = Command::new("pactl")
+        .arg("info")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    else {
+        return s;
+    };
+    for line in out.lines() {
+        if let Some(v) = line.strip_prefix("Server Name:") {
+            s.server = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("Default Sample Specification:") {
+            s.spec = v.trim().to_string();
+        }
+    }
+    s
+}
+
+/// Seconds since boot, from /proc/uptime.
+pub fn uptime_secs() -> Option<u64> {
+    let s = std::fs::read_to_string("/proc/uptime").ok()?;
+    s.split_whitespace().next()?.parse::<f64>().ok().map(|v| v as u64)
 }
 
 fn wpctl(args: &[&str]) -> Option<String> {
@@ -835,6 +925,61 @@ pub fn gamemode_on() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Trimmed verbatim from this machine's `wpctl status`, box glyphs and all.
+    const WPCTL: &str = "\
+Audio
+ ├─ Devices:
+ │      45. AD104 High Definition Audio Controller [alsa]
+ │
+ ├─ Sinks:
+ │      54. [G533 Wireless Headset Dongle] Analog Stereo [vol: 0.80]
+ │  *   59. Starship/Matisse HD Audio Controller Analog Stereo [vol: 0.15]
+ │
+ ├─ Sources:
+ │      55. [G533 Wireless Headset Dongle] Mono [vol: 1.00]
+ │  *   58. C920 HD Pro Webcam Analog Stereo    [vol: 0.44]
+ │
+ ├─ Filters:
+ │
+ └─ Streams:
+        81. Waydroid
+             82. output_FL       > ALCS1200A Analog:playback_FL\t[active]
+             84. output_FR       > ALCS1200A Analog:playback_FR\t[active]
+
+Video
+ ├─ Sinks:
+ │      99. Not an audio sink
+";
+
+    #[test]
+    fn a_section_stops_at_the_next_header_so_video_never_leaks_into_audio() {
+        let sinks = parse_wpctl_section(WPCTL, "Sinks:");
+        assert_eq!(sinks.len(), 2);
+        assert_eq!(sinks[0].id, 54);
+        assert_eq!(sinks[0].name, "[G533 Wireless Headset Dongle] Analog Stereo");
+        assert!(!sinks[0].default);
+        assert_eq!(sinks[1].id, 59);
+        // The `*` marks the default, and the volume suffix is not part of a name.
+        assert_eq!(sinks[1].name, "Starship/Matisse HD Audio Controller Analog Stereo");
+        assert!(sinks[1].default);
+    }
+
+    #[test]
+    fn the_default_source_is_the_starred_one_not_the_first() {
+        let srcs = parse_wpctl_section(WPCTL, "Sources:");
+        assert_eq!(srcs.iter().find(|d| d.default).map(|d| d.id), Some(58));
+        assert_eq!(srcs[1].name, "C920 HD Pro Webcam Analog Stereo");
+    }
+
+    #[test]
+    fn a_streams_ports_are_not_mistaken_for_applications() {
+        // The bug this covers: `output_FL`/`output_FR` rows appeared in the
+        // mixer under every application that had them.
+        let streams = parse_wpctl_section(WPCTL, "Streams:");
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].name, "Waydroid");
+    }
 
     #[test]
     fn nmcli_terse_fields_survive_a_colon_inside_a_value() {

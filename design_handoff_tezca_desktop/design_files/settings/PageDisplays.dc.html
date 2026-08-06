@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>[data-rect]{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:var(--elev);border:1px solid var(--muted);border-radius:3px;cursor:grab;user-select:none;touch-action:none;overflow:hidden;padding:0 4px}[data-rect][data-small="true"]>span{display:none}[data-rect]:active{cursor:grabbing}[data-rect][data-state="sel"]{border:2px solid var(--accent);z-index:2}[data-rect][data-state="over"]{border:2px solid var(--urgent);z-index:2}[data-rect][data-state="off"]{opacity:.4}[data-rect]>b{font-size:13px;font-weight:700;color:var(--text);white-space:nowrap}[data-rect]>span{font:400 10px/1 var(--mono);color:var(--muted);white-space:nowrap}[data-rect][data-state="off"]>b{color:var(--muted)}[data-btn]{padding:6px 13px;border-radius:var(--r);border:1px solid var(--linex);background:var(--elev);color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}[data-btn]:hover{border-color:var(--accentline)}[data-btn="primary"]{border:none;background:var(--accent);color:var(--onacc);font-weight:700}[data-btn="danger"]{border-color:var(--urgent);color:var(--urgent);background:transparent}[data-btn="small"]{padding:4px 10px;font-size:11.5px}[data-chip]{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 12px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line);font-size:12.5px;font-weight:600;color:var(--sub)}[data-chip] i{font-style:normal;color:var(--faint);cursor:pointer;padding:0 3px}[data-chip] i:hover{color:var(--urgent)}[data-exp]{display:flex;align-items:center;gap:8px;padding:var(--rp) 0;border-top:1px solid var(--line);cursor:pointer;font-size:13px;font-weight:600;color:var(--sub)}[data-exp]:hover{color:var(--text)}[data-exp] u{text-decoration:none;display:inline-block;transition:transform .15s;color:var(--faint)}[data-exp][data-on="true"] u{transform:rotate(90deg)}</style></helmet><sc-if value="{{ isDisplays }}" hint-placeholder-val="{{ true }}"><div><div><h1 style="margin:0;font-size:23px;font-weight:700;letter-spacing:-.012em;color:var(--text)">Displays</h1><p style="margin:7px 0 0;font-size:13px;line-height:1.55;color:var(--muted);max-width:58ch">Arrange the screens the way they sit on your desk. Everything here is written to hyprland's monitor rules and confirmed before it sticks.</p></div><div style="display:flex;align-items:baseline;justify-content:space-between;margin:24px 2px 10px"><div style="font:700 10.5px/1 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)">Arrangement</div><span onClick="{{ identify }}" style="font-size:11.5px;font-weight:600;color:var(--accent);cursor:pointer;white-space:nowrap">Identify displays</span></div><div style="border:1px solid var(--line);border-radius:var(--r2);background:var(--card);padding:14px"><div onPointerDown="{{ deselect }}" ref="{{ canvasRef }}" style="position:relative;height:230px;border-radius:var(--r);background:var(--field);border:1px solid var(--line);overflow:hidden"><sc-for list="{{ rects }}" as="r" hint-placeholder-count="3"><div onPointerDown="{{ r.down }}" ref="{{ r.ref }}" data-rect="" data-state="{{ r.state }}" data-small="{{ r.small }}"><b>{{ r.name }}</b><span>{{ r.detail }}</span></div></sc-for></div><p style="margin:10px 2px 0;font-size:12px;line-height:1.5;color:var(--muted);max-width:72ch">Drag a monitor to move it — edges snap to their neighbours. Arrow keys nudge by 1 px, Shift+arrow by 10. Red means two screens overlap.</p><div style="display:flex;align-items:center;gap:8px;margin-top:12px"><span style="flex:1;font:500 11.5px/1 var(--mono);color:var(--faint)">{{ arrangeStatus }}</span><button onClick="{{ tidy }}" data-btn="small">Tidy up</button><button onClick="{{ revert }}" data-btn="small">Revert</button><button onClick="{{ applyLayout }}" data-btn="primary">Apply layout</button></div></div><div style="display:flex;align-items:baseline;justify-content:space-between;margin:24px 2px 10px"><div style="font:700 10.5px/1 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)">Layout profiles</div><span onClick="{{ saveProfile }}" style="font-size:11.5px;font-weight:600;color:var(--accent);cursor:pointer">Save current…</span></div><div style="border:1px solid var(--line);border-radius:var(--r2);background:var(--card);padding:14px"><sc-if value="{{ hasProfiles }}" hint-placeholder-val="{{ true }}"><div style="display:flex;flex-wrap:wrap;gap:8px"><sc-for list="{{ profiles }}" as="p" hint-placeholder-count="2"><div data-chip=""><span onClick="{{ p.apply }}" style="cursor:pointer">{{ p.name }}</span><i onClick="{{ p.remove }}">✕</i></div></sc-for></div></sc-if><sc-if value="{{ noProfiles }}" hint-placeholder-val="{{ false }}"><p style="margin:0;font-size:12.5px;line-height:1.5;color:var(--muted)">No saved profiles yet. Save one to snapshot every monitor's mode, position, scale and rotation, and get back to it in a click.</p></sc-if></div><div style="display:flex;align-items:baseline;justify-content:space-between;margin:24px 2px 10px"><div style="font:700 10.5px/1 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)">{{ selName }}</div><span style="font:500 11.5px/1 var(--mono);color:var(--faint)">{{ selDesc }}</span></div><div style="border:1px solid var(--line);border-radius:var(--r2);background:var(--card);padding:2px 18px"><div data-row=""><div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Enabled</div><div style="font-size:12px;color:var(--muted);margin-top:2px">Turning a screen off leaves its windows on the others.</div></div><div onClick="{{ togEnabled }}" data-sw="{{ selEnabled }}"><i></i></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Resolution</div></div><div style="display:flex;gap:2px;padding:3px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line)"><sc-for list="{{ resOpts }}" as="o" hint-placeholder-count="3"><div onClick="{{ o.pick }}" data-seg="" data-on="{{ o.on }}">{{ o.label }}</div></sc-for></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Refresh rate</div></div><div style="display:flex;gap:2px;padding:3px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line)"><sc-for list="{{ rateOpts }}" as="o" hint-placeholder-count="3"><div onClick="{{ o.pick }}" data-seg="" data-on="{{ o.on }}">{{ o.label }}</div></sc-for></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Scale</div></div><div style="display:flex;gap:2px;padding:3px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line)"><sc-for list="{{ scaleOpts }}" as="o" hint-placeholder-count="4"><div onClick="{{ o.pick }}" data-seg="" data-on="{{ o.on }}">{{ o.label }}</div></sc-for></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Rotation</div></div><div style="display:flex;gap:2px;padding:3px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line)"><sc-for list="{{ rotOpts }}" as="o" hint-placeholder-count="4"><div onClick="{{ o.pick }}" data-seg="" data-on="{{ o.on }}">{{ o.label }}</div></sc-for></div></div><div data-row=""><div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Brightness</div><div style="font-size:12px;color:var(--muted);margin-top:2px">{{ ddcHint }}</div></div><div style="display:flex;align-items:center;gap:14px;width:250px;flex:none"><input type="range" data-slider="" min="0" max="100" step="1" value="{{ brightness }}" onInput="{{ setBrightness }}"><div style="font:500 12px/1 var(--mono);color:var(--sub);width:54px;text-align:right">{{ brightnessText }}</div></div></div><div onClick="{{ toggleAdv }}" data-exp="" data-on="{{ advOpen }}"><u>▸</u>Advanced</div><sc-if value="{{ advOpen }}" hint-placeholder-val="{{ false }}"><div style="padding:2px 0 10px"><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Bit depth</div></div><div style="display:flex;gap:2px;padding:3px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line)"><sc-for list="{{ depthOpts }}" as="o" hint-placeholder-count="3"><div onClick="{{ o.pick }}" data-seg="" data-on="{{ o.on }}">{{ o.label }}</div></sc-for></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Variable refresh rate</div><div style="font-size:12px;color:var(--muted);margin-top:2px">Overrides the global default set under Appearance.</div></div><div style="display:flex;gap:2px;padding:3px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line)"><sc-for list="{{ vrrOpts }}" as="o" hint-placeholder-count="3"><div onClick="{{ o.pick }}" data-seg="" data-on="{{ o.on }}">{{ o.label }}</div></sc-for></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Mirror</div></div><div style="display:flex;gap:2px;padding:3px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line)"><sc-for list="{{ mirrorOpts }}" as="o" hint-placeholder-count="2"><div onClick="{{ o.pick }}" data-seg="" data-on="{{ o.on }}">{{ o.label }}</div></sc-for></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Position</div><div style="font-size:12px;color:var(--muted);margin-top:2px">Set by the canvas above. Logical pixels.</div></div><span style="font:500 12.5px/1 var(--mono);color:var(--sub)">{{ selPos }}</span></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Workspaces</div></div><div style="display:flex;gap:2px;padding:3px;border-radius:var(--r);background:var(--elev);border:1px solid var(--line)"><sc-for list="{{ wsOpts }}" as="o" hint-placeholder-count="4"><div onClick="{{ o.pick }}" data-seg="" data-on="{{ o.on }}">{{ o.label }}</div></sc-for></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Custom mode</div><div style="font-size:12px;color:var(--muted);margin-top:2px">A modeline the panel doesn't advertise. Blank uses the list above.</div></div><input value="{{ custom }}" onInput="{{ setCustom }}" placeholder="e.g. 3440x1440@144" style="width:200px;padding:7px 11px;border-radius:var(--r);background:var(--field);border:1px solid var(--line);color:var(--text);font:500 12px/1 var(--mono);outline:none"></div></div></sc-if><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Wallpaper for this screen</div><div style="font-size:12px;color:var(--muted);margin-top:2px">{{ wallLabel }}</div></div><div style="display:flex;gap:8px"><button onClick="{{ setWall }}" data-btn="">Set image…</button><button onClick="{{ resetWall }}" data-btn="">Reset to theme</button></div></div><div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 0 14px;border-top:1px solid var(--line)"><button onClick="{{ applyMon }}" data-btn="primary">Apply</button></div></div><div style="font:700 10.5px/1 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:24px 2px 10px">Night light</div><div style="border:1px solid var(--line);border-radius:var(--r2);background:var(--card);padding:2px 18px"><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Night light</div></div><div onClick="{{ togNight }}" data-sw="{{ nightOn }}"><i></i></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Schedule</div><div style="font-size:12px;color:var(--muted);margin-top:2px">Leave it clear and the switch alone decides.</div></div><div style="display:flex;align-items:center;gap:8px"><input value="{{ from }}" onInput="{{ setFrom }}" style="width:74px;padding:7px 10px;border-radius:var(--r);background:var(--field);border:1px solid var(--line);color:var(--text);font:500 12px/1 var(--mono);text-align:center;outline:none"><span style="color:var(--faint);font-size:12px">→</span><input value="{{ to }}" onInput="{{ setTo }}" style="width:74px;padding:7px 10px;border-radius:var(--r);background:var(--field);border:1px solid var(--line);color:var(--text);font:500 12px/1 var(--mono);text-align:center;outline:none"><button onClick="{{ clearSchedule }}" data-btn="small">Clear</button></div></div><div data-row=""><div style="flex:1"><div style="font-size:13.5px;font-weight:600;color:var(--text)">Colour temperature</div><div style="font-size:12px;color:var(--muted);margin-top:2px">Lower is warmer. 6500 K is daylight; 4000 K is a typical evening setting.</div></div><div style="display:flex;align-items:center;gap:14px;width:250px;flex:none"><input type="range" data-slider="" min="2500" max="6500" step="50" value="{{ temp }}" onInput="{{ setTemp }}"><div style="font:500 12px/1 var(--mono);color:var(--sub);width:54px;text-align:right">{{ tempText }}</div></div></div></div><sc-if value="{{ confirming }}" hint-placeholder-val="{{ false }}"><div style="position:fixed;inset:0;z-index:50;background:rgba(3,6,7,.66);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center"><div style="width:440px;padding:22px;border-radius:var(--r2);background:var(--palette);border:1px solid var(--linex);box-shadow:0 30px 90px -12px rgba(0,0,0,.8)"><div style="font-size:16px;font-weight:700;color:var(--text)">Keep display settings?</div><p style="margin:9px 0 0;font-size:13px;line-height:1.55;color:var(--muted)">Reverting in {{ countdown }} seconds. If the screen is unreadable, wait — it will put itself back. From a terminal: <span style="font:500 12px/1 var(--mono);color:var(--sub)">tezca display reset</span>.</p><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px"><button onClick="{{ doRevert }}" data-btn="">Revert</button><button onClick="{{ doKeep }}" data-btn="primary">Keep</button></div></div></div></sc-if></div></sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const CANVAS_W = 664, CANVAS_H = 230, PAD = 16, SNAP_PX = 12;
+
+const MONS = [
+  { name:'DP-1', desc:'Xiaomi Mi Curved 34"', res:'3440x1440', rate:'165', scale:'1.0', rot:'0', x:0, y:0, enabled:true,
+    modes:{ '3440x1440':['165','120','60'], '2560x1080':['120','60'] }, depth:'auto', vrr:'on', mirror:'off', ws:'odd', wall:'obsidian-teal.jpg', bright:78, ddc:true },
+  { name:'DP-3', desc:'LG UltraGear 27GP850', res:'2560x1440', rate:'144', scale:'1.0', rot:'0', x:3440, y:0, enabled:true,
+    modes:{ '2560x1440':['165','144','60'], '1920x1080':['144','60'] }, depth:'auto', vrr:'fullscreen', mirror:'off', ws:'even', wall:'theme default', bright:64, ddc:true },
+  { name:'DP-2', desc:'Dell U2415 (portrait)', res:'1920x1200', rate:'60', scale:'1.0', rot:'1', x:0, y:3440, enabled:true,
+    modes:{ '1920x1200':['60'], '1600x1200':['60'] }, depth:'auto', vrr:'off', mirror:'off', ws:'auto', wall:'theme default', bright:0, ddc:false }
+];
+
+const ROTS = [['0','None'],['1','90°'],['2','180°'],['3','270°']];
+const SCALES = ['1.0','1.25','1.5','2.0'];
+const DEPTHS = [['auto','Automatic'],['8','8-bit'],['10','10-bit']];
+const VRRS = [['off','Off'],['on','On'],['fullscreen','Fullscreen']];
+const WSETS = [['auto','Automatic'],['odd','Odd'],['even','Even'],['custom','Custom…']];
+
+function logicalSize(m){
+  const [rw, rh] = m.res.split('x').map(Number);
+  const s = parseFloat(m.scale) || 1;
+  const rotated = m.rot === '1' || m.rot === '3';
+  return rotated ? { w: Math.round(rh/s), h: Math.round(rw/s) } : { w: Math.round(rw/s), h: Math.round(rh/s) };
+}
+
+class Component extends DCLogic {
+  state = {
+    mons: MONS.map(m => ({...m})),
+    origin: MONS.map(m => ({ x:m.x, y:m.y })),
+    sel: 0, adv:false, confirming:false, countdown:12, dirty:false,
+    profiles:['desk', 'docked'],
+    night:false, from:'20:00', to:'06:30', temp:4200, custom:''
+  };
+
+  _els = []; _geo = [];
+
+  emit(cmd){ if (this.props.onCmd) this.props.onCmd(cmd); }
+
+  /** Canvas geometry is written straight to the node: it changes on every drag
+   *  frame, so it is a live pixel position rather than anything the template
+   *  could hold as a literal. */
+  paint(i){
+    const el = this._els[i], g = this._geo[i];
+    if (!el || !g) return;
+    el.style.transform = 'translate(' + g.x + 'px,' + g.y + 'px)';
+    el.style.width = g.w + 'px';
+    el.style.height = g.h + 'px';
+  }
+
+  paintAll(){ this._els.forEach((_, i) => this.paint(i)); }
+
+  view(){
+    const CW = this._cw || CANVAS_W;
+    const rs = this.state.mons.map(m => ({ ...logicalSize(m), x:m.x, y:m.y }));
+    const minx = Math.min(...rs.map(r=>r.x)), miny = Math.min(...rs.map(r=>r.y));
+    const maxx = Math.max(...rs.map(r=>r.x+r.w)), maxy = Math.max(...rs.map(r=>r.y+r.h));
+    const ww = Math.max(1, maxx-minx), wh = Math.max(1, maxy-miny);
+    const scale = Math.max(0.0001, Math.min((CW-2*PAD)/ww, (CANVAS_H-2*PAD)/wh));
+    return { scale, ox:(CW-ww*scale)/2 - minx*scale, oy:(CANVAS_H-wh*scale)/2 - miny*scale };
+  }
+
+  snap(i, x, y, tol){
+    const sizes = this.state.mons.map(logicalSize);
+    const { w, h } = sizes[i];
+    const xs = [0], ys = [0];
+    this.state.mons.forEach((m, j) => { if (j===i) return;
+      xs.push(m.x, m.x + sizes[j].w); ys.push(m.y, m.y + sizes[j].h); });
+    const near = (lines, v, extent) => {
+      let best = null, bd = tol + 1;
+      for (const c of lines) { const d = Math.abs(v - c); if (d <= tol && d < bd) { bd = d; best = c; } }
+      if (best !== null) return best;
+      bd = tol + 1;
+      for (const c of lines) { const d = Math.abs(v + extent - c); if (d <= tol && d < bd) { bd = d; best = c - extent; } }
+      return best;
+    };
+    const nx = near(xs, x, w), ny = near(ys, y, h);
+    return [nx === null ? x : nx, ny === null ? y : ny];
+  }
+
+  overlaps(i){
+    const sizes = this.state.mons.map(logicalSize);
+    const a = this.state.mons[i], as = sizes[i];
+    return this.state.mons.some((b, j) => j !== i &&
+      a.x < b.x + sizes[j].w && b.x < a.x + as.w && a.y < b.y + sizes[j].h && b.y < a.y + as.h);
+  }
+
+  beginDrag(i, e){
+    e.stopPropagation();
+    this.setState({ sel:i });
+    const v = this.view();
+    const start = { x:this.state.mons[i].x, y:this.state.mons[i].y, cx:e.clientX, cy:e.clientY };
+    const move = (ev) => {
+      const wantX = Math.round(start.x + (ev.clientX-start.cx)/v.scale);
+      const wantY = Math.round(start.y + (ev.clientY-start.cy)/v.scale);
+      const [x, y] = this.snap(i, wantX, wantY, Math.round(SNAP_PX/v.scale));
+      this.setState(s => { const mons = s.mons.slice(); mons[i] = {...mons[i], x, y}; return { mons, dirty:true }; });
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  }
+
+  nudge(dx, dy){
+    const i = this.state.sel;
+    this.setState(s => { const mons = s.mons.slice(); mons[i] = {...mons[i], x:mons[i].x+dx, y:mons[i].y+dy}; return { mons, dirty:true }; });
+  }
+
+  setMon(patch, cmd){
+    const i = this.state.sel;
+    this.setState(s => { const mons = s.mons.slice(); mons[i] = {...mons[i], ...patch}; return { mons, dirty:true }; });
+    this.emit(cmd);
+  }
+
+  segs(list, current, onPick){
+    return list.map(([val, label]) => ({ label, on: current === val, pick: () => onPick(val) }));
+  }
+
+  renderVals(){
+    const v = this.view();
+    const sel = this.state.sel;
+    const m = this.state.mons[sel];
+
+    const rects = this.state.mons.map((mm, i) => {
+      const s = logicalSize(mm);
+      const geo = { x: Math.round(v.ox + mm.x*v.scale), y: Math.round(v.oy + mm.y*v.scale),
+        w: Math.max(24, Math.round(s.w*v.scale)), h: Math.max(18, Math.round(s.h*v.scale)) };
+      this._geo[i] = geo;
+      return {
+        name: mm.name, detail: mm.enabled ? mm.res + ' · ' + mm.rate + ' Hz' : 'off',
+        small: geo.h < 44 || geo.w < 116,
+        state: !mm.enabled ? 'off' : this.overlaps(i) ? 'over' : (i===sel ? 'sel' : 'idle'),
+        ref: (el) => { this._els[i] = el; if (el) this.paint(i); },
+        down: (e) => this.beginDrag(i, e)
+      };
+    });
+
+    const anyOverlap = this.state.mons.some((_, i) => this.overlaps(i));
+    const moved = this.state.mons.filter((mm, i) => mm.x !== this.state.origin[i].x || mm.y !== this.state.origin[i].y).length;
+
+    const resOpts = Object.keys(m.modes).map(r => ({ label: r.replace('x','×'), on: m.res===r,
+      pick: () => this.setMon({ res:r, rate:m.modes[r][0] }, 'tezca display set '+m.name+' --mode '+r+'@'+m.modes[r][0]) }));
+    const rateOpts = (m.modes[m.res]||[]).map(r => ({ label: r+' Hz', on: m.rate===r,
+      pick: () => this.setMon({ rate:r }, 'tezca display set '+m.name+' --mode '+m.res+'@'+r) }));
+    const scaleOpts = SCALES.map(s => ({ label:s+'×', on:m.scale===s,
+      pick: () => this.setMon({ scale:s }, 'tezca display set '+m.name+' --scale '+s) }));
+    const rotOpts = this.segs(ROTS, m.rot, val => this.setMon({ rot:val }, 'tezca display set '+m.name+' --transform '+val));
+    const depthOpts = this.segs(DEPTHS, m.depth, val => this.setMon({ depth:val }, 'tezca display set '+m.name+' --bitdepth '+val));
+    const vrrOpts = this.segs(VRRS, m.vrr, val => this.setMon({ vrr:val }, 'tezca display set '+m.name+' --vrr '+val));
+    const others = this.state.mons.filter(o => o.name !== m.name).map(o => [o.name, 'Mirror of '+o.name]);
+    const mirrorOpts = this.segs([['off','Off'], ...others], m.mirror, val => this.setMon({ mirror:val }, 'tezca display set '+m.name+' --mirror '+val));
+    const wsOpts = this.segs(WSETS, m.ws, val => this.setMon({ ws:val }, 'tezca display workspace '+val+' '+m.name));
+
+    return {
+      isDisplays: this.props.isDisplays,
+      canvasRef: (el) => {
+        this._canvas = el;
+        if (!el) return;
+        const w = el.clientWidth;
+        if (w && Math.abs(w - (this._cw || 0)) > 1) { this._cw = w; requestAnimationFrame(() => this.forceUpdate()); }
+      },
+      rects,
+      arrangeStatus: anyOverlap ? '⚠ two screens overlap' : moved ? moved + ' moved · not applied' : 'layout matches the compositor',
+      deselect: () => this.setState({ sel:-1 }),
+      tidy: () => {
+        const sizes = this.state.mons.map(logicalSize);
+        const order = this.state.mons.map((_, i) => i).sort((a,b) => this.state.mons[a].x - this.state.mons[b].x || this.state.mons[a].y - this.state.mons[b].y);
+        const tallest = Math.max(...sizes.map(s => s.h));
+        let cursor = 0;
+        const mons = this.state.mons.slice();
+        order.forEach(i => { mons[i] = {...mons[i], x:cursor, y:Math.round((tallest - sizes[i].h)/2)}; cursor += sizes[i].w; });
+        this.setState({ mons, dirty:true });
+        this.emit('tezca display arrange --tidy');
+      },
+      revert: () => { this.setState(s => ({ mons: s.mons.map((mm,i) => ({...mm, ...s.origin[i]})), dirty:false })); this.emit('tezca display reset'); },
+      applyLayout: () => { this.setState({ confirming:true, countdown:12 }); this.emit('tezca display arrange --apply'); },
+      identify: () => this.emit('tezca display identify'),
+
+      hasProfiles: this.state.profiles.length > 0,
+      noProfiles: this.state.profiles.length === 0,
+      profiles: this.state.profiles.map(n => ({ name:n,
+        apply: () => this.emit('tezca display profile apply '+n),
+        remove: () => { this.setState(s => ({ profiles: s.profiles.filter(x => x!==n) })); this.emit('tezca display profile rm '+n); } })),
+      saveProfile: () => { const n = 'profile-'+(this.state.profiles.length+1);
+        this.setState(s => ({ profiles:[...s.profiles, n] })); this.emit('tezca display profile save '+n); },
+
+      selName: m.name, selDesc: m.desc, selEnabled: m.enabled,
+      selPos: m.x + ', ' + m.y,
+      togEnabled: () => this.setMon({ enabled: !m.enabled }, 'tezca display set '+m.name+(m.enabled?' --disable':' --enable')),
+      resOpts, rateOpts, scaleOpts, rotOpts, depthOpts, vrrOpts, mirrorOpts, wsOpts,
+      brightness: m.bright, brightnessText: m.ddc ? m.bright+' %' : '—',
+      ddcHint: m.ddc ? 'Over DDC/CI — the first probe can take a second.' : 'No DDC/CI channel (install ddcutil, or the panel does not support it).',
+      setBrightness: (e) => this.setMon({ bright:Number(e.target.value) }, 'tezca display brightness '+m.name+' '+e.target.value),
+      advOpen: this.state.adv, toggleAdv: () => this.setState(s => ({ adv: !s.adv })),
+      custom: this.state.custom, setCustom: (e) => this.setState({ custom:e.target.value }),
+      wallLabel: m.wall,
+      setWall: () => this.emit('tezca wallpaper set … --monitor '+m.name),
+      resetWall: () => { this.setMon({ wall:'theme default' }, 'tezca wallpaper clear --monitor '+m.name); },
+      applyMon: () => this.setState({ confirming:true, countdown:12 }),
+
+      nightOn: this.state.night,
+      togNight: () => { const on = !this.state.night; this.setState({ night:on }); this.emit('tezca night '+(on?'on':'off')); },
+      from: this.state.from, to: this.state.to,
+      setFrom: (e) => this.setState({ from:e.target.value }), setTo: (e) => this.setState({ to:e.target.value }),
+      clearSchedule: () => { this.setState({ from:'', to:'' }); this.emit('tezca night schedule off'); },
+      temp: this.state.temp, tempText: this.state.temp + ' K',
+      setTemp: (e) => { this.setState({ temp:Number(e.target.value) }); this.emit('tezca night temp '+e.target.value); },
+
+      confirming: this.state.confirming, countdown: this.state.countdown,
+      doKeep: () => { this.setState({ confirming:false, dirty:false, origin: this.state.mons.map(mm => ({x:mm.x,y:mm.y})) }); this.emit('tezca display keep'); },
+      doRevert: () => { this.setState(s => ({ confirming:false, mons: s.mons.map((mm,i) => ({...mm, ...s.origin[i]})) })); this.emit('tezca display reset'); }
+    };
+  }
+
+  componentDidUpdate(_, prev){
+    this.paintAll();
+    if (this.state.confirming && !prev.confirming) {
+      this._t = setInterval(() => {
+        this.setState(s => {
+          if (!s.confirming) return null;
+          if (s.countdown <= 1) { clearInterval(this._t); return { confirming:false, countdown:12, mons: s.mons.map((mm,i) => ({...mm, ...s.origin[i]})) }; }
+          return { countdown: s.countdown - 1 };
+        });
+      }, 1000);
+    }
+    if (!this.state.confirming && prev.confirming) clearInterval(this._t);
+  }
+
+  componentDidMount(){
+    this._k = (e) => {
+      if (!this.props.isDisplays || this.state.sel < 0) return;
+      if (/^Arrow/.test(e.key) && !/INPUT|TEXTAREA/.test((e.target.tagName||''))) {
+        const step = e.shiftKey ? 10 : 1;
+        const d = { ArrowLeft:[-step,0], ArrowRight:[step,0], ArrowUp:[0,-step], ArrowDown:[0,step] }[e.key];
+        if (d) { e.preventDefault(); this.nudge(d[0], d[1]); }
+      }
+    };
+    window.addEventListener('keydown', this._k);
+    this._ro = new ResizeObserver(() => {
+      const w = this._canvas && this._canvas.clientWidth;
+      if (w && Math.abs(w - (this._cw || 0)) > 1) { this._cw = w; this.forceUpdate(); }
+    });
+    if (this._canvas) this._ro.observe(this._canvas);
+    this.paintAll();
+  }
+  componentWillUnmount(){ window.removeEventListener('keydown', this._k); clearInterval(this._t); if (this._ro) this._ro.disconnect(); }
+}
+</script>
+</body>
+</html>

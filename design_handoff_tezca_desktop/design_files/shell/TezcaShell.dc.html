@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<!-- @template name="Tezca Shell" description="The remaining desktop surfaces — dock, launcher, theme picker, notification toasts, lock screen — in obsidian, cyber and the light smoke theme." --><helmet><script src="./ds-base.js"></script><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"><style>*{box-sizing:border-box}body{margin:0;background:#07090a;font-family:Inter,sans-serif}button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}input{font:inherit}::-webkit-scrollbar{width:10px}::-webkit-scrollbar-thumb{background:rgba(139,147,152,.3);border-radius:8px;border:3px solid transparent;background-clip:content-box}::-webkit-scrollbar-track{background:transparent}
+@keyframes shpop{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:none}}@keyframes shslide{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}@keyframes shrise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}@keyframes shpulse{0%,100%{opacity:.9}50%{opacity:.45}}
+[data-shell]{--text:#E8EAED;--sub:#C3C8CC;--muted:#8B9398;--faint:#5A6166;--accent:#3FB8AF;--accentdim:#2A7E78;--onacc:#04100F;--gold:#C9A24B;--urgent:#E06C75;--good:#8FBF6B;--glass:rgba(11,14,15,.72);--glass2:rgba(17,22,24,.94);--line:rgba(139,147,152,.16);--linex:rgba(139,147,152,.26);--hair:rgba(63,184,175,.18);--field:rgba(4,8,9,.45);--hov:rgba(139,147,152,.1);--sel:rgba(63,184,175,.13);--r:12px;--r2:16px;--rsm:9px;--font:Inter,sans-serif;--mono:"JetBrains Mono",monospace;--blur:saturate(1.25) blur(22px);--glow:0 0 14px rgba(63,184,175,.5);--shadow:0 24px 64px rgba(0,0,0,.55);--card:rgba(20,25,27,.5);--desk:#05090a;--deskpage:linear-gradient(170deg,#0a0d0e,#060809);--wall:url(../../wallpapers/obsidian-teal.jpg);--onwall:rgba(232,234,237,.46);--cardbase:rgba(11,14,15,.85);--cardfield:rgba(20,25,27,.7)}
+[data-shell][data-look="cyber"]{--text:#DFF7F2;--sub:#A9DDD5;--muted:#5F8F89;--faint:#3E6A66;--accent:#2BE8C8;--accentdim:#12A48C;--onacc:#031312;--gold:#F0C25A;--urgent:#FF5C7A;--glass:rgba(5,12,13,.78);--glass2:rgba(6,16,17,.97);--line:rgba(43,232,200,.16);--linex:rgba(43,232,200,.34);--hair:rgba(43,232,200,.4);--field:rgba(3,9,10,.6);--sel:rgba(43,232,200,.13);--r:4px;--r2:6px;--rsm:3px;--font:"JetBrains Mono",monospace;--glow:0 0 16px rgba(43,232,200,.75);--card:rgba(10,24,25,.55);--deskpage:linear-gradient(170deg,#04090a,#020506);--wall:url(../../wallpapers/obsidian-teal.jpg);--onwall:rgba(223,247,242,.5);--cardbase:rgba(5,12,13,.85);--cardfield:rgba(10,24,25,.7)}
+[data-shell][data-look="smoke"]{--text:#16191B;--sub:#3A4145;--muted:#6C7479;--faint:#A6AEB2;--accent:#1F8A82;--accentdim:#59B3AC;--onacc:#FFFFFF;--gold:#9C7A22;--urgent:#C0392F;--good:#4F7A32;--glass:rgba(241,244,245,.82);--glass2:rgba(248,250,250,.97);--line:rgba(22,25,27,.1);--linex:rgba(22,25,27,.17);--hair:rgba(31,138,130,.35);--field:rgba(227,233,234,.72);--hov:rgba(22,25,27,.05);--sel:rgba(31,138,130,.13);--blur:saturate(1.1) blur(20px);--glow:0 0 12px rgba(31,138,130,.3);--shadow:0 24px 64px rgba(22,25,27,.18);--card:rgba(255,255,255,.7);--desk:#E3E9EA;--deskpage:linear-gradient(170deg,#F1F4F5,#E3E9EA);--wall:url(../../wallpapers/smoke-light.jpg);--onwall:rgba(22,25,27,.62);--cardbase:rgba(241,244,245,.85);--cardfield:rgba(227,233,234,.7)}
+.shsec{font:700 10.5px/1 var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:34px 2px 11px}
+.shhead{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin:34px 2px 11px}
+.shnote{font-size:12px;line-height:1.55;color:var(--muted);max-width:74ch;margin:0 2px 12px}
+.shstage{position:relative;border-radius:var(--r2);overflow:hidden;border:1px solid var(--line);background:var(--desk) var(--wall) center/cover}
+.shmono{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.shchip{font-family:var(--mono);font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:7px;padding:4px 9px;cursor:pointer;transition:all .13s}
+.shchip:hover{color:var(--text);border-color:var(--linex)}
+.shchip[data-on="true"]{color:var(--accent);border-color:var(--hair);background:var(--sel)}
+[data-look="cyber"] .shchip{border-radius:3px}
+.shscrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(4,8,9,.3),rgba(4,8,9,.06) 42%,rgba(4,8,9,.52))}
+[data-look="smoke"] .shscrim{background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(255,255,255,.04) 42%,rgba(26,29,31,.16))}</style></helmet><div data-shell="" data-look="{{ look }}" data-monitor="{{ monitor }}" style="min-height:100vh;padding:28px 22px 48px;background:var(--deskpage);font-family:var(--font);color:var(--text);-webkit-font-smoothing:antialiased"><div style="max-width:1240px;margin:0 auto"><div style="display:flex;align-items:baseline;justify-content:space-between;gap:20px"><div><h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">tezca-shell</h1><p class="shnote" style="margin-top:7px">The surfaces the bar and Settings point at but never showed: the dock, the launcher, the theme picker, notification toasts, and the lock screen. Same token set, now including the light <span style="font-family:var(--mono);color:var(--sub)">smoke</span> theme.</p></div><span class="shmono" style="white-space:nowrap">5 surfaces</span></div><div class="shhead" style="margin-top:8px"><span class="shsec" style="margin:0">Dock</span><span class="shmono">tezca-dock · dock.toml</span></div><dc-import name="ShellDock" mag="{{ mag }}" pos="{{ dockPos }}" hint-size="100%,300px"></dc-import><div class="shhead"><span class="shsec" style="margin:0">Launcher</span><span class="shmono">SUPER SPACE</span></div><dc-import name="ShellLauncher" hint-size="100%,560px"></dc-import><div class="shhead"><span class="shsec" style="margin:0">Notifications</span><span class="shmono">swaync · toasts</span></div><dc-import name="ShellNotify" hint-size="100%,420px"></dc-import><div class="shhead"><span class="shsec" style="margin:0">Lock &amp; session</span><span class="shmono">hyprlock · SUPER L</span></div><dc-import name="ShellLock" hint-size="100%,520px"></dc-import></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:1400},&quot;look&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;obsidian&quot;,&quot;cyber&quot;,&quot;smoke&quot;],&quot;default&quot;:&quot;obsidian&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;dockPosition&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;bottom&quot;,&quot;left&quot;],&quot;default&quot;:&quot;bottom&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Dock&quot;},&quot;magnify&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Dock&quot;},&quot;monitor&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;wide&quot;,&quot;vertical&quot;],&quot;default&quot;:&quot;wide&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Layout&quot;}}">
+class Component extends DCLogic {
+  renderVals(){
+    return {
+      look: this.props.look || 'obsidian',
+      monitor: this.props.monitor || 'wide',
+      mag: this.props.magnify !== false,
+      dockPos: this.props.dockPosition || 'bottom'
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -12,6 +12,7 @@
 
 use crate::config::{Clutter, Config, Mod, Numerals, Shape, Slot};
 use crate::draw::{self, SharedPalette, Sparkline};
+use crate::icon::{self, Icon};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
 use crate::{
@@ -21,46 +22,61 @@ use crate::{
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
 use gtk4::prelude::*;
-use gtk4::{
-    Align, Box as GtkBox, Button, CenterBox, Image, Label, Orientation, Overlay, Popover, Window,
-};
+use gtk4::{Align, Box as GtkBox, Button, CenterBox, Image, Label, Orientation, Popover, Window};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
-// Nerd Font glyphs — the codepoints carried over from the Waybar layout this
-// bar replaced, plus the redesign additions (brightness/battery/play-pause).
-const G_WIFI: &str = "\u{F05A9}";
-const G_ETH: &str = "\u{F0200}";
-const G_DISC: &str = "\u{F092D}";
-const G_VOL: [&str; 3] = ["\u{F057F}", "\u{F0580}", "\u{F057E}"]; // low / mid / high
-const G_MUTED: &str = "\u{F075F}";
-const G_NOTIF: &str = "\u{F009A}";
-const G_NOTIF_ON: &str = "\u{F0116}";
-const G_POWER: &str = "\u{F0425}";
-const G_GAME: &str = "\u{F02B4}";
-const G_BRIGHT: &str = "\u{F00DF}";
-const G_BATT: &str = "\u{F0079}";
-const G_BATT_CHG: &str = "\u{F0084}";
-const G_AI: &str = "\u{F06A9}"; // nf-md-robot — the AI usage module
-const G_CAM: &str = "\u{F05A0}"; // nf-md-webcam — camera-in-use privacy indicator
-const G_BT: &str = "\u{F00AF}"; // nf-md-bluetooth
-const G_BT_OFF: &str = "\u{F00B2}"; // nf-md-bluetooth_off
-const G_BT_CONN: &str = "\u{F00B1}"; // nf-md-bluetooth_connect
-const G_MIC: &str = "\u{F036C}"; // nf-md-microphone — mic-in-use privacy indicator
-const G_REC: &str = "\u{F044B}"; // nf-md-record — screen recording in progress
-const G_CAFFEINE: &str = "\u{F0176}"; // nf-md-coffee — keep-awake held
-const G_NIGHT: &str = "\u{F0594}"; // nf-md-weather_night — night light active
-const G_WEATHER: &str = "\u{F0599}"; // nf-md-weather_partly_cloudy
-const G_LLM: &str = "\u{F035C}"; // nf-md-memory — the local model in memory
-
 // ===========================================================================
 // Manager
 // ===========================================================================
 
+/// How long to let the output list settle before re-placing the bars. Waking a
+/// multi-monitor desk emits several add/remove events, and re-anchoring against
+/// a half-assembled list only means doing it again.
+const MONITOR_SETTLE_MS: u64 = 400;
+
+/// The outputs that can actually hold a surface right now, as
+/// `(connector, monitor)` — the connector being the identity that outlives the
+/// `GdkMonitor` across a power cycle.
+///
+/// A monitor already invalidated, or still reporting a zero-width geometry, is
+/// on its way in or out; anchoring to one puts the bar nowhere. Skipping it here
+/// is safe because leaving the list is itself an event, so we come back.
+fn live_monitors(display: &gdk::Display) -> Vec<(String, gdk::Monitor)> {
+    let list = display.monitors();
+    let mut out = Vec::new();
+    for i in 0..list.n_items() {
+        let Some(obj) = list.item(i) else { continue };
+        let Ok(monitor) = obj.downcast::<gdk::Monitor>() else { continue };
+        if !monitor.is_valid() || monitor.geometry().width() == 0 {
+            continue;
+        }
+        let name = monitor.connector().map(|s| s.to_string()).unwrap_or_default();
+        out.push((name, monitor));
+    }
+    out
+}
+
 pub struct Bar {
-    surfaces: Vec<Rc<Surface>>,
+    /// One surface per live output. Mutable because the monitor list is: a
+    /// display that sleeps hard enough to drop its link takes its output with
+    /// it, and a surface has to be built for the one that comes back. See
+    /// [`Bar::sync_monitors`].
+    surfaces: RefCell<Vec<Rc<Surface>>>,
+    /// The debounce for [`Bar::schedule_sync`]: the pending pass, and whether
+    /// anything in the current burst asked for a forced re-anchor.
+    sync_pending: RefCell<Option<glib::SourceId>>,
+    sync_force: Cell<bool>,
+    /// Whether SIGUSR1 has hidden the bars, so a surface coming back from a
+    /// sleeping monitor is restored to the state the user actually chose.
+    hidden: Cell<bool>,
+    /// Held so a surface can be built after startup, when a monitor appears.
+    app: gtk4::Application,
+    /// Same, for the two collections `Surface::build` needs.
+    customs: Vec<custom::CustomModule>,
+    shared_state: Shared,
     cfg: Config,
     palette: SharedPalette,
     css: CssStack,
@@ -77,6 +93,10 @@ pub struct Bar {
     /// one never triggers a fetch.
     weather: Rc<RefCell<weather::Snapshot>>,
     battery_history: Rc<RefCell<VecDeque<f64>>>,
+    /// Down/up Mb/s per controls tick, for the network popover's throughput
+    /// chart. Both directions are kept so the chart can scale them together —
+    /// an upload spike has to read as small next to a download that dwarfs it.
+    net_history: Rc<RefCell<VecDeque<(f64, f64)>>>,
     /// The moves the last compaction pass dispatched — if the same plan recurs
     /// (a window that wouldn't move), we skip it rather than loop forever.
     last_compaction: RefCell<Vec<(i32, i32)>>,
@@ -121,18 +141,17 @@ impl Bar {
         let weather_state: Rc<RefCell<weather::Snapshot>> =
             Rc::new(RefCell::new(weather::Snapshot::default()));
         let battery_history: Rc<RefCell<VecDeque<f64>>> = Rc::new(RefCell::new(VecDeque::new()));
+        let net_history: Rc<RefCell<VecDeque<(f64, f64)>>> = Rc::new(RefCell::new(VecDeque::new()));
         let surface_state = Shared {
             throughput: throughput.clone(),
             ai: ai_state.clone(),
             weather: weather_state.clone(),
             battery_history: battery_history.clone(),
+            net_history: net_history.clone(),
         };
 
         let mut surfaces = Vec::new();
-        let monitors = display.monitors();
-        for i in 0..monitors.n_items() {
-            let Some(obj) = monitors.item(i) else { continue };
-            let Ok(monitor) = obj.downcast::<gdk::Monitor>() else { continue };
+        for (_, monitor) in live_monitors(&display) {
             let s = Surface::build(app, &monitor, &cfg, &shared, &surface_state, customs);
             surfaces.push(s);
         }
@@ -153,7 +172,13 @@ impl Bar {
         // backlight, which is what gates the fast brightness-OSD poll below.
         let b0 = sysinfo::brightness();
         let bar = Rc::new(Bar {
-            surfaces,
+            surfaces: RefCell::new(surfaces),
+            sync_pending: RefCell::new(None),
+            sync_force: Cell::new(false),
+            hidden: Cell::new(false),
+            app: app.clone(),
+            customs: customs.to_vec(),
+            shared_state: surface_state,
             cfg,
             palette: shared,
             css,
@@ -166,6 +191,7 @@ impl Bar {
             ai: ai_state,
             weather: weather_state,
             battery_history,
+            net_history,
             last_compaction: RefCell::new(Vec::new()),
             last_audio: RefCell::new(Some((a0.volume, a0.muted))),
             last_brightness: RefCell::new(b0),
@@ -177,17 +203,39 @@ impl Bar {
             last_night_active: RefCell::new(None),
         });
 
-        bar.refresh_hypr();
-        bar.tick_clock();
-        bar.tick_cpu();
-        bar.tick_mem();
-        bar.tick_gpu();
-        bar.tick_controls();
-        bar.tick_bluetooth();
-        bar.tick_session();
-        bar.wire_layout_freeze();
+        bar.reseed();
+        let all = bar.surfaces.borrow().clone();
+        bar.wire_layout_freeze(&all);
+        bar.watch_monitors();
         bar.start_timers();
         bar
+    }
+
+    /// Fill every surface with the state we already hold, from scratch.
+    ///
+    /// Runs at startup and again whenever a surface is added, because a
+    /// freshly built one is blank: its clock reads nothing, its meters are at
+    /// zero, and the poll threads will not speak again until their next
+    /// interval. Everything here is a pure re-render of state the bar already
+    /// has, so calling it spuriously costs a few reads and no correctness.
+    fn reseed(self: &Rc<Self>) {
+        self.refresh_hypr();
+        self.tick_clock();
+        self.tick_cpu();
+        self.tick_mem();
+        self.tick_gpu();
+        self.tick_controls();
+        self.tick_bluetooth();
+        self.tick_session();
+        self.rebuild_tray();
+        // The AI and weather snapshots live behind the same handles the
+        // surfaces read, so replaying them is how a new surface learns what the
+        // poll threads last said. (The LLM and custom modules keep no snapshot;
+        // they redraw on their own next tick.)
+        let ai = self.ai.borrow().clone();
+        self.apply_ai(ai);
+        let weather = self.weather.borrow().clone();
+        self.apply_weather(weather);
     }
 
     /// Install the recurring poll timers, each holding a weak ref so they stop if
@@ -254,7 +302,7 @@ impl Bar {
             return; // unchanged
         }
         *self.last_brightness.borrow_mut() = Some(pct);
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.osd.show_brightness(pct);
         }
     }
@@ -265,7 +313,7 @@ impl Bar {
         if self.cfg.compact {
             self.compact_workspaces(&snap);
         }
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_workspaces(&snap);
             s.set_app(&snap.active.class);
         }
@@ -298,7 +346,7 @@ impl Bar {
 
     /// A submap change (empty = default submap).
     pub fn set_submap(&self, name: &str) {
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_submap(name);
         }
     }
@@ -309,8 +357,11 @@ impl Bar {
             .and_then(|d| d.format(&self.cfg.clock_format).ok())
             .map(|g| g.to_string())
             .unwrap_or_default();
-        for s in &self.surfaces {
-            s.clock_label.set_text(&text);
+        let (date, time) = split_clock(&text);
+        for s in self.surfaces.borrow().iter() {
+            s.clock_label.set_text(date);
+            s.clock_time.set_text(time);
+            s.clock_time.set_visible(!time.is_empty());
         }
     }
 
@@ -322,7 +373,7 @@ impl Bar {
         // situations. Absent (no sensor) simply hides the sub-label.
         let temp =
             sysinfo::cpu_temp().map(|c| format!("{}°", c.round() as i64)).unwrap_or_default();
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.cpu_spark.push(frac);
             s.cpu_val.set_text(&pct_text(pct));
             set_sub(&s.cpu_sub, &temp);
@@ -339,7 +390,7 @@ impl Bar {
         let frac = if d.total_kb > 0.0 { (d.used_kb / d.total_kb).clamp(0.0, 1.0) } else { 0.0 };
         let used = format!("{:.1}G", d.used_kb / 1024.0 / 1024.0);
         let total = format!("/{:.0}", d.total_kb / 1024.0 / 1024.0);
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.mem_spark.push(frac);
             s.mem_val.set_text(&used);
             set_sub(&s.mem_sub, &total);
@@ -359,7 +410,7 @@ impl Bar {
             .map(|p| (p / 100.0).clamp(0.0, 1.0))
             .or_else(sysinfo::gpu);
         let Some(frac) = frac else {
-            for s in &self.surfaces {
+            for s in self.surfaces.borrow().iter() {
                 s.show(&s.gpu_metric, false);
                 s.sys_parts.borrow_mut().2.clear();
                 s.apply_clusters();
@@ -368,7 +419,7 @@ impl Bar {
         };
         let pct = (frac * 100.0).round() as u32;
         let sub = detail.as_ref().map(gpu_sub_text).unwrap_or_default();
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.gpu_spark.push(frac);
             s.gpu_val.set_text(&pct_text(pct));
             set_sub(&s.gpu_sub, &sub);
@@ -394,6 +445,14 @@ impl Bar {
         let microphone = self.has_mic.then(mic::poll).unwrap_or_default();
 
         *self.throughput.borrow_mut() = self.netmeter.borrow_mut().sample(2.0);
+        {
+            let t = self.throughput.borrow();
+            let mut h = self.net_history.borrow_mut();
+            h.push_back((t.down_mbps, t.up_mbps));
+            while h.len() > NET_POINTS {
+                h.pop_front();
+            }
+        }
         // One trace point per tick, capped — the popover shows this session
         // only, which is what it says on the label.
         if let Some(b) = &battery {
@@ -404,7 +463,7 @@ impl Bar {
             }
         }
 
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_audio(&audio);
             s.set_net(&net, &self.throughput.borrow());
             s.set_battery(&battery);
@@ -444,7 +503,7 @@ impl Bar {
             }
         }
 
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_caffeine(caffeine);
             s.set_recording(&rec);
             s.set_night(&night);
@@ -457,7 +516,7 @@ impl Bar {
             return;
         }
         let bt = bluetooth::poll();
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_bluetooth(&bt);
         }
     }
@@ -480,7 +539,7 @@ impl Bar {
             return;
         }
         *self.last_audio.borrow_mut() = Some(now);
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.osd.show(a.volume, a.muted);
         }
     }
@@ -489,16 +548,24 @@ impl Bar {
     pub fn reload_palette(&self) {
         *self.palette.borrow_mut() = Palette::load();
         self.css.reload();
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.repaint_drawn();
         }
     }
 
     /// SIGUSR1 — toggle every bar's visibility (parity with bar-toggle.sh).
+    ///
+    /// The wanted state is tracked rather than read back off the windows: a
+    /// surface parked because its monitor is asleep is already invisible, and
+    /// asking each window what it is doing would let one toggle flip the bars
+    /// out of step with each other.
     pub fn toggle_visibility(&self) {
-        for s in &self.surfaces {
-            let vis = s.window.is_visible();
-            s.window.set_visible(!vis);
+        let hide = !self.hidden.get();
+        self.hidden.set(hide);
+        for s in self.surfaces.borrow().iter() {
+            if !s.detached.get() {
+                s.window.set_visible(!hide);
+            }
         }
     }
 
@@ -508,21 +575,21 @@ impl Bar {
     pub fn apply_weather(&self, snap: weather::Snapshot) {
         *self.weather.borrow_mut() = snap;
         let snap = self.weather.borrow();
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_weather(&snap);
         }
     }
 
     /// Apply an Ollama status from the poll thread.
     pub fn apply_llm(&self, st: llm::Status) {
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_llm(&st);
         }
     }
 
     /// Apply a generation rate pushed by the AI panel. Zero means it stopped.
     pub fn apply_llm_rate(&self, tps: f64) {
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_llm_rate(tps);
         }
     }
@@ -538,14 +605,14 @@ impl Bar {
         let empty = snap.is_empty();
         let (warn, crit) = (self.cfg.ai.warn, self.cfg.ai.critical);
         *self.ai.borrow_mut() = snap;
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_ai(pct, resets_at, empty, warn, crit);
         }
     }
 
     /// Apply one custom-module poll result to every surface that hosts it.
     pub fn apply_custom(&self, out: custom::Output) {
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             s.set_custom(&out);
         }
     }
@@ -561,6 +628,132 @@ impl Bar {
         self.rebuild_tray();
     }
 
+    /// Watch the display's output list and re-place the bars when it changes.
+    ///
+    /// This is what makes a monitor power-cycle survivable. A display that
+    /// sleeps deeply enough drops its link, and the compositor destroys that
+    /// output — but a layer surface anchored to it is not destroyed with it.
+    /// Hyprland re-homes the orphan onto a surviving monitor, which is why
+    /// every bar ends up stacked on the first screen. Nothing moves them back
+    /// when the output returns: the surface is still perfectly happy, just on
+    /// the wrong monitor, so the correction has to be ours.
+    fn watch_monitors(self: &Rc<Self>) {
+        let Some(display) = gdk::Display::default() else { return };
+        let weak = Rc::downgrade(self);
+        display.monitors().connect_items_changed(move |_, _, _, _| {
+            if let Some(b) = weak.upgrade() {
+                b.schedule_sync(false);
+            }
+        });
+    }
+
+    /// Queue a [`Bar::sync_monitors`] for once the output list stops moving.
+    ///
+    /// Waking a desk emits a burst — a removal and an addition per output, from
+    /// two independent sources (GDK's list and Hyprland's event socket), and two
+    /// screens rarely come back in the same instant. Coalescing buys one
+    /// re-anchor at the end instead of one per event, and since the sync
+    /// reconciles the whole list rather than applying a delta, only the last
+    /// pass has to be right. A `force` asked for by any event in the burst
+    /// carries through to that pass.
+    pub fn schedule_sync(self: &Rc<Self>, force: bool) {
+        if force {
+            self.sync_force.set(true);
+        }
+        if let Some(id) = self.sync_pending.borrow_mut().take() {
+            id.remove();
+        }
+        let weak = Rc::downgrade(self);
+        let id = glib::timeout_add_local_once(
+            std::time::Duration::from_millis(MONITOR_SETTLE_MS),
+            move || {
+                let Some(b) = weak.upgrade() else { return };
+                *b.sync_pending.borrow_mut() = None;
+                b.sync_monitors(b.sync_force.replace(false));
+            },
+        );
+        *self.sync_pending.borrow_mut() = Some(id);
+    }
+
+    /// Reconcile the surfaces against the live outputs. Idempotent.
+    ///
+    /// Keyed on the connector name (`DP-1`), which is the only identity that
+    /// survives an output being destroyed and recreated — the `GdkMonitor` is a
+    /// fresh object each time, so holding one would be holding a corpse.
+    ///
+    /// A surface whose output has gone is unmapped and kept, not destroyed.
+    /// Destroying a layer-shell window after its output is already gone takes
+    /// GDK down with it (`gdk_surface_get_display` asserts, then the process
+    /// dies), and a parked surface is the cheaper answer anyway: the monitor
+    /// that just went to sleep is overwhelmingly likely to come back, and
+    /// re-anchoring it costs nothing next to rebuilding every widget.
+    ///
+    /// `force` re-anchors even when the monitor object looks unchanged. The
+    /// display-side signal never fires for a compositor that shuffles layer
+    /// surfaces without dropping the output, which is what the Hyprland
+    /// `monitoradded`/`monitorremoved` events are routed here to cover.
+    fn sync_monitors(self: &Rc<Self>, force: bool) {
+        let Some(display) = gdk::Display::default() else { return };
+        let live = live_monitors(&display);
+        // Every output down at once (both asleep, or mid-transition) is not a
+        // reason to touch anything — the next event brings them back.
+        if live.is_empty() {
+            return;
+        }
+
+        // Park the surfaces whose output has gone. Left mapped they are what the
+        // user actually sees go wrong: the compositor re-homes an orphaned layer
+        // surface onto a surviving monitor, so its bar appears stacked under the
+        // one that belongs there.
+        for s in self.surfaces.borrow().iter() {
+            if !live.iter().any(|(name, _)| *name == s.output) && !s.detached.get() {
+                s.detached.set(true);
+                s.window.set_visible(false);
+                s.osd.park();
+            }
+        }
+
+        // Re-anchor what is live, and build a surface for any output that hasn't
+        // got one. Setting the monitor on a layer surface re-maps it onto that
+        // output — the move back the compositor never makes.
+        let mut fresh: Vec<Rc<Surface>> = Vec::new();
+        let mut reattached = false;
+        for (name, monitor) in &live {
+            let existing = self.surfaces.borrow().iter().find(|s| s.output == *name).cloned();
+            let Some(s) = existing else {
+                fresh.push(Surface::build(
+                    &self.app,
+                    monitor,
+                    &self.cfg,
+                    &self.palette,
+                    &self.shared_state,
+                    &self.customs,
+                ));
+                continue;
+            };
+            // A surface already on this exact monitor object is where it
+            // belongs; re-mapping it would flash a bar that never moved.
+            let placed = s.window.monitor().is_some_and(|cur| cur.is_valid() && cur == *monitor);
+            if force || !placed || s.detached.get() {
+                s.window.set_monitor(Some(monitor));
+                s.osd.set_output(monitor);
+            }
+            if s.detached.replace(false) {
+                // Back on its own monitor. Respect a bar the user has hidden
+                // with SIGUSR1 — a monitor waking up is not a reason to undo it.
+                s.window.set_visible(!self.hidden.get());
+                reattached = true;
+            }
+        }
+
+        if fresh.is_empty() && !reattached {
+            return;
+        }
+        self.wire_layout_freeze(&fresh);
+        self.surfaces.borrow_mut().extend(fresh);
+        self.reseed();
+    }
+
     /// Hold the bar's layout still for as long as a popover is open.
     ///
     /// GTK keeps a popover glued to the widget it is anchored to, so anything
@@ -571,8 +764,12 @@ impl Bar {
     ///
     /// Both handlers hold weak refs: the popovers are owned by the surface, so
     /// strong ones would be a cycle that never drops.
-    fn wire_layout_freeze(self: &Rc<Self>) {
-        for s in &self.surfaces {
+    ///
+    /// Takes the surfaces explicitly rather than reading `self.surfaces`, so a
+    /// monitor arriving late wires only its own popovers — running over the
+    /// whole list again would give every existing popover a second handler.
+    fn wire_layout_freeze(self: &Rc<Self>, surfaces: &[Rc<Surface>]) {
+        for s in surfaces {
             for pop in &s.popovers {
                 let sw = Rc::downgrade(s);
                 pop.connect_show(move |_| {
@@ -597,7 +794,7 @@ impl Bar {
     /// Rebuild each surface's tray cluster from the current item + menu state.
     fn rebuild_tray(self: &Rc<Self>) {
         let items = self.tray_items.borrow();
-        for s in &self.surfaces {
+        for s in self.surfaces.borrow().iter() {
             // A rebuild destroys and recreates every icon, so a tray menu open
             // over one would lose the very widget it is anchored to — the icon
             // an app refreshes precisely when you are about to click it. Defer;
@@ -697,6 +894,11 @@ struct Surface {
     window: Window,
     output: String,
     compact: bool,
+    /// True while this surface's output is gone (a monitor asleep or unplugged).
+    /// It is unmapped rather than destroyed — tearing down a layer-shell window
+    /// whose output has already been destroyed kills GDK — and re-anchored when
+    /// the connector comes back. See [`Bar::sync_monitors`].
+    detached: Cell<bool>,
     bar_box: CenterBox,
 
     ws_box: GtkBox,
@@ -731,17 +933,17 @@ struct Surface {
     gpu_metric: GtkBox,
 
     net_ctl: Button,
-    net_glyph: Label,
+    net_glyph: icon::IconArea,
     net_val: Label,
     net_sub: Label,
     bt_ctl: Button,
-    bt_glyph: Label,
+    bt_glyph: icon::IconArea,
     bt_val: Label,
     rec_box: GtkBox,
     caffeine_box: GtkBox,
     night_box: GtkBox,
 
-    vol_glyph: Label,
+    vol_glyph: icon::IconArea,
     vol_val: Label,
     vol_ctl: Button,
 
@@ -749,15 +951,16 @@ struct Surface {
     bri_val: Label,
 
     bat_ctl: GtkBox,
-    bat_glyph: Label,
+    bat_glyph: icon::IconArea,
     bat_val: Label,
     bat_sub: Label,
 
     bell_btn: Button,
-    bell_glyph: Label,
-    bell_dot: GtkBox,
+    bell_glyph: icon::IconArea,
+    bell_count: Label,
 
     clock_label: Label,
+    clock_time: Label,
 
     gamemode_box: GtkBox,
     tray_box: GtkBox,
@@ -831,6 +1034,8 @@ struct Shared {
     weather: Rc<RefCell<weather::Snapshot>>,
     /// Charge fractions recorded since launch, for the battery popover's trace.
     battery_history: Rc<RefCell<VecDeque<f64>>>,
+    /// Down/up Mb/s recorded since launch, for the network popover's chart.
+    net_history: Rc<RefCell<VecDeque<(f64, f64)>>>,
 }
 
 impl Surface {
@@ -846,6 +1051,7 @@ impl Surface {
         let ai_state = shared.ai.clone();
         let weather_state = shared.weather.clone();
         let battery_history = shared.battery_history.clone();
+        let net_history = shared.net_history.clone();
         let output = monitor.connector().map(|s| s.to_string()).unwrap_or_default();
         let compact = monitor.geometry().width() < cfg.compact_width;
         let ws_assigned = cfg.ws_assign.get(&output).cloned();
@@ -872,7 +1078,7 @@ impl Surface {
         right.set_halign(Align::End);
 
         // Tezca mirror menu (drawn glyph inside a flat button).
-        let mirror = draw::mirror_glyph(pal, 16.0);
+        let mirror = icon::icon(pal, Icon::Mirror).area;
         mirror.set_valign(Align::Center);
         let mirror_btn = Button::new();
         mirror_btn.add_css_class("mirror");
@@ -938,9 +1144,22 @@ impl Surface {
         np_box.append(&np_text);
         np_box.append(&eq);
         np_box.set_visible(false);
-        // Click = play/pause; scroll = seek.
+        // Left click opens the transport popover, middle click keeps the
+        // one-gesture play/pause the pill has always had, scroll seeks. One
+        // all-buttons gesture rather than a Button, for the same reason the
+        // tray items use one: a GtkButton's built-in primary gesture swallows
+        // the secondary and middle ones.
+        let np_pop = popovers::nowplaying_detail(&np_box, pal);
         let click = gtk4::GestureClick::new();
-        click.connect_released(|_, _, _, _| nowplaying::play_pause());
+        click.set_button(0);
+        {
+            let pop = np_pop.clone();
+            click.connect_released(move |g, _, _, _| match g.current_button() {
+                gdk::BUTTON_MIDDLE => nowplaying::play_pause(),
+                gdk::BUTTON_PRIMARY => pop.popup(),
+                _ => {}
+            });
+        }
         np_box.add_controller(click);
         let scroll = gtk4::EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
         scroll.connect_scroll(|_, _, dy| {
@@ -953,9 +1172,10 @@ impl Surface {
         // Game mode (hidden unless on).
         let gamemode_box = GtkBox::new(Orientation::Horizontal, 0);
         gamemode_box.add_css_class("gamemode");
-        let game_glyph = Label::new(Some(G_GAME));
-        game_glyph.add_css_class("glyph");
-        gamemode_box.append(&game_glyph);
+        let game_glyph = icon::glowing_icon(pal, Icon::GameMode);
+        game_glyph.area.add_css_class("glyph");
+        game_glyph.set_glow(true);
+        gamemode_box.append(&game_glyph.area);
         gamemode_box.set_visible(false);
 
         // Camera-in-use privacy indicator — a lone webcam glyph, hidden until an
@@ -963,9 +1183,10 @@ impl Surface {
         let camera_box = GtkBox::new(Orientation::Horizontal, 0);
         camera_box.add_css_class("camera");
         camera_box.set_valign(Align::Center);
-        let camera_glyph = Label::new(Some(G_CAM));
-        camera_glyph.add_css_class("glyph");
-        camera_box.append(&camera_glyph);
+        let camera_glyph = icon::glowing_icon(pal, Icon::Camera);
+        camera_glyph.area.add_css_class("glyph");
+        camera_glyph.set_glow(true);
+        camera_box.append(&camera_glyph.area);
         camera_box.set_visible(false);
         camera_box.set_has_tooltip(true);
 
@@ -974,9 +1195,10 @@ impl Surface {
         let mic_box = GtkBox::new(Orientation::Horizontal, 0);
         mic_box.add_css_class("mic");
         mic_box.set_valign(Align::Center);
-        let mic_glyph = Label::new(Some(G_MIC));
-        mic_glyph.add_css_class("glyph");
-        mic_box.append(&mic_glyph);
+        let mic_glyph = icon::glowing_icon(pal, Icon::Mic);
+        mic_glyph.area.add_css_class("glyph");
+        mic_glyph.set_glow(true);
+        mic_box.append(&mic_glyph.area);
         mic_box.set_visible(false);
         mic_box.set_has_tooltip(true);
 
@@ -986,9 +1208,10 @@ impl Surface {
         let rec_box = GtkBox::new(Orientation::Horizontal, 0);
         rec_box.add_css_class("recording");
         rec_box.set_valign(Align::Center);
-        let rec_glyph = Label::new(Some(G_REC));
-        rec_glyph.add_css_class("glyph");
-        rec_box.append(&rec_glyph);
+        let rec_glyph = icon::glowing_icon(pal, Icon::Recording);
+        rec_glyph.area.add_css_class("glyph");
+        rec_glyph.set_glow(true);
+        rec_box.append(&rec_glyph.area);
         rec_box.set_visible(false);
         rec_box.set_has_tooltip(true);
 
@@ -997,9 +1220,9 @@ impl Surface {
         let caffeine_box = GtkBox::new(Orientation::Horizontal, 0);
         caffeine_box.add_css_class("caffeine");
         caffeine_box.set_valign(Align::Center);
-        let caffeine_glyph = Label::new(Some(G_CAFFEINE));
-        caffeine_glyph.add_css_class("glyph");
-        caffeine_box.append(&caffeine_glyph);
+        let caffeine_glyph = icon::icon(pal, Icon::Caffeine);
+        caffeine_glyph.area.add_css_class("glyph");
+        caffeine_box.append(&caffeine_glyph.area);
         caffeine_box.set_visible(false);
         caffeine_box.set_has_tooltip(true);
         {
@@ -1024,9 +1247,9 @@ impl Surface {
         let night_box = GtkBox::new(Orientation::Horizontal, 0);
         night_box.add_css_class("night");
         night_box.set_valign(Align::Center);
-        let night_glyph = Label::new(Some(G_NIGHT));
-        night_glyph.add_css_class("glyph");
-        night_box.append(&night_glyph);
+        let night_glyph = icon::icon(pal, Icon::Night);
+        night_glyph.area.add_css_class("glyph");
+        night_box.append(&night_glyph.area);
         night_box.set_visible(false);
         night_box.set_has_tooltip(true);
         {
@@ -1049,8 +1272,8 @@ impl Surface {
         let ai_box = GtkBox::new(Orientation::Horizontal, 7);
         ai_box.add_css_class("ai");
         ai_box.set_valign(Align::Center);
-        let ai_glyph = Label::new(Some(G_AI));
-        ai_glyph.add_css_class("glyph");
+        let ai_glyph = icon::icon(pal, Icon::AiUsage);
+        ai_glyph.area.add_css_class("glyph");
         let ai_val = Label::new(None);
         ai_val.add_css_class("ai-val");
         // How long until the window resets. "68%" alone does not tell you
@@ -1058,7 +1281,7 @@ impl Surface {
         let ai_sub = Label::new(None);
         ai_sub.add_css_class("control-sub");
         ai_sub.set_visible(false);
-        ai_box.append(&ai_glyph);
+        ai_box.append(&ai_glyph.area);
         ai_box.append(&ai_val);
         ai_box.append(&ai_sub);
         ai_box.set_visible(false);
@@ -1070,14 +1293,14 @@ impl Surface {
         let weather_box = GtkBox::new(Orientation::Horizontal, 7);
         weather_box.add_css_class("weather");
         weather_box.set_valign(Align::Center);
-        let weather_glyph = Label::new(Some(G_WEATHER));
-        weather_glyph.add_css_class("glyph");
+        let weather_glyph = icon::icon(pal, Icon::Weather);
+        weather_glyph.area.add_css_class("glyph");
         let weather_val = Label::new(None);
         weather_val.add_css_class("control-val");
         let weather_sub = Label::new(None);
         weather_sub.add_css_class("control-sub");
         weather_sub.set_visible(false);
-        weather_box.append(&weather_glyph);
+        weather_box.append(&weather_glyph.area);
         weather_box.append(&weather_val);
         weather_box.append(&weather_sub);
         weather_box.set_visible(false);
@@ -1093,8 +1316,8 @@ impl Surface {
         llm_box.add_css_class("llm");
         llm_box.add_css_class("clickable");
         llm_box.set_valign(Align::Center);
-        let llm_glyph = Label::new(Some(G_LLM));
-        llm_glyph.add_css_class("glyph");
+        let llm_glyph = icon::icon(pal, Icon::Llm);
+        llm_glyph.area.add_css_class("glyph");
         let llm_val = Label::new(None);
         llm_val.add_css_class("control-val");
         // The accelerator badge, not a generic sub-value: it carries its own
@@ -1109,7 +1332,7 @@ impl Surface {
         let llm_tps = Label::new(None);
         llm_tps.add_css_class("control-sub");
         llm_tps.set_visible(false);
-        llm_box.append(&llm_glyph);
+        llm_box.append(&llm_glyph.area);
         llm_box.append(&llm_val);
         llm_box.append(&llm_sub);
         llm_box.append(&llm_tps);
@@ -1161,24 +1384,21 @@ impl Surface {
         // worth having — which network, and how fast it is moving — do not fit
         // side by side without pushing the rest of the cluster off a 2560px
         // monitor.
-        let (net_ctl, net_glyph, net_val, net_sub) = control_button_stacked();
-        net_glyph.set_text(G_WIFI);
-        let net_pop = popovers::network(&net_ctl, throughput.clone());
+        let (net_ctl, net_glyph, net_val, net_sub) = control_button_stacked(pal, Icon::Wifi);
+        let net_pop = popovers::network(&net_ctl, throughput.clone(), net_history);
         let p = net_pop.clone();
         net_ctl.connect_clicked(move |_| p.popup());
 
         // Bluetooth (button → device popover). Hidden until the first poll says
         // there is an adapter, so a machine without one shows nothing at all.
-        let (bt_ctl, bt_glyph, bt_val) = control_button();
-        bt_glyph.set_text(G_BT);
+        let (bt_ctl, bt_glyph, bt_val) = control_button(pal, Icon::Bluetooth);
         bt_ctl.set_visible(false);
         let bt_pop = popovers::bluetooth(&bt_ctl);
         let p = bt_pop.clone();
         bt_ctl.connect_clicked(move |_| p.popup());
 
         // Volume (button → mixer popover).
-        let (vol_ctl, vol_glyph, vol_val) = control_button();
-        vol_glyph.set_text(G_VOL[2]);
+        let (vol_ctl, vol_glyph, vol_val) = control_button(pal, Icon::VolumeHigh);
         let mix_pop = popovers::mixer(&vol_ctl);
         let p = mix_pop.clone();
         vol_ctl.connect_clicked(move |_| p.popup());
@@ -1187,11 +1407,11 @@ impl Surface {
         let bri_ctl = GtkBox::new(Orientation::Horizontal, 6);
         bri_ctl.add_css_class("control");
         bri_ctl.set_valign(Align::Center);
-        let bri_glyph = Label::new(Some(G_BRIGHT));
-        bri_glyph.add_css_class("glyph");
+        let bri_glyph = icon::icon(pal, Icon::Brightness);
+        bri_glyph.area.add_css_class("glyph");
         let bri_val = Label::new(None);
         bri_val.add_css_class("control-val");
-        bri_ctl.append(&bri_glyph);
+        bri_ctl.append(&bri_glyph.area);
         bri_ctl.append(&bri_val);
         bri_ctl.set_visible(false);
 
@@ -1199,35 +1419,35 @@ impl Surface {
         let bat_ctl = GtkBox::new(Orientation::Horizontal, 7);
         bat_ctl.add_css_class("control");
         bat_ctl.set_valign(Align::Center);
-        let bat_glyph = Label::new(Some(G_BATT));
-        bat_glyph.add_css_class("glyph");
+        let bat_glyph = icon::icon(pal, Icon::Battery);
+        bat_glyph.area.add_css_class("glyph");
         let bat_val = Label::new(None);
         bat_val.add_css_class("control-val");
         let bat_sub = Label::new(None);
         bat_sub.add_css_class("control-sub");
         bat_sub.set_visible(false);
-        bat_ctl.append(&bat_glyph);
+        bat_ctl.append(&bat_glyph.area);
         bat_ctl.append(&bat_val);
         bat_ctl.append(&bat_sub);
         bat_ctl.set_visible(false);
         let bat_pop = popovers::battery_detail(&bat_ctl, battery_history);
         attach_detail(&bat_ctl, bat_pop.clone());
 
-        // Notification bell with an urgent dot badge.
-        let bell_overlay = Overlay::new();
-        let bell_glyph = Label::new(Some(G_NOTIF));
-        bell_glyph.add_css_class("glyph");
-        bell_overlay.set_child(Some(&bell_glyph));
-        let bell_dot = GtkBox::new(Orientation::Horizontal, 0);
-        bell_dot.add_css_class("notif-dot");
-        bell_dot.set_halign(Align::End);
-        bell_dot.set_valign(Align::Start);
-        bell_dot.set_visible(false);
-        bell_overlay.add_overlay(&bell_dot);
+        // Notification bell. The badge carries the count rather than a bare
+        // dot: "something happened" is a much weaker answer than "three things
+        // happened", and the glyph already changes shape when it is non-zero.
+        let bell_row = GtkBox::new(Orientation::Horizontal, 6);
+        let bell_glyph = icon::icon(pal, Icon::Bell);
+        bell_glyph.area.add_css_class("glyph");
+        bell_row.append(&bell_glyph.area);
+        let bell_count = Label::new(None);
+        bell_count.add_css_class("notif-count");
+        bell_count.set_visible(false);
+        bell_row.append(&bell_count);
         let bell_btn = Button::new();
         bell_btn.add_css_class("bell");
         bell_btn.set_valign(Align::Center);
-        bell_btn.set_child(Some(&bell_overlay));
+        bell_btn.set_child(Some(&bell_row));
         bell_btn.connect_clicked(|_| notify::toggle_panel());
         let bell_right = gtk4::GestureClick::new();
         bell_right.set_button(gdk::BUTTON_SECONDARY);
@@ -1238,22 +1458,33 @@ impl Surface {
         let clock_btn = Button::new();
         clock_btn.add_css_class("clock");
         clock_btn.set_valign(Align::Center);
+        // Two labels, not one. The design sets the date in Inter and the time in
+        // JetBrains Mono with tabular figures — the time is the part that
+        // changes, and proportional digits make it shuffle sideways every
+        // minute. `clock_format`'s shipped default separates the two with a run
+        // of spaces, which is what `split_clock` looks for; a custom format
+        // without one keeps the whole string in the date's font rather than
+        // guessing where the time starts.
+        let clock_row = GtkBox::new(Orientation::Horizontal, 9);
+        clock_row.set_valign(Align::Center);
         let clock_label = Label::new(None);
-        clock_btn.set_child(Some(&clock_label));
-        let cal_pop = popovers::calendar(&clock_btn);
+        let clock_time = Label::new(None);
+        clock_time.add_css_class("clock-time");
+        clock_time.set_visible(false);
+        clock_row.append(&clock_label);
+        clock_row.append(&clock_time);
+        clock_btn.set_child(Some(&clock_row));
+        let cal_pop = popovers::calendar(&clock_btn, Rc::new(cfg.clock_zones.clone()));
         let p = cal_pop.clone();
         clock_btn.connect_clicked(move |_| p.popup());
 
-        // Power → wlogout.
+        // Power → the session menu (which still offers wlogout as its last row).
         let power_btn = Button::new();
         power_btn.add_css_class("power");
-        power_btn.set_child(Some(&Label::new(Some(G_POWER))));
-        power_btn.connect_clicked(|_| {
-            let _ = std::process::Command::new("sh")
-                .arg("-c")
-                .arg("uwsm app -- wlogout -b 4 || wlogout -b 4")
-                .spawn();
-        });
+        power_btn.set_child(Some(&icon::icon(pal, Icon::Power).area));
+        let session_pop = popovers::session_menu(&power_btn);
+        let p = session_pop.clone();
+        power_btn.connect_clicked(move |_| p.popup());
 
         // ── Custom (community/user exec) modules ─────────────────────────
         // Build one widget per discovered manifest, keyed by name, so a
@@ -1269,10 +1500,10 @@ impl Surface {
         // Each is a chip that stands in for a run of modules, plus the box the
         // run actually lives in. Clicking either swaps which one is showing;
         // the members keep their own auto-hide logic untouched inside the box.
-        let (priv_chip, priv_chip_val) = cluster_chip("", "priv-chip", 7);
+        let (priv_chip, priv_chip_val) = cluster_chip(pal, "", "priv-chip", 7);
         let priv_box = GtkBox::new(Orientation::Horizontal, 0);
         priv_box.add_css_class("cluster");
-        let (sys_chip, sys_chip_val) = cluster_chip(G_SYS_LABEL, "sys-chip", 9);
+        let (sys_chip, sys_chip_val) = cluster_chip(pal, G_SYS_LABEL, "sys-chip", 9);
         let sys_box = GtkBox::new(Orientation::Horizontal, 0);
         sys_box.add_css_class("cluster");
 
@@ -1378,8 +1609,8 @@ impl Surface {
         // Under `all` there is nothing to fold back into, so the glyph would be
         // an unexplained button offering a mode the user did not pick.
         let collapsible = cfg.clutter == Clutter::Grouped;
-        let priv_collapse = collapse_button();
-        let sys_collapse = collapse_button();
+        let priv_collapse = collapse_button(pal);
+        let sys_collapse = collapse_button(pal);
         if has_priv && collapsible {
             priv_box.append(&priv_collapse);
         }
@@ -1419,12 +1650,13 @@ impl Surface {
 
         // This monitor's volume OSD lives in its own overlay-layer surface so it
         // can float mid-screen independent of the bar strip.
-        let osd = osd::Osd::build(app, monitor, cfg.osd_timeout_ms);
+        let osd = osd::Osd::build(app, monitor, pal, cfg.osd_timeout_ms);
 
         let surface = Rc::new(Surface {
             window,
             output,
             compact,
+            detached: Cell::new(false),
             bar_box,
             ws_box,
             ws_assigned,
@@ -1469,8 +1701,9 @@ impl Surface {
             bat_sub,
             bell_btn,
             bell_glyph,
-            bell_dot,
+            bell_count,
             clock_label,
+            clock_time,
             gamemode_box,
             tray_box,
             camera_box,
@@ -1656,7 +1889,7 @@ impl Surface {
 
     fn set_audio(&self, a: &sysinfo::Audio) {
         if a.muted {
-            self.vol_glyph.set_text(G_MUTED);
+            self.vol_glyph.set(Icon::VolumeMuted);
             set_pct(&self.vol_val, None);
             self.vol_ctl.add_css_class("muted");
         } else {
@@ -1665,7 +1898,7 @@ impl Surface {
                 33..=66 => 1,
                 _ => 2,
             };
-            self.vol_glyph.set_text(G_VOL[idx]);
+            self.vol_glyph.set([Icon::VolumeLow, Icon::VolumeMid, Icon::VolumeHigh][idx]);
             set_pct(&self.vol_val, Some(a.volume));
             self.vol_ctl.remove_css_class("muted");
         }
@@ -1680,17 +1913,17 @@ impl Surface {
         self.net_ctl.remove_css_class("disconnected");
         match n {
             Net::Wifi { ssid, .. } => {
-                self.net_glyph.set_text(G_WIFI);
+                self.net_glyph.set(Icon::Wifi);
                 self.net_val.set_text(if ssid.is_empty() { "Wi-Fi" } else { ssid });
                 set_sub(&self.net_sub, &rate_text(t));
             }
             Net::Ethernet { .. } => {
-                self.net_glyph.set_text(G_ETH);
+                self.net_glyph.set(Icon::Ethernet);
                 self.net_val.set_text("Wired");
                 set_sub(&self.net_sub, &rate_text(t));
             }
             Net::Disconnected => {
-                self.net_glyph.set_text(G_DISC);
+                self.net_glyph.set(Icon::Disconnected);
                 self.net_val.set_text("Offline");
                 set_sub(&self.net_sub, "");
                 self.net_ctl.add_css_class("disconnected");
@@ -1701,7 +1934,7 @@ impl Surface {
     fn set_battery(&self, b: &Option<sysinfo::Battery>) {
         match b {
             Some(b) => {
-                self.bat_glyph.set_text(if b.charging { G_BATT_CHG } else { G_BATT });
+                self.bat_glyph.set(if b.charging { Icon::BatteryCharging } else { Icon::Battery });
                 self.bat_val.set_text(&pct_text(b.percent));
                 // Time is the number you actually plan around; the percentage
                 // only stands in for it. Absent while resting on AC.
@@ -1725,13 +1958,20 @@ impl Surface {
 
     fn set_bell(&self, s: &notify::BellState) {
         if s.unread > 0 {
-            self.bell_glyph.set_text(G_NOTIF_ON);
+            self.bell_glyph.set(Icon::BellUnread);
             self.bell_btn.add_css_class("unread");
-            self.bell_dot.set_visible(true);
+            // Past two digits the badge would push the whole right cluster
+            // along; at that point the exact number has stopped being useful.
+            self.bell_count.set_text(&if s.unread > 99 {
+                "99+".to_string()
+            } else {
+                s.unread.to_string()
+            });
+            self.bell_count.set_visible(true);
         } else {
-            self.bell_glyph.set_text(G_NOTIF);
+            self.bell_glyph.set(Icon::Bell);
             self.bell_btn.remove_css_class("unread");
-            self.bell_dot.set_visible(false);
+            self.bell_count.set_visible(false);
         }
     }
 
@@ -1939,10 +2179,10 @@ impl Surface {
             return;
         }
         let connected = !b.connected.is_empty();
-        self.bt_glyph.set_text(match (b.powered, connected) {
-            (false, _) => G_BT_OFF,
-            (true, false) => G_BT,
-            (true, true) => G_BT_CONN,
+        self.bt_glyph.set(match (b.powered, connected) {
+            (false, _) => Icon::BluetoothOff,
+            (true, false) => Icon::Bluetooth,
+            (true, true) => Icon::BluetoothConnected,
         });
         // The battery of a connected headset is the one number worth the space —
         // named, because with two devices paired "82%" alone leaves you guessing
@@ -2017,13 +2257,6 @@ const BATTERY_POINTS: usize = 60;
 /// At the 2-second controls tick that is the last ~48 seconds, which is the
 /// window in which "is something downloading right now" is a live question.
 const NET_POINTS: usize = 24;
-/// The chevron on a cluster chip — down to open a collapsed run, and the
-/// collapse control that closes it again.
-const G_EXPAND: &str = "\u{F0140}"; // nf-md-chevron_down
-                                    // Deliberately the mirror of G_EXPAND rather than a dedicated "collapse" icon:
-                                    // the pair reads as one control in two states, and chevron_up is in every Nerd
-                                    // Font build, which arrow_collapse_horizontal is not.
-const G_COLLAPSE: &str = "\u{F0143}"; // nf-md-chevron_up
 
 /// Open (or close) the SUPER+I lateral panel.
 ///
@@ -2039,7 +2272,7 @@ fn open_llm_panel() {
 /// `gap` is per-chip rather than shared: the SYS chip's summary is a run of
 /// numbers separated by interpuncts and needs more air between them than the
 /// privacy chip's dot-and-phrase does.
-fn cluster_chip(label: &str, class: &str, gap: i32) -> (GtkBox, Label) {
+fn cluster_chip(pal: &SharedPalette, label: &str, class: &str, gap: i32) -> (GtkBox, Label) {
     let b = GtkBox::new(Orientation::Horizontal, gap);
     b.add_css_class("cluster-chip");
     b.add_css_class(class);
@@ -2053,23 +2286,18 @@ fn cluster_chip(label: &str, class: &str, gap: i32) -> (GtkBox, Label) {
     let val = Label::new(None);
     val.add_css_class("cluster-val");
     b.append(&val);
-    let chev = Label::new(Some(G_EXPAND));
-    chev.add_css_class("glyph");
-    chev.add_css_class("cluster-chev");
-    b.append(&chev);
+    let chev = icon::icon(pal, Icon::ChevronDown);
+    chev.area.add_css_class("cluster-chev");
+    b.append(&chev.area);
     b.set_visible(false);
     (b, val)
 }
 
 /// The control that folds an expanded run back into its chip.
-fn collapse_button() -> Button {
+fn collapse_button(pal: &SharedPalette) -> Button {
     let b = Button::new();
     b.add_css_class("cluster-collapse");
-    b.set_child(Some(&{
-        let l = Label::new(Some(G_COLLAPSE));
-        l.add_css_class("glyph");
-        l
-    }));
+    b.set_child(Some(&icon::icon(pal, Icon::Collapse).area));
     b.set_valign(Align::Center);
     b.set_tooltip_text(Some("Group these"));
     b
@@ -2411,6 +2639,21 @@ fn rate_text(t: &sysinfo::Throughput) -> String {
     format!("↓{down:.1} ↑{up:.1} MB/s")
 }
 
+/// Split a formatted clock into its date and time halves.
+///
+/// The design draws them in different faces, so they have to be different
+/// labels — but `clock_format` is one strftime string the user owns. The shipped
+/// default (`%a %d %b   %H:%M`) puts a run of spaces between the two, and that
+/// run is the only marker available that does not amount to parsing dates back
+/// out of their own rendering. Without one, the whole string stays in the date's
+/// face: one font is a smaller error than a split in the wrong place.
+fn split_clock(text: &str) -> (&str, &str) {
+    match text.rfind("  ") {
+        Some(i) => (text[..i].trim_end(), text[i..].trim_start()),
+        None => (text, ""),
+    }
+}
+
 /// `71° 168W` — whichever of the two the driver actually reported.
 fn gpu_sub_text(d: &sysinfo::GpuDetail) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -2431,17 +2674,17 @@ fn attach_detail(widget: &impl IsA<gtk4::Widget>, pop: gtk4::Popover) {
     widget.add_controller(click);
 }
 
-/// A `.control` button holding a glyph + value; returns handles to both labels.
-fn control_button() -> (Button, Label, Label) {
+/// A `.control` button holding an icon + value; returns handles to both.
+fn control_button(pal: &SharedPalette, kind: Icon) -> (Button, icon::IconArea, Label) {
     let b = Button::new();
     b.add_css_class("control");
     b.set_valign(Align::Center);
     let inner = GtkBox::new(Orientation::Horizontal, 6);
-    let glyph = Label::new(None);
-    glyph.add_css_class("glyph");
+    let glyph = icon::icon(pal, kind);
+    glyph.area.add_css_class("glyph");
     let val = Label::new(None);
     val.add_css_class("control-val");
-    inner.append(&glyph);
+    inner.append(&glyph.area);
     inner.append(&val);
     b.set_child(Some(&inner));
     (b, glyph, val)
@@ -2449,13 +2692,16 @@ fn control_button() -> (Button, Label, Label) {
 
 /// A `.control` button with its value stacked over a smaller second line.
 /// Returns `(button, glyph, name, sub)`.
-fn control_button_stacked() -> (Button, Label, Label, Label) {
+fn control_button_stacked(
+    pal: &SharedPalette,
+    kind: Icon,
+) -> (Button, icon::IconArea, Label, Label) {
     let b = Button::new();
     b.add_css_class("control");
     b.set_valign(Align::Center);
     let inner = GtkBox::new(Orientation::Horizontal, 7);
-    let glyph = Label::new(None);
-    glyph.add_css_class("glyph");
+    let glyph = icon::icon(pal, kind);
+    glyph.area.add_css_class("glyph");
 
     let col = GtkBox::new(Orientation::Vertical, 0);
     col.set_valign(Align::Center);
@@ -2469,7 +2715,7 @@ fn control_button_stacked() -> (Button, Label, Label, Label) {
     col.append(&name);
     col.append(&sub);
 
-    inner.append(&glyph);
+    inner.append(&glyph.area);
     inner.append(&col);
     b.set_child(Some(&inner));
     (b, glyph, name, sub)
@@ -2665,6 +2911,17 @@ mod tests {
             assert_eq!(cluster_of(&m(id)), None, "{id:?}");
         }
         assert_eq!(cluster_of(&Slot::Custom("weather".into())), None);
+    }
+
+    #[test]
+    fn the_clock_splits_on_the_shipped_format_and_leaves_others_whole() {
+        // The shipped default separates date from time with a run of spaces.
+        assert_eq!(split_clock("Tue 04 Aug   10:08"), ("Tue 04 Aug", "10:08"));
+        // A format with no such run keeps one face rather than guessing.
+        assert_eq!(split_clock("Tue 04 Aug 10:08"), ("Tue 04 Aug 10:08", ""));
+        // The *last* run wins, so a padded date does not steal the split.
+        assert_eq!(split_clock("Tue  04 Aug   10:08"), ("Tue  04 Aug", "10:08"));
+        assert_eq!(split_clock(""), ("", ""));
     }
 
     #[test]

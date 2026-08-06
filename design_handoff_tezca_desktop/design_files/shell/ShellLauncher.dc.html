@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>.lc{width:600px;max-height:472px;display:flex;flex-direction:column;gap:10px;background:var(--cardbase);border:1px solid color-mix(in srgb, var(--accent) 16%, transparent);border-radius:20px;padding:16px;box-shadow:0 24px 60px rgba(0,0,0,.55),0 8px 24px rgba(0,0,0,.35);backdrop-filter:var(--blur);animation:shpop .16s cubic-bezier(.2,.8,.3,1)}
+.lcin{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;background:var(--cardfield);border:1px solid color-mix(in srgb, var(--accent) 12%, transparent);flex:none}
+.lcq{flex:1;background:none;border:none;outline:none;font-size:19px;font-weight:400;color:var(--text);caret-color:var(--accent)}
+.lcq::placeholder{color:var(--muted);opacity:1}
+.lcmode{font-family:var(--mono);font-size:10px;letter-spacing:.06em;padding:3px 7px;border-radius:6px;color:var(--accent);background:var(--sel);border:1px solid var(--hair)}
+[data-look="cyber"] .lcmode{border-radius:2px}
+
+.lcrow{display:flex;align-items:center;gap:12px;padding:10px 12px;margin:2px 0;border-radius:12px;cursor:pointer}
+.lcrow[data-on="true"]{background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 3px 0 0 0 var(--accent)}
+.lcrow:hover{background:var(--hov)}
+.lcglyph{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;font:700 15px/1 var(--font);color:#fff;flex:none}
+[data-look="cyber"] .lcglyph{border-radius:3px}
+.lcname{font-size:15px;color:var(--text)}
+.lcsub{font-size:12px;color:var(--muted);margin-top:2px}
+.lckey{font-size:12px;color:var(--muted)}
+.lcqa{font-size:12px;color:var(--text);background:color-mix(in srgb, var(--accent) 20%, transparent);border-radius:6px;padding:2px 8px}
+.lcname[data-calc="true"]{font-size:24px;font-weight:600;color:var(--accent)}
+.lcfoot{display:flex;align-items:center;gap:10px;padding-top:10px;border-top:1px solid color-mix(in srgb, var(--accent) 10%, transparent);font-size:12px;color:var(--muted)}
+.lcbind{display:flex;flex-direction:column;align-items:center;gap:3px}
+.lcb{font-size:11px;color:var(--muted);opacity:.6;text-transform:lowercase}
+.lccap{padding:2px 6px;border-radius:5px;border:1px solid color-mix(in srgb, var(--text) 25%, transparent);color:var(--text);font-size:12px}
+.thsw{display:flex;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+[data-look="cyber"] .thsw{border-radius:2px}
+.thsw>i{flex:1}
+.thcard{padding:10px;border-radius:var(--r);border:1px solid var(--line);background:var(--card);cursor:pointer;transition:all .14s}
+.thcard[data-on="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--sel)}
+.thcard:hover{border-color:var(--linex)}
+[data-look="cyber"] .thcard{border-radius:4px}</style></helmet><div><div class="shstage" style="min-height:352px;display:flex;justify-content:center;padding:44px 0 30px"><div class="shscrim"></div><div class="lc" style="position:relative"><div class="lcin"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input class="lcq" value="{{ q }}" onInput="{{ onQ }}" placeholder="Search  ·  apps, calc, web"><sc-if value="{{ hasMode }}" hint-placeholder-val="{{ false }}"><span class="lcmode">{{ modeLabel }}</span></sc-if><span class="lccap">esc</span></div><div style="overflow-y:auto;max-height:400px;flex:1"><sc-for list="{{ items }}" as="it" hint-placeholder-count="7"><div class="lcrow" data-on="{{ it.on }}" onClick="{{ it.pick }}"><span class="lcglyph" data-bg="{{ it.k }}">{{ it.letter }}</span><div style="flex:1;min-width:0"><div class="lcname" data-calc="{{ it.isCalc }}">{{ it.name }}</div><sc-if value="{{ it.sub }}" hint-placeholder-val="{{ true }}"><div class="lcsub">{{ it.sub }}</div></sc-if></div><sc-if value="{{ it.qa }}" hint-placeholder-val="{{ false }}"><span class="lcqa">{{ it.qa }}</span></sc-if></div></sc-for></div><div class="lcfoot"><span style="flex:1"></span><span class="lcbind"><span class="lccap">open+next</span><span class="lcb">⇧↵</span></span><span class="lcbind"><span class="lccap">pin</span><span class="lcb">^+p</span></span><span class="lcbind"><span class="lccap">start</span><span class="lcb">↵</span></span></div></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px"><div style="border:1px solid var(--line);border-radius:14px;background:var(--card);padding:13px 14px"><div style="font-size:12.5px;font-weight:600;margin-bottom:5px">Five prefixes, one field</div><div style="font-size:11.5px;line-height:1.55;color:var(--muted)">Straight from <span style="font-family:var(--mono);color:var(--sub)">providers.prefixes</span> — <span style="font-family:var(--mono);color:var(--sub)">;</span> lists providers, <span style="font-family:var(--mono);color:var(--sub)">&gt;</span> runs a shell command, <span style="font-family:var(--mono);color:var(--sub)">/</span> searches files, <span style="font-family:var(--mono);color:var(--sub)">:</span> finds symbols, <span style="font-family:var(--mono);color:var(--sub)">=</span> forces the calculator. The active provider is named in the field so a stray first character never silently changes what you are searching.</div></div><div style="border:1px solid var(--line);border-radius:14px;background:var(--card);padding:13px 14px"><div style="font-size:12.5px;font-weight:600;margin-bottom:5px">One flat, ranked list</div><div style="font-size:11.5px;line-height:1.55;color:var(--muted)"><span style="font-family:var(--mono);color:var(--sub)">layout.xml</span> makes the list a single-column <span style="font-family:var(--mono);color:var(--sub)">GtkGridView</span> — plain text queries all three default providers and their results interleave in one ranked run, with no provider headers. F1–F4 activate the first four without leaving the keyboard.</div></div><div style="border:1px dashed var(--hair);border-radius:14px;background:var(--card);padding:13px 14px"><div style="font-size:12.5px;font-weight:600;margin-bottom:5px">Window switching<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--gold);margin-left:7px">PROPOSED</span></div><div style="font-size:11.5px;line-height:1.55;color:var(--muted)">Walker has no window provider configured today. On a tiling WM you switch more than you launch, so an elephant provider surfacing Hyprland clients above apps would be the single highest-value addition here.</div></div></div><div class="shhead"><span class="shsec" style="margin:0">Theme picker</span><span class="shmono">SUPER ⇧ T · tezca theme set</span></div><div class="shstage" style="min-height:250px;display:flex;justify-content:center;padding:34px 0"><div class="shscrim"></div><div style="position:relative;width:600px;background:var(--glass2);border:1px solid var(--linex);border-radius:var(--r2);box-shadow:var(--shadow);backdrop-filter:var(--blur);padding:17px;animation:shpop .16s cubic-bezier(.2,.8,.3,1)"><div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px"><span style="font-size:13.5px;font-weight:600">Theme</span><span class="lckey">applies live · esc reverts</span></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:9px"><sc-for list="{{ themes }}" as="t" hint-placeholder-count="5"><div class="thcard" data-on="{{ t.on }}" onClick="{{ t.pick }}"><div class="thsw"><i data-c="{{ t.a }}"></i><i data-c="{{ t.b }}"></i><i data-c="{{ t.c }}"></i></div><div style="font-size:11.5px;color:var(--text);margin-top:8px">{{ t.name }}</div><div class="lcsub">{{ t.note }}</div></div></sc-for></div><div style="display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)"><span class="lckey" style="flex:1">Wallpaper follows the theme</span><span class="shchip" data-on="true">on</span><span class="shchip">off</span></div></div></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const BG = {
+  ghostty:'linear-gradient(145deg,#2f3b3d,#161d1e)', firefox:'linear-gradient(145deg,#e06a3b,#8c3a17)',
+  code:'linear-gradient(145deg,#3d7bb8,#1e4570)', signal:'linear-gradient(145deg,#4a7fd4,#24468a)',
+  spotify:'linear-gradient(145deg,#5aa85c,#2b6b33)', obsidian:'linear-gradient(145deg,#7b5bb8,#3f2a6b)',
+  cmd:'linear-gradient(145deg,#3fb8af,#1f6b66)', file:'linear-gradient(145deg,#c9a24b,#7c6122)',
+  win:'linear-gradient(145deg,#5a6466,#31383a)'
+};
+// Verbatim tz_base / tz_accent / tz_gold from themes/<id>/colors.css.
+// Every curated dark theme shares base #0B0E0F and gold #C9A24B; only the
+// accent differs. smoke is the light counterpart.
+const THEMES = [
+  { id:'obsidian',        name:'obsidian', note:'dark · turquoise', a:'#0B0E0F', b:'#3FB8AF', c:'#C9A24B' },
+  { id:'quetzalcoatl',    name:'quetzal',  note:'dark · pale mint', a:'#0B0E0F', b:'#D2E4E2', c:'#C9A24B' },
+  { id:'huitzilopochtli', name:'huitzil',  note:'dark · blue',      a:'#0B0E0F', b:'#5B93E8', c:'#C9A24B' },
+  { id:'xipe',            name:'xipe',     note:'dark · ember',     a:'#0B0E0F', b:'#E0685C', c:'#C9A24B' },
+  { id:'smoke',           name:'smoke',    note:'light · jade',     a:'#F1F4F5', b:'#1F8A82', c:'#9C7A22' }
+];
+
+// config/walker/config.toml — providers.default is desktopapplications, calc,
+// websearch (there is NO window provider). quick_activate binds F1–F4.
+const APPS = [
+  { k:'ghostty', name:'Ghostty', sub:'Terminal emulator', letter:'G', key:'F1' },
+  { k:'code', name:'Code', sub:'Code editing. Redefined.', letter:'C', key:'F2' },
+  { k:'obsidian', name:'Obsidian', sub:'Knowledge base', letter:'O', key:'F3' }
+];
+const WEB = [
+  { k:'web', name:'Search the web', sub:'duckduckgo', letter:'⌕', key:'⏎' }
+];
+const FILES = [
+  { k:'file', name:'bar.css', sub:'~/tezca/crates/tezca-bar/src', letter:'◆', key:'F1' },
+  { k:'file', name:'dock.toml', sub:'~/.config/tezca-dock', letter:'◆', key:'F2' }
+];
+// ">" is walker's shell runner, not a tezca-command provider.
+const RUN = [
+  { k:'cmd', name:'tezca theme set smoke', sub:'run in shell', letter:'›', key:'⏎' },
+  { k:'cmd', name:'systemctl --user restart tezca-bar', sub:'run in shell', letter:'›', key:'' }
+];
+const PROVIDERS = [
+  { k:'cmd', name:'desktopapplications', sub:'default · empty', letter:';', key:'' },
+  { k:'cmd', name:'calc', sub:'default · prefix =', letter:';', key:'' },
+  { k:'cmd', name:'websearch', sub:'default', letter:';', key:'' },
+  { k:'cmd', name:'runner', sub:'prefix &gt;', letter:';', key:'' },
+  { k:'cmd', name:'files', sub:'prefix /', letter:';', key:'' },
+  { k:'cmd', name:'symbols', sub:'prefix :', letter:';', key:'' }
+];
+const SYMBOLS = [
+  { k:'web', name:'✓  check mark', sub:'U+2713', letter:':', key:'⏎' },
+  { k:'web', name:'→  rightwards arrow', sub:'U+2192', letter:':', key:'' }
+];
+
+class Component extends DCLogic {
+  state = { q:'', theme:'obsidian', sel:0 };
+
+  componentDidMount(){ this.paint(); }
+  componentDidUpdate(){ this.paint(); }
+  paint(){
+    document.querySelectorAll('[data-bg]').forEach(el => {
+      const b = BG[el.getAttribute('data-bg')]; if (b) el.style.background = b;
+    });
+    document.querySelectorAll('[data-c]').forEach(el => { el.style.background = el.getAttribute('data-c'); });
+  }
+
+  renderVals(){
+    const raw = this.state.q;
+    const p = raw.charAt(0);
+    const mode = ';>/:='.includes(p) && raw.length ? p : '';
+    const term = raw.slice(mode ? 1 : 0).trim().toLowerCase();
+    const hit = (x) => !term || (x.name + ' ' + x.sub).toLowerCase().includes(term);
+
+    let groups;
+    if (mode === ';') groups = [{ title:'providerlist', items: PROVIDERS.filter(hit) }];
+    else if (mode === '>') groups = [{ title:'runner', items: RUN.filter(hit) }];
+    else if (mode === '/') groups = [{ title:'files', items: FILES.filter(hit) }];
+    else if (mode === ':') groups = [{ title:'symbols', items: SYMBOLS.filter(hit) }];
+    else if (mode === '=') groups = [{ title:'calc', items:[{ k:'cmd', name: term ? term + ' =' : '=', sub:'copy result', letter:'=', key:'⏎' }] }];
+    else groups = [
+      { title:'desktopapplications', items: APPS.filter(hit) },
+      { title:'calc', items: term && /[0-9]/.test(term) ? [{ k:'cmd', name: term + ' =', sub:'copy result', letter:'=', key:'' }] : [] },
+      { title:'websearch', items: WEB.filter(() => !!term) }
+    ];
+    groups = groups.filter(g => g.items.length);
+
+    // layout.xml's List is a single-column GtkGridView — one flat run of rows,
+    // no provider headers. quick_activate binds F1–F4 to the first four.
+    const QA = ['F1','F2','F3','F4'];
+    const flat = [];
+    groups.forEach(g => g.items.forEach(it => flat.push({ ...it, group:g.title })));
+    const items = flat.map((it, i) => ({
+      ...it, on: i === 0,
+      qa: QA[i] || '',
+      isCalc: it.group === 'calc' ? 'true' : 'false',
+      pick: () => this.setState({ sel:i })
+    }));
+    const total = items.length;
+
+    return {
+      q: raw, onQ: (e) => this.setState({ q:e.target.value }),
+      items, count: total + (total === 1 ? ' result' : ' results'),
+      hasMode: !!mode,
+      modeLabel: { ';':'providerlist', '>':'runner', '/':'files', ':':'symbols', '=':'calc' }[mode] || '',
+      themes: THEMES.map(t => ({ ...t, on: t.id === this.state.theme, pick: () => this.setState({ theme:t.id }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -89,6 +89,102 @@ pub fn poll() -> BtState {
     BtState { present: true, powered: true, connected: connected_devices() }
 }
 
+/// What the popover shows on top of [`poll`] — the paired-but-idle devices and
+/// which adapter is doing the talking.
+///
+/// Deliberately *not* part of `poll`: this costs an extra `bluetoothctl` call
+/// per paired device, which is fine once when a popover opens and far too much
+/// on the module's five-second tick.
+#[derive(Clone, Debug, Default)]
+pub struct BtDetail {
+    /// Paired devices that are not currently connected, with BlueZ's icon hint
+    /// (`phone`, `audio-headset`, …) as the trailing note.
+    pub paired: Vec<(String, String)>,
+    /// Adapter alias and what it supports, e.g. `("tezca", "5.3")`.
+    pub adapter: Option<(String, String)>,
+}
+
+pub fn detail() -> BtDetail {
+    let show = run(&["show"]).unwrap_or_default();
+    let adapter = adapter_of(&show);
+
+    let connected: Vec<String> = run(&["devices", "Connected"])
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| Some(l.trim().strip_prefix("Device ")?.split_once(' ')?.0.to_string()))
+        .collect();
+
+    let paired = run(&["devices", "Paired"])
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let (mac, name) = l.trim().strip_prefix("Device ")?.split_once(' ')?;
+            if connected.iter().any(|c| c == mac) {
+                return None;
+            }
+            let info = run(&["info", mac]).unwrap_or_default();
+            Some((name.trim().to_string(), icon_of(&info)))
+        })
+        .collect();
+
+    BtDetail { paired, adapter }
+}
+
+/// The adapter's alias and the Bluetooth revision it speaks.
+///
+/// Keyed off the `Controller` line so an absent adapter is `None` rather than a
+/// row of blanks. The address is deliberately *not* shown — it is a stable
+/// identifier for this machine, and the popover is a status readout, not an
+/// inventory.
+fn adapter_of(show: &str) -> Option<(String, String)> {
+    show.lines().find_map(|l| l.trim().strip_prefix("Controller "))?;
+    let field = |key: &str| {
+        show.lines()
+            .filter_map(|l| l.trim().split_once(": "))
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.trim().to_string())
+    };
+    let alias = field("Alias").unwrap_or_else(|| "Adapter".to_string());
+    let version = field("Version").and_then(|v| core_version(&v)).unwrap_or_default();
+    Some((alias, version))
+}
+
+/// `0x0c (12)` → `5.3`.
+///
+/// BlueZ reports the raw HCI version number; the Bluetooth Core spec assigns
+/// each one a revision, and the revision is the number anyone recognises.
+/// Anything past the table is a spec newer than this code — reported as the
+/// bare HCI number rather than guessed at.
+fn core_version(field: &str) -> Option<String> {
+    let open = field.find('(')?;
+    let close = field[open..].find(')')? + open;
+    let hci: u32 = field[open + 1..close].trim().parse().ok()?;
+    Some(
+        match hci {
+            6 => "4.0",
+            7 => "4.1",
+            8 => "4.2",
+            9 => "5.0",
+            10 => "5.1",
+            11 => "5.2",
+            12 => "5.3",
+            13 => "5.4",
+            14 => "6.0",
+            _ => return Some(format!("HCI {hci}")),
+        }
+        .to_string(),
+    )
+}
+
+/// BlueZ's `Icon:` hint — the closest thing to a device *kind* it exposes.
+fn icon_of(info: &str) -> String {
+    info.lines()
+        .filter_map(|l| l.trim().split_once(": "))
+        .find(|(k, _)| *k == "Icon")
+        .map(|(_, v)| v.trim().to_string())
+        .unwrap_or_else(|| "paired".to_string())
+}
+
 fn connected_devices() -> Vec<Device> {
     // `devices Connected` asks BlueZ for exactly the set we want, so the common
     // case (nothing connected) costs one command and no per-device `info` calls.
@@ -163,6 +259,28 @@ mod tests {
         };
         assert_eq!(s.tooltip(), "Bluetooth — WH-1000XM4 (90%), MX Master");
         assert_eq!(s.badge().as_deref(), Some("90%"));
+    }
+
+    #[test]
+    fn the_adapter_row_reads_the_alias_and_the_spec_revision() {
+        // Shape taken from this machine's `bluetoothctl show`.
+        let show = "Controller 08:71:90:80:D9:CC (public)\n\tManufacturer: 0x0002 (2)\n\t\
+                    Version: 0x0a (10)\n\tName: tower\n\tAlias: Tezca\n\tPowered: yes\n";
+        assert_eq!(adapter_of(show), Some(("Tezca".into(), "5.1".into())));
+        assert_eq!(adapter_of("no controller here"), None);
+    }
+
+    #[test]
+    fn an_hci_version_past_the_table_is_reported_rather_than_guessed() {
+        assert_eq!(core_version("0x0c (12)").as_deref(), Some("5.3"));
+        assert_eq!(core_version("0x63 (99)").as_deref(), Some("HCI 99"));
+        assert_eq!(core_version("0x0a"), None);
+    }
+
+    #[test]
+    fn a_paired_device_falls_back_to_a_generic_kind_when_bluez_offers_no_icon() {
+        assert_eq!(icon_of("\tIcon: phone\n\tPaired: yes"), "phone");
+        assert_eq!(icon_of("\tPaired: yes"), "paired");
     }
 
     #[test]

@@ -14,6 +14,7 @@ mod config;
 mod custom;
 mod draw;
 mod hypr;
+mod icon;
 mod mic;
 mod notify;
 mod nowplaying;
@@ -200,6 +201,21 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::SUCCESS;
     }
 
+    // `--audio-dump`: print what the volume popover would render — the server,
+    // the routable devices with the default marked, and the live application
+    // streams — without opening a window.
+    if std::env::args().any(|a| a == "--audio-dump") {
+        audio_dump();
+        return glib::ExitCode::SUCCESS;
+    }
+
+    // `--np-dump`: print what the now-playing pill and its popover would show,
+    // straight from playerctl, without opening a window.
+    if std::env::args().any(|a| a == "--np-dump") {
+        np_dump();
+        return glib::ExitCode::SUCCESS;
+    }
+
     // `--session-dump`: print the keep-awake / night-light / recording state the
     // bar would show, without opening a window.
     if std::env::args().any(|a| a == "--session-dump") {
@@ -215,6 +231,12 @@ fn main() -> glib::ExitCode {
         return run_osd_demo(kind);
     }
 
+    // `--popover-demo <name>`: open one popover on its own, under its own
+    // app-id. See `run_popover_demo` for why clicking the real bar isn't it.
+    if let Some(name) = arg_after("--popover-demo") {
+        return run_popover_demo(name);
+    }
+
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(activate);
     app.run()
@@ -227,6 +249,37 @@ fn arg_after(flag: &str) -> Option<String> {
     args.get(i + 1).cloned().filter(|v| !v.starts_with("--"))
 }
 
+/// `--audio-dump` — the volume popover's readings, as text.
+fn audio_dump() {
+    let s = sysinfo::audio_server();
+    println!("server={}", if s.server.is_empty() { "unknown" } else { &s.server });
+    println!("spec={}", if s.spec.is_empty() { "unknown" } else { &s.spec });
+    for (heading, list) in [("sink", sysinfo::sinks()), ("source", sysinfo::sources())] {
+        for d in list {
+            println!("{heading}={} id={} default={}", d.name, d.id, d.default);
+        }
+    }
+    for st in sysinfo::streams() {
+        println!("stream={} volume={} muted={}", st.name, st.volume, st.muted);
+    }
+}
+
+/// `--np-dump` — the media pill's strip line and the popover's extra metadata.
+fn np_dump() {
+    let Some(np) = nowplaying::current() else {
+        println!("Nothing playing");
+        return;
+    };
+    println!("title={}", np.title);
+    println!("subtitle={}", np.subtitle());
+    println!("playing={} position={:?} length={:?}", np.playing, np.position, np.length);
+    println!("art={}", if np.art_url.is_empty() { "none" } else { &np.art_url });
+    println!("art_loads={}", nowplaying::art_texture(&np.art_url).is_some());
+    let d = nowplaying::detail();
+    println!("album={} player={}", d.album, d.player);
+    println!("shuffle={} loop={}", d.shuffle, d.loop_status);
+}
+
 /// Parse `--osd-demo <volume|brightness>` (defaulting to volume) from argv.
 fn osd_demo_kind() -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
@@ -235,6 +288,98 @@ fn osd_demo_kind() -> Option<String> {
 }
 
 /// Show a single OSD pill on the primary monitor, then quit — a visual preview.
+/// `--popover-demo <name>`: open one popover, on its own, in a small window.
+///
+/// The counterpart to `--osd-demo`, and for the same reason. A popover on the
+/// real bar can only be opened by clicking it, an open popover holds a pointer
+/// grab (so the next click dismisses rather than opens), and driving that with
+/// synthetic clicks on a live desktop is both slow and intrusive. This gives
+/// every surface a deterministic, screenshottable entry point under its own
+/// app-id, so it can never disturb a running bar.
+///
+/// Content is the real thing: each popover fills itself from the live system in
+/// `connect_show`, exactly as it does on the bar.
+fn run_popover_demo(name: String) -> glib::ExitCode {
+    let app = Application::builder().application_id("dev.tezca.popover-demo").build();
+    app.connect_activate(move |app| {
+        let display = Display::default().expect("no display");
+        let css = theme::CssStack::install(&display);
+        std::mem::forget(css);
+
+        let cfg = config::Config::load();
+        let pal = std::rc::Rc::new(std::cell::RefCell::new(theme::Palette::load()));
+        let win = gtk4::ApplicationWindow::builder()
+            .application(app)
+            .title(format!("tezca-bar popover — {name}"))
+            .default_width(420)
+            .default_height(620)
+            .build();
+        win.add_css_class("tz-popover-demo");
+        // The anchor stands in for the bar module the popover hangs off, and
+        // sits at the top so the panel drops into the window rather than off it.
+        let anchor = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        anchor.set_valign(gtk4::Align::Start);
+        anchor.set_halign(gtk4::Align::Center);
+        anchor.set_size_request(1, 1);
+        win.set_child(Some(&anchor));
+
+        let pop = match name.as_str() {
+            "clock" | "calendar" => {
+                popovers::calendar(&anchor, std::rc::Rc::new(cfg.clock_zones.clone()))
+            }
+            "power" | "session" => popovers::session_menu(&anchor),
+            "np" | "nowplaying" => popovers::nowplaying_detail(&anchor, &pal),
+            "volume" | "mixer" | "audio" => popovers::mixer(&anchor),
+            "bt" | "bluetooth" => popovers::bluetooth(&anchor),
+            "mirror" => popovers::tezca_menu(&anchor),
+            // The network panel is the one demo that needs its own meter: its
+            // throughput chart is a series, so it has to be sampled over time
+            // rather than read once. Same 2-second cadence as the bar's
+            // controls tick, so the chart it draws is the chart the bar draws.
+            "net" | "network" => {
+                let tp = std::rc::Rc::new(std::cell::RefCell::new(sysinfo::Throughput {
+                    down_mbps: 0.0,
+                    up_mbps: 0.0,
+                }));
+                let history: std::rc::Rc<
+                    std::cell::RefCell<std::collections::VecDeque<(f64, f64)>>,
+                > = std::rc::Rc::new(std::cell::RefCell::new(std::collections::VecDeque::new()));
+                let meter = std::rc::Rc::new(std::cell::RefCell::new(sysinfo::NetMeter::default()));
+                let pop = popovers::network(&anchor, tp.clone(), history.clone());
+                let popped = pop.clone();
+                glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
+                    let sample = meter.borrow_mut().sample(2.0);
+                    let mut h = history.borrow_mut();
+                    h.push_back((sample.down_mbps, sample.up_mbps));
+                    while h.len() > 24 {
+                        h.pop_front();
+                    }
+                    drop(h);
+                    *tp.borrow_mut() = sample;
+                    // Re-fire `connect_show` so the panel repaints with the
+                    // sample that just landed.
+                    popped.popdown();
+                    popped.popup();
+                    glib::ControlFlow::Continue
+                });
+                pop
+            }
+            other => {
+                eprintln!(
+                    "unknown popover '{other}' — try clock, power, np, volume, bt, net or mirror"
+                );
+                app.quit();
+                return;
+            }
+        };
+        pop.set_autohide(false);
+        win.present();
+        // Popped after the window is mapped: a popover needs a realized parent.
+        glib::timeout_add_local_once(std::time::Duration::from_millis(120), move || pop.popup());
+    });
+    app.run_with_args(&["tezca-bar"])
+}
+
 fn run_osd_demo(kind: String) -> glib::ExitCode {
     let app = Application::builder().application_id("dev.tezca.osd-demo").build();
     app.connect_activate(move |app| {
@@ -245,7 +390,8 @@ fn run_osd_demo(kind: String) -> glib::ExitCode {
         let monitors = display.monitors();
         let Some(obj) = monitors.item(0) else { return };
         let Ok(monitor) = obj.downcast::<gtk4::gdk::Monitor>() else { return };
-        let osd = osd::Osd::build(app, &monitor, 1800);
+        let pal = std::rc::Rc::new(std::cell::RefCell::new(theme::Palette::load()));
+        let osd = osd::Osd::build(app, &monitor, &pal, 1800);
         match kind.as_str() {
             "brightness" | "bright" => osd.show_brightness(72),
             _ => osd.show(45, false),
@@ -403,6 +549,11 @@ fn activate(app: &Application) {
                         bar.refresh_hypr();
                     }
                     hypr::Event::Submap(name) => bar.set_submap(&name),
+                    // The compositor has re-laid-out the outputs. GDK usually
+                    // reports this too, but only when the `wl_output` itself
+                    // churned — so force the re-anchor rather than trusting the
+                    // monitor objects to have changed under us.
+                    hypr::Event::Monitors => bar.schedule_sync(true),
                 }
             }
         }

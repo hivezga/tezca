@@ -282,9 +282,7 @@ fn tz_layout_status(
 async fn tz_hypr(opts: Vec<String>) -> Vec<(String, String)> {
     tauri::async_runtime::spawn_blocking(move || {
         backend::without_echo(|| {
-            opts.into_iter()
-                .filter_map(|o| backend::hypr_get(&o).map(|v| (o, v)))
-                .collect()
+            opts.into_iter().filter_map(|o| backend::hypr_get(&o).map(|v| (o, v))).collect()
         })
     })
     .await

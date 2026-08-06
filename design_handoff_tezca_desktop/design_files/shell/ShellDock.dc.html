@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>.dk{display:flex;align-items:flex-end;gap:10px;padding:9px 12px;background:var(--glass);border:1px solid var(--line);border-radius:20px;backdrop-filter:var(--blur);box-shadow:var(--shadow)}[data-look="cyber"] .dk{border-radius:5px;border-color:var(--linex)}[data-pos="left"] .dk{flex-direction:column;align-items:center;padding:12px 9px}
+.dkico[data-pinned="true"]:not(:has(.dkrun)){opacity:.62}
+.dkico{position:relative;width:48px;height:48px;border-radius:13px;display:flex;align-items:center;justify-content:center;font:700 17px/1 var(--font);color:#fff;cursor:pointer;transition:transform .17s cubic-bezier(.25,.4,.2,1.2),box-shadow .17s;transform-origin:bottom center;box-shadow:0 3px 10px rgba(0,0,0,.35)}
+[data-pos="left"] .dkico{transform-origin:left center}
+[data-look="cyber"] .dkico{border-radius:4px}
+.dkico{will-change:transform}
+.dkrun{position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--accent);box-shadow:var(--glow)}
+[data-pos="left"] .dkrun{bottom:50%;left:-6px;transform:translateY(50%)}
+.dkbadge{position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--urgent);color:#fff;font:700 10px/17px var(--mono);text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.4)}
+.dktip{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);white-space:nowrap;padding:5px 9px;border-radius:8px;background:var(--glass2);border:1px solid var(--line);color:var(--text);font-size:11.5px;opacity:0;pointer-events:none;transition:opacity .1s;box-shadow:var(--shadow)}
+[data-pos="left"] .dktip{bottom:auto;left:calc(100% + 13px);top:50%;transform:translateY(-50%)}
+.dkico[data-label="true"] .dktip{opacity:1}
+.dksep{width:1px;height:34px;background:var(--linex);margin:0 3px;align-self:center;flex:none}
+[data-pos="left"] .dksep{width:34px;height:1px;margin:3px 0}
+.dkcard{border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden}
+[data-look="cyber"] .dkcard{border-radius:4px}
+.dkwhy{font-size:11.5px;line-height:1.5;color:var(--muted);padding:0 14px 13px}
+.dkname{font-size:12.5px;font-weight:600;color:var(--text)}</style></helmet><div><div class="shstage" data-pos="{{ pos }}" data-mag="{{ magStr }}" style="height:262px;display:flex;align-items:flex-end;justify-content:center;padding:0 0 20px"><div class="shscrim"></div><sc-if value="{{ isLeft }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:18px;top:0;bottom:0;display:flex;align-items:center"><div class="dk" onPointerMove="{{ onMove }}" onPointerLeave="{{ onLeave }}"><sc-for list="{{ apps }}" as="a" hint-placeholder-count="8"><sc-if value="{{ a.divider }}" hint-placeholder-val="{{ false }}"><span class="dksep"></span></sc-if><div class="dkico" data-bg="{{ a.k }}" data-pinned="{{ a.pinnedStr }}"><span>{{ a.letter }}</span><sc-if value="{{ a.running }}" hint-placeholder-val="{{ false }}"><i class="dkrun"></i></sc-if><span class="dktip">{{ a.name }}</span></div></sc-for></div></div></sc-if><sc-if value="{{ isBottom }}" hint-placeholder-val="{{ true }}"><div class="dk" style="position:relative" onPointerMove="{{ onMove }}" onPointerLeave="{{ onLeave }}"><sc-for list="{{ apps }}" as="a" hint-placeholder-count="8"><sc-if value="{{ a.divider }}" hint-placeholder-val="{{ false }}"><span class="dksep"></span></sc-if><div class="dkico" data-bg="{{ a.k }}" data-pinned="{{ a.pinnedStr }}"><span>{{ a.letter }}</span><sc-if value="{{ a.running }}" hint-placeholder-val="{{ false }}"><i class="dkrun"></i></sc-if><span class="dktip">{{ a.name }}</span></div></sc-for></div></sc-if><span class="shmono" style="position:absolute;left:18px;bottom:14px;color:var(--onwall)">hover an icon — cos² magnification, running dot, label above 1.15×</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px"><div class="dkcard"><div style="padding:13px 14px 9px"><div class="dkname">Pinned, then running</div></div><div style="display:flex;align-items:flex-end;gap:10px;padding:0 14px 14px"><div class="dkico" data-bg="ghostty" style="width:40px;height:40px;font-size:15px"><span>G</span><i class="dkrun"></i></div><div class="dkico" data-bg="firefox" style="width:40px;height:40px;font-size:15px"><span>F</span><i class="dkrun"></i></div><div class="dkico" data-bg="code" style="width:40px;height:40px;font-size:15px;opacity:.6"><span>C</span></div></div><div class="dkwhy">Pinned favourites come first in <span style="font-family:var(--mono);color:var(--sub)">dock.toml</span> order; running apps that are not pinned follow behind a divider. A dot marks running — pinned-and-closed just dims.</div></div><div class="dkcard"><div style="padding:13px 14px 9px"><div class="dkname">Attention &amp; progress<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--gold);margin-left:7px">PROPOSED</span></div></div><div style="display:flex;align-items:flex-end;gap:14px;padding:0 14px 14px"><div class="dkico" data-bg="signal" style="width:40px;height:40px;font-size:15px"><span>S</span><i class="dkrun"></i><i class="dkbadge">7</i></div><div style="position:relative"><div class="dkico" data-bg="files" style="width:40px;height:40px;font-size:15px"><span>N</span><i class="dkrun"></i></div><div style="position:absolute;left:0;right:0;bottom:-8px;height:3px;border-radius:2px;background:var(--linex)"><i style="display:block;height:100%;width:64%;border-radius:2px;background:var(--accent)"></i></div></div></div><div class="dkwhy">Not in <span style="font-family:var(--mono);color:var(--sub)">magnifier.rs</span> today — it draws only the running dot. Counts would ride the corner; long copies get a hairline under the icon rather than a second bar widget.</div></div><div class="dkcard"><div style="padding:13px 14px 9px"><div class="dkname">Autohide reveal</div></div><div style="padding:0 14px 14px"><div style="position:relative;height:46px;border-radius:9px;overflow:hidden;border:1px solid var(--line);background:var(--field)"><div style="position:absolute;left:0;right:0;bottom:0;height:6px;background:var(--accent);opacity:.5"></div><span class="shmono" style="position:absolute;left:10px;top:14px">6px hotspot · 350 ms hide_delay</span></div></div><div class="dkwhy">Hidden, the dock leaves a <span style="font-family:var(--mono);color:var(--sub)">hotspot_height</span> of 6px. Entering it reveals; leaving starts the 350 ms <span style="font-family:var(--mono);color:var(--sub)">hide_delay_ms</span> countdown. The pill fades in while sliding up 22px.</div></div><div class="dkcard"><div style="padding:13px 14px 9px"><div class="dkname">Drop target<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--gold);margin-left:7px">PROPOSED</span></div></div><div style="display:flex;align-items:flex-end;gap:10px;padding:0 14px 14px"><div class="dkico" data-bg="ghostty" style="width:40px;height:40px;font-size:15px;opacity:.5"><span>G</span></div><div class="dkico" data-bg="code" style="width:40px;height:40px;font-size:15px;box-shadow:0 0 0 2px var(--accent),var(--glow)"><span>C</span></div><div class="dkico" data-bg="firefox" style="width:40px;height:40px;font-size:15px;opacity:.5"><span>F</span></div></div><div class="dkwhy">Also new — the dock has no drag handling yet. Dragging a file would ring the receiving app and dim the rest, so a mis-drop is visible before you let go.</div></div></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;pos&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;mag&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;boolean&quot;}}">
+// apps.rs: pinned favourites in dock.toml order, then running-but-unpinned apps
+// behind a divider. `label` is the .desktop Name= verbatim — the dock has no
+// window counts, unread badges or trash item.
+const APPS = [
+  { k:'ghostty',  name:'Ghostty',  letter:'G', running:true,  pinned:true },
+  { k:'firefox',  name:'Firefox',  letter:'F', running:true,  pinned:true },
+  { k:'code',     name:'Code',     letter:'C', running:true,  pinned:true },
+  { k:'signal',   name:'Signal',   letter:'S', running:true,  pinned:true },
+  { k:'spotify',  name:'Spotify',  letter:'♪', running:true,  pinned:true },
+  { k:'obsidian', name:'Obsidian', letter:'O', running:false, pinned:true },
+  { k:'files',    name:'Files',    letter:'N', running:true,  pinned:false, divider:true },
+  { k:'pavu',     name:'Volume Control', letter:'V', running:true, pinned:false }
+];
+const BG = {
+  ghostty:'linear-gradient(145deg,#2f3b3d,#161d1e)',
+  firefox:'linear-gradient(145deg,#e06a3b,#8c3a17)',
+  code:'linear-gradient(145deg,#3d7bb8,#1e4570)',
+  signal:'linear-gradient(145deg,#4a7fd4,#24468a)',
+  spotify:'linear-gradient(145deg,#5aa85c,#2b6b33)',
+  obsidian:'linear-gradient(145deg,#7b5bb8,#3f2a6b)',
+  files:'linear-gradient(145deg,#c9a24b,#7c6122)',
+  pavu:'linear-gradient(145deg,#4a5254,#282e30)'
+};
+
+// From crates/tezca-dock/src/{config,magnifier}.rs — the real defaults.
+const ICON = 48, MAX_SCALE = 1.6, INFLUENCE = 110, LABEL_AT = 1.15;
+
+class Component extends DCLogic {
+  componentDidMount(){ this.paint(); }
+  componentDidUpdate(){ this.paint(); }
+  paint(){
+    document.querySelectorAll('[data-bg]').forEach(el => {
+      const b = BG[el.getAttribute('data-bg')];
+      if (b) el.style.background = b;
+    });
+  }
+
+  // scale = 1 + (max_scale-1) · cos²(π/2 · d/influence)   [magnifier.rs::compute]
+  magnify(dock, px){
+    const icons = [...dock.querySelectorAll('.dkico')];
+    const vertical = this.props.pos === 'left';
+    let best = null, bestScale = 1;
+    icons.forEach(el => {
+      const r = el.getBoundingClientRect();
+      const c = vertical ? r.top + r.height/2 : r.left + r.width/2;
+      let s = 1;
+      if (px != null){
+        const d = Math.abs(px - c);
+        if (d < INFLUENCE){ const f = Math.cos(Math.PI/2 * (d/INFLUENCE)); s = 1 + (MAX_SCALE-1) * f * f; }
+      }
+      el.style.transform = s > 1.001
+        ? 'scale(' + s.toFixed(3) + ') translateY(' + (vertical ? 0 : -(s-1)*9).toFixed(1) + 'px)'
+        : '';
+      el.style.zIndex = s > 1.001 ? String(Math.round(s*10)) : '';
+      if (s > bestScale){ bestScale = s; best = el; }
+      el.removeAttribute('data-label');
+    });
+    // magnifier.rs only draws the label once the focused icon passes 1.15×
+    if (best && bestScale > LABEL_AT) best.setAttribute('data-label','true');
+  }
+  renderVals(){
+    const pos = this.props.pos || 'bottom';
+    const live = this.props.mag !== false;
+    return {
+      apps: APPS.map(a => ({ ...a, pinnedStr: a.pinned ? 'true' : 'false' })), pos,
+      onMove: (e) => { if (!live) return;
+        this.magnify(e.currentTarget, pos === 'left' ? e.clientY : e.clientX); },
+      onLeave: (e) => this.magnify(e.currentTarget, null),
+      isLeft: pos === 'left', isBottom: pos !== 'left',
+      magStr: this.props.mag === false ? 'false' : 'true'
+    };
+  }
+}
+</script>
+</body>
+</html>

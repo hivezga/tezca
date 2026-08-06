@@ -61,6 +61,10 @@ pub enum Event {
     Refresh,
     /// The submap changed; empty string means back to the default submap.
     Submap(String),
+    /// An output came or went — re-place the bars. Hyprland moves the layer
+    /// surfaces of a departing monitor onto a surviving one and never moves them
+    /// back, so this is the bar's cue to re-anchor itself.
+    Monitors,
 }
 
 /// Pull the current workspaces, monitors, and focused window in one shot.
@@ -179,6 +183,12 @@ pub fn subscribe(tx: async_channel::Sender<Event>) {
             let ev = match name {
                 // Submap carries its name (empty on exit).
                 "submap" => Some(Event::Submap(data.to_string())),
+                // Monitor topology. `monitoradded`/`monitorremoved` are the v1
+                // names; the v2 forms carry the id as well and are what recent
+                // Hyprland emits, so both are matched.
+                "monitoradded" | "monitoraddedv2" | "monitorremoved" | "monitorremovedv2" => {
+                    Some(Event::Monitors)
+                }
                 // Anything that changes the workspace set or focus → refresh.
                 "workspace" | "workspacev2" | "createworkspace" | "createworkspacev2"
                 | "destroyworkspace" | "destroyworkspacev2" | "focusedmon" | "openwindow"

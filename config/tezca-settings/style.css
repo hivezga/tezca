@@ -24,14 +24,15 @@ headerbar.tz-header {
 }
 .tz-brand {
     font-weight: 800;
-    font-size: 14pt;
+    font-size: 11pt;
     color: @tz_text;
-    letter-spacing: 0.5px;
+    letter-spacing: 1.8px;
 }
 .tz-subtitle {
-    color: @tz_accent;
+    color: @tz_muted;
     font-weight: 600;
-    font-size: 11pt;
+    font-size: 9pt;
+    letter-spacing: 1.2px;
 }
 
 /* --- Sidebar ------------------------------------------------------------ */
@@ -100,25 +101,99 @@ button.tz-primary {
 button.tz-primary:hover {
     background-color: @tz_accent_dim;
 }
+/* A theme card: the palette drawn as a swatch strip over the theme's name. The
+   strip itself is cairo (see pages.rs — GTK CSS would resolve every card's
+   colours to the LIVE theme), so this only styles the card around it. */
 button.tz-theme {
     min-width: 118px;
-    min-height: 46px;
-    font-size: 11pt;
+    padding: 11px;
+    background-color: @tz_surface;
+    border: 1px solid alpha(@tz_muted, 0.16);
+    border-radius: 10px;
+}
+button.tz-theme:hover {
+    background-color: @tz_surface;
+    border-color: alpha(@tz_accent, 0.45);
 }
 button.tz-theme.tz-active {
-    border: 2px solid @tz_accent;
+    border: 1px solid @tz_accent;
+    box-shadow: 0 0 0 3px alpha(@tz_accent, 0.22);
+}
+.tz-theme-name {
+    font-size: 9pt;
+    font-weight: 600;
     color: @tz_text;
-    box-shadow: 0 0 0 3px alpha(@tz_accent, 0.20);
 }
 button.tz-action {
     min-width: 150px;
     min-height: 40px;
 }
 
-/* --- Wallpaper preview -------------------------------------------------- */
+/* --- Segmented control ---------------------------------------------------
+ *
+ * GTK has no segmented widget; a `.linked` run of ToggleButtons in a padded
+ * well is the closest idiom, and reads as one control rather than four buttons.
+ */
+.tz-seg {
+    background-color: @tz_surface;
+    border: 1px solid alpha(@tz_muted, 0.16);
+    border-radius: 10px;
+    padding: 3px;
+}
+.tz-seg button {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 7px;
+    padding: 4px 12px;
+    min-height: 24px;
+    font-size: 9.5pt;
+    font-weight: 600;
+    color: @tz_subtext;
+}
+.tz-seg button:hover {
+    background-color: alpha(@tz_muted, 0.14);
+    color: @tz_text;
+}
+.tz-seg button:checked {
+    background-color: @tz_accent;
+    color: @tz_on_accent;
+}
+
+/* --- Wallpaper preview + library ---------------------------------------- */
 .tz-wallpreview {
     border-radius: 12px;
     border: 1px solid alpha(@tz_muted, 0.25);
+}
+/* The filename, floated over the bottom-left of the preview — legible on any
+   picture, which is why it carries its own scrim rather than relying on one. */
+.tz-wallname {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 8pt;
+    color: @tz_text;
+    background-color: alpha(#000000, 0.55);
+    border-radius: 5px;
+    padding: 4px 7px;
+}
+.tz-walllib {
+    background: transparent;
+}
+button.tz-wallcard {
+    padding: 0;
+    border: 1px solid alpha(@tz_muted, 0.16);
+    border-radius: 10px;
+    background: transparent;
+    min-height: 74px;
+}
+button.tz-wallcard:hover {
+    border-color: alpha(@tz_accent, 0.45);
+}
+button.tz-wallcard.tz-active {
+    border-color: @tz_accent;
+    box-shadow: 0 0 0 3px alpha(@tz_accent, 0.22);
+}
+button.tz-wallcard picture {
+    border-radius: 9px;
 }
 
 /* --- Switch row (gaming) ------------------------------------------------ */

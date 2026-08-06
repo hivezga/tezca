@@ -11,6 +11,8 @@
 //! Plus the Tezca "mirror" system menu.
 
 use crate::ai;
+use crate::draw::SharedPalette;
+use crate::icon::{self, Icon};
 use crate::sysinfo::{self, Net, Throughput};
 use crate::tray;
 use gtk4::glib;
@@ -78,45 +80,282 @@ pub fn tezca_menu(anchor: &impl IsA<gtk4::Widget>) -> Popover {
     pop
 }
 
+// ── Session menu (power) ───────────────────────────────────────────────────
+
+/// The power glyph's menu: the five session actions, each with the chord that
+/// reaches it without the mouse.
+///
+/// The button used to launch `wlogout` directly. It still can — that is the
+/// last entry — but the four things you actually do from here now take one
+/// click instead of two, and the popover names its own keybinds so the menu
+/// teaches you out of needing it.
+pub fn session_menu(anchor: &impl IsA<gtk4::Widget>) -> Popover {
+    let (pop, content) = glass(anchor);
+    content.set_width_request(196);
+
+    // (label, chord, command). Empty chord = no binding, which is deliberate
+    // for the three that reboot or power the machine off.
+    let items = [
+        ("Lock", "SUPER L", "loginctl lock-session || hyprlock"),
+        ("Log out", "SUPER \u{21E7} Q", "uwsm stop || hyprctl dispatch 'hl.dsp.exit()'"),
+        ("Suspend", "", "systemctl suspend"),
+        ("Reboot", "", "systemctl reboot"),
+        ("Power off", "", "systemctl poweroff"),
+    ];
+    for (label, chord, cmd) in items {
+        let row = GtkBox::new(Orientation::Horizontal, 10);
+        let l = Label::new(Some(label));
+        l.set_halign(Align::Start);
+        l.set_hexpand(true);
+        let k = Label::new(Some(chord));
+        k.add_css_class("pop-mono");
+        k.set_halign(Align::End);
+        row.append(&l);
+        row.append(&k);
+
+        let b = Button::new();
+        b.add_css_class("appmenu-item");
+        b.set_child(Some(&row));
+        if label == "Power off" {
+            b.add_css_class("danger");
+        }
+        let pop_c = pop.clone();
+        let cmd = cmd.to_string();
+        b.connect_clicked(move |_| {
+            sh(&cmd);
+            pop_c.popdown();
+        });
+        content.append(&b);
+    }
+
+    content.append(&sep_row());
+    let full = Button::with_label("All options\u{2026}");
+    full.add_css_class("appmenu-item");
+    if let Some(child) = full.child() {
+        child.set_halign(Align::Start);
+    }
+    let pop_c = pop.clone();
+    full.connect_clicked(move |_| {
+        sh("uwsm app -- wlogout -b 4 || wlogout -b 4");
+        pop_c.popdown();
+    });
+    content.append(&full);
+    pop
+}
+
 // ── Calendar (clock) ───────────────────────────────────────────────────────
 
-pub fn calendar(anchor: &impl IsA<gtk4::Widget>) -> Popover {
+/// The clock's popover: the month, the other zones you keep, and how long the
+/// machine has been up.
+///
+/// `zones` comes from `clock_zones` in config.toml and is usually empty, in
+/// which case that section is omitted rather than guessed at. There is no
+/// agenda block: nothing on this system publishes one, and a hardcoded list of
+/// fake meetings would be worse than no list at all.
+pub fn calendar(anchor: &impl IsA<gtk4::Widget>, zones: Rc<Vec<(String, String)>>) -> Popover {
     let (pop, content) = glass(anchor);
-    let cal = Calendar::new();
-    cal.add_css_class("tz-cal");
-    content.append(&cal);
+    content.set_width_request(238);
+    let c = content.clone();
+    pop.connect_show(move |_| {
+        clear(&c);
+        let now = glib::DateTime::now_local().ok();
+
+        let head = GtkBox::new(Orientation::Horizontal, 8);
+        let title = pop_title(
+            &now.as_ref()
+                .and_then(|d| d.format("%B %Y").ok())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+        );
+        title.set_hexpand(true);
+        head.append(&title);
+        if let Some(w) = now.as_ref().and_then(|d| d.format("week %V").ok()) {
+            let wk = Label::new(Some(&w));
+            wk.add_css_class("pop-mono");
+            wk.set_valign(Align::Baseline);
+            head.append(&wk);
+        }
+        c.append(&head);
+
+        let cal = Calendar::new();
+        cal.add_css_class("tz-cal");
+        c.append(&cal);
+
+        if !zones.is_empty() {
+            c.append(&sep_row());
+            c.append(&caption("other zones"));
+            let rows = GtkBox::new(Orientation::Vertical, 5);
+            for (label, zone) in zones.iter() {
+                if let Some((time, day)) = zone_time(zone) {
+                    let val = if day.is_empty() { time } else { format!("{time} \u{00B7} {day}") };
+                    rows.append(&mono_row(label, &val, false));
+                }
+            }
+            c.append(&rows);
+        }
+
+        if let Some(up) = sysinfo::uptime_secs() {
+            c.append(&sep_row());
+            c.append(&mono_row("uptime", &uptime_long(up), false));
+        }
+    });
     pop
+}
+
+/// The wall clock in `zone`, plus how its date sits relative to ours.
+///
+/// `date` does the zone maths — the bar carries no tz database of its own, and
+/// shelling out is how every other reading in this crate is taken. The relative
+/// day is computed from the day-of-year pair rather than a string compare, so
+/// "tomorrow" is still right across a year boundary.
+fn zone_time(zone: &str) -> Option<(String, String)> {
+    let out = Command::new("date")
+        .env("TZ", zone)
+        .arg("+%H:%M %j")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    let (time, yday) = s.trim().split_once(' ')?;
+    let there: i32 = yday.trim_start_matches('0').parse().ok()?;
+
+    let here = Command::new("date")
+        .arg("+%j")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            String::from_utf8_lossy(&o.stdout).trim().trim_start_matches('0').parse::<i32>().ok()
+        })?;
+
+    // A wrap at new year shows up as ±364-ish; clamp it back to ±1.
+    let day = match there - here {
+        0 => "today",
+        d if d == 1 || d < -300 => "tomorrow",
+        d if d == -1 || d > 300 => "yesterday",
+        _ => "",
+    };
+    Some((time.to_string(), day.to_string()))
+}
+
+/// `3d 7h 12m` — uptime keeps its days, unlike [`sysinfo::duration_short`],
+/// which drops anything past a day because a battery estimate that long is
+/// noise. An uptime that long is just an uptime.
+fn uptime_long(secs: u64) -> String {
+    let (d, h, m) = (secs / 86_400, (secs % 86_400) / 3600, (secs % 3600) / 60);
+    if d > 0 {
+        format!("{d}d {h}h {m}m")
+    } else if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{m}m")
+    }
 }
 
 // ── Audio mixer ────────────────────────────────────────────────────────────
 
 pub fn mixer(anchor: &impl IsA<gtk4::Widget>) -> Popover {
     let (pop, content) = glass(anchor);
-    content.set_width_request(240);
-    let content_c = content.clone();
+    content.set_width_request(258);
+    let c = content.clone();
+    let pop_c = pop.clone();
     pop.connect_show(move |_| {
-        while let Some(c) = content_c.first_child() {
-            content_c.remove(&c);
+        clear(&c);
+
+        let head = GtkBox::new(Orientation::Horizontal, 8);
+        let title = pop_title("Audio");
+        title.set_hexpand(true);
+        head.append(&title);
+        if let Some(rate) = sample_rate(&sysinfo::audio_server().spec) {
+            let l = Label::new(Some(&rate));
+            l.add_css_class("pop-mono");
+            l.set_valign(Align::Baseline);
+            head.append(&l);
         }
+        c.append(&head);
+
         let rows = [("Output", "@DEFAULT_AUDIO_SINK@"), ("Input", "@DEFAULT_AUDIO_SOURCE@")];
         for (label, id) in rows {
             let a = sysinfo::audio_of(id);
             let (vol, muted) = a.map(|x| (x.volume, x.muted)).unwrap_or((0, true));
-            content_c.append(&mix_row(label, vol, muted));
+            c.append(&mix_row(label, vol, muted));
         }
+
         // Per-application streams. Only rendered when something is actually
         // playing — an empty "Apps" heading over nothing is worse than no
         // heading, and most of the time nothing is.
         let streams = sysinfo::streams();
         if !streams.is_empty() {
-            content_c.append(&sep_row());
-            content_c.append(&caption("apps"));
+            c.append(&sep_row());
+            c.append(&caption("apps"));
             for st in streams {
-                content_c.append(&mix_row(&st.name, st.volume, st.muted));
+                c.append(&mix_row(&st.name, st.volume, st.muted));
             }
+        }
+
+        // Output routing. Skipped when there is only one sink: a picker with a
+        // single entry is a label pretending to be a control.
+        let sinks = sysinfo::sinks();
+        if sinks.len() > 1 {
+            c.append(&sep_row());
+            c.append(&caption("output"));
+            let list = GtkBox::new(Orientation::Vertical, 2);
+            for s in sinks {
+                let b = device_row(&s.name, s.default);
+                let pop = pop_c.clone();
+                let id = s.id;
+                b.connect_clicked(move |_| {
+                    sysinfo::set_default_sink(id);
+                    pop.popdown();
+                });
+                list.append(&b);
+            }
+            c.append(&list);
+        }
+
+        if let Some(input) = sysinfo::sources().into_iter().find(|d| d.default) {
+            c.append(&sep_row());
+            c.append(&caption("input"));
+            c.append(&mono_row(&input.name, "default", false));
         }
     });
     pop
+}
+
+/// `float32le 2ch 48000Hz` → `48 kHz`, `… 44100Hz` → `44.1 kHz`.
+///
+/// The bit format and channel count are the two parts of the spec nobody reads
+/// off a bar; the rate is the one that tells you whether the device you think
+/// you are on is the device you are on.
+fn sample_rate(spec: &str) -> Option<String> {
+    let hz: f64 = spec.split_whitespace().find_map(|t| t.strip_suffix("Hz"))?.parse().ok()?;
+    let khz = hz / 1000.0;
+    let text = format!("{khz:.1}");
+    Some(format!("{} kHz", text.strip_suffix(".0").unwrap_or(&text)))
+}
+
+/// One selectable device in the output list — a filled dot when it is the one
+/// currently in use, a hollow ring when clicking would switch to it.
+fn device_row(name: &str, selected: bool) -> Button {
+    let row = GtkBox::new(Orientation::Horizontal, 9);
+    let dot = GtkBox::new(Orientation::Horizontal, 0);
+    dot.add_css_class(if selected { "dot-on" } else { "dot-off" });
+    dot.set_valign(Align::Center);
+    let l = Label::new(Some(name));
+    l.set_halign(Align::Start);
+    l.set_hexpand(true);
+    l.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    l.set_max_width_chars(26);
+    row.append(&dot);
+    row.append(&l);
+
+    let b = Button::new();
+    b.add_css_class("appmenu-item");
+    if selected {
+        b.add_css_class("selected");
+    }
+    b.set_child(Some(&row));
+    b
 }
 
 fn mix_row(label: &str, vol: u32, muted: bool) -> GtkBox {
@@ -146,7 +385,11 @@ fn mix_row(label: &str, vol: u32, muted: bool) -> GtkBox {
 
 // ── Network detail ─────────────────────────────────────────────────────────
 
-pub fn network(anchor: &impl IsA<gtk4::Widget>, tp: Rc<RefCell<Throughput>>) -> Popover {
+pub fn network(
+    anchor: &impl IsA<gtk4::Widget>,
+    tp: Rc<RefCell<Throughput>>,
+    history: Rc<RefCell<std::collections::VecDeque<(f64, f64)>>>,
+) -> Popover {
     let (pop, content) = glass(anchor);
     content.set_width_request(230);
     let content_c = content.clone();
@@ -173,6 +416,13 @@ pub fn network(anchor: &impl IsA<gtk4::Widget>, tp: Rc<RefCell<Throughput>>) -> 
             head.append(&chip);
         }
         content_c.append(&head);
+
+        // The throughput trace, scaled to its own peak. Both directions share
+        // one scale so an upload reads at its true size beside a download.
+        if let Some((chart, peak)) = throughput_chart(&history.borrow()) {
+            content_c.append(&caption(&format!("last 48 s \u{00B7} peak {peak}")));
+            content_c.append(&chart);
+        }
 
         let rows = GtkBox::new(Orientation::Vertical, 7);
         if !ip.is_empty() {
@@ -216,6 +466,51 @@ pub fn network(anchor: &impl IsA<gtk4::Widget>, tp: Rc<RefCell<Throughput>>) -> 
         content_c.append(&actions);
     });
     pop
+}
+
+/// The throughput chart: one column per sample, download over upload, plus the
+/// peak the columns are scaled against.
+///
+/// Returns `None` until there are two samples — a single column, or a flat run
+/// of zeroes with no peak to scale against, reads as "the link is idle" when it
+/// actually means "the bar has not been up long enough to say".
+fn throughput_chart(history: &std::collections::VecDeque<(f64, f64)>) -> Option<(GtkBox, String)> {
+    if history.len() < 2 {
+        return None;
+    }
+    let peak = history.iter().fold(0.0f64, |m, (d, u)| m.max(*d).max(*u));
+    if peak <= 0.0 {
+        return None;
+    }
+
+    let strip = GtkBox::new(Orientation::Horizontal, 1);
+    strip.set_homogeneous(true);
+    for (down, up) in history.iter() {
+        // Down above, up below, sharing the column and mirrored about the line
+        // between them: each grows away from the centre, so the two directions
+        // are read as one shape rather than two charts that happen to be
+        // stacked. `inverted` is what anchors each half to that centre line.
+        let col = GtkBox::new(Orientation::Vertical, 1);
+        for (v, class, from_centre) in [(*down, "net-down", false), (*up, "net-up", true)] {
+            let bar = LevelBar::builder()
+                .mode(gtk4::LevelBarMode::Continuous)
+                .min_value(0.0)
+                .max_value(1.0)
+                .value((v / peak).clamp(0.0, 1.0))
+                .orientation(Orientation::Vertical)
+                .inverted(from_centre)
+                .hexpand(true)
+                .build();
+            bar.add_css_class("core");
+            bar.add_css_class(class);
+            bar.set_size_request(-1, 14);
+            col.append(&bar);
+        }
+        strip.append(&col);
+    }
+    // Megabytes, matching the strip's own `↓12.4 ↑1.1 MB/s` — two units for one
+    // measurement would make the chart look like it disagreed with the module.
+    Some((strip, format!("{:.1} MB/s", peak / 8.0)))
 }
 
 /// Whether NetworkManager reports the Wi-Fi radio as enabled.
@@ -277,6 +572,27 @@ pub fn bluetooth(anchor: &impl IsA<gtk4::Widget>) -> Popover {
                 }
             }
             content_c.append(&rows);
+        }
+
+        // Paired-but-idle devices and the adapter, both of which cost an extra
+        // `bluetoothctl` round trip each — fine here, far too much on the tick.
+        if state.powered {
+            let d = crate::bluetooth::detail();
+            if !d.paired.is_empty() {
+                content_c.append(&sep_row());
+                content_c.append(&caption("paired, not connected"));
+                let rows = GtkBox::new(Orientation::Vertical, 4);
+                for (name, kind) in &d.paired {
+                    rows.append(&mono_row(name, kind, false));
+                }
+                content_c.append(&rows);
+            }
+            if let Some((alias, version)) = d.adapter {
+                let val =
+                    if version.is_empty() { alias } else { format!("{alias} \u{00B7} {version}") };
+                content_c.append(&sep_row());
+                content_c.append(&mono_row("adapter", &val, false));
+            }
         }
 
         let actions = GtkBox::new(Orientation::Horizontal, 6);
@@ -963,6 +1279,134 @@ pub fn battery_detail(
     pop
 }
 
+// ── Now playing ────────────────────────────────────────────────────────────
+
+/// The media pill's popover: cover art, the full metadata, a progress trace and
+/// the transport.
+///
+/// No play queue. MPRIS keeps its track list behind the optional `TrackList`
+/// interface and virtually nothing implements it, so the "up next" list in the
+/// design has no source on this system — a fabricated one would be the only way
+/// to draw it.
+pub fn nowplaying_detail(anchor: &impl IsA<gtk4::Widget>, pal: &SharedPalette) -> Popover {
+    let (pop, content) = glass(anchor);
+    content.set_width_request(272);
+    let c = content.clone();
+    let pal = pal.clone();
+    pop.connect_show(move |_| {
+        clear(&c);
+        let Some(np) = crate::nowplaying::current() else {
+            c.append(&pop_title("Nothing playing"));
+            return;
+        };
+        let d = crate::nowplaying::detail();
+
+        // Head: art beside title / artist / album.
+        let head = GtkBox::new(Orientation::Horizontal, 12);
+        let art = GtkBox::new(Orientation::Horizontal, 0);
+        art.add_css_class("np-art-lg");
+        if let Some(tex) = crate::nowplaying::art_texture(&np.art_url) {
+            let pic = gtk4::Picture::for_paintable(&tex);
+            pic.set_content_fit(gtk4::ContentFit::Cover);
+            pic.set_size_request(58, 58);
+            art.append(&pic);
+        }
+        head.append(&art);
+        let text = GtkBox::new(Orientation::Vertical, 3);
+        text.set_valign(Align::Center);
+        text.append(&pop_title(&np.title));
+        if !np.artist.is_empty() {
+            text.append(&caption(&np.artist));
+        }
+        if !d.album.is_empty() {
+            text.append(&caption(&d.album));
+        }
+        head.append(&text);
+        c.append(&head);
+
+        // Progress. A stream has no length, so it gets its elapsed time alone
+        // rather than a bar that would sit at zero forever.
+        if let (Some(pos), Some(len)) = (np.position, np.length) {
+            let bar = LevelBar::builder()
+                .mode(gtk4::LevelBarMode::Continuous)
+                .min_value(0.0)
+                .max_value(1.0)
+                .value((pos as f64 / len.max(1) as f64).clamp(0.0, 1.0))
+                .hexpand(true)
+                .build();
+            bar.add_css_class("mix");
+            c.append(&bar);
+            let times = GtkBox::new(Orientation::Horizontal, 8);
+            let a = Label::new(Some(&crate::nowplaying::clock(pos)));
+            a.add_css_class("pop-mono");
+            a.set_hexpand(true);
+            a.set_halign(Align::Start);
+            let b = Label::new(Some(&crate::nowplaying::clock(len)));
+            b.add_css_class("pop-mono");
+            b.set_halign(Align::End);
+            times.append(&a);
+            times.append(&b);
+            c.append(&times);
+        } else if let Some(pos) = np.position {
+            c.append(&mono_row("elapsed", &crate::nowplaying::clock(pos), false));
+        }
+
+        // Transport.
+        let transport = GtkBox::new(Orientation::Horizontal, 18);
+        transport.set_halign(Align::Center);
+        let button = |kind: Icon| {
+            let b = Button::new();
+            b.add_css_class("np-transport");
+            b.set_child(Some(&icon::icon(&pal, kind).area));
+            b
+        };
+        let prev = button(Icon::TransportPrev);
+        prev.connect_clicked(|_| crate::nowplaying::previous());
+        let play = button(if np.playing { Icon::TransportPause } else { Icon::TransportPlay });
+        play.add_css_class("primary");
+        play.connect_clicked(|_| crate::nowplaying::play_pause());
+        let next = button(Icon::TransportNext);
+        next.connect_clicked(|_| crate::nowplaying::next());
+        transport.append(&prev);
+        transport.append(&play);
+        transport.append(&next);
+        c.append(&transport);
+
+        // Shuffle / repeat, as two-state chips.
+        let modes = GtkBox::new(Orientation::Horizontal, 6);
+        let shuffle = Button::with_label("shuffle");
+        shuffle.add_css_class("pop-chip");
+        if d.shuffle {
+            shuffle.add_css_class("on");
+        }
+        shuffle.connect_clicked(|_| crate::nowplaying::toggle_shuffle());
+        let repeat_on = matches!(d.loop_status.trim(), "Track" | "Playlist");
+        let repeat_label = match d.loop_status.trim() {
+            "Track" => "repeat one",
+            "Playlist" => "repeat all",
+            _ => "repeat",
+        };
+        let repeat = Button::with_label(repeat_label);
+        repeat.add_css_class("pop-chip");
+        if repeat_on {
+            repeat.add_css_class("on");
+        }
+        let loop_now = d.loop_status.clone();
+        repeat.connect_clicked(move |_| {
+            crate::nowplaying::cycle_loop(&loop_now);
+        });
+        modes.append(&shuffle);
+        modes.append(&repeat);
+        c.append(&modes);
+
+        if !d.player.is_empty() {
+            c.append(&sep_row());
+            c.append(&mono_row("player", &d.player, false));
+        }
+    });
+    pop
+}
+
 /// A grid of one cell per logical core, each filled to its busy fraction.
 ///
 /// Eight per row, which is the widest that stays legible at popover width and
@@ -1050,4 +1494,24 @@ fn mono_row(key: &str, val: &str, accent: bool) -> GtkBox {
     row.append(&k);
     row.append(&v);
     row
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sample_rate, uptime_long};
+
+    #[test]
+    fn uptime_keeps_its_days_where_a_battery_estimate_would_drop_them() {
+        assert_eq!(uptime_long(285_120), "3d 7h 12m");
+        assert_eq!(uptime_long(13_200), "3h 40m");
+        assert_eq!(uptime_long(420), "7m");
+    }
+
+    #[test]
+    fn a_whole_rate_loses_its_decimal_and_a_fractional_one_keeps_it() {
+        assert_eq!(sample_rate("float32le 2ch 48000Hz").as_deref(), Some("48 kHz"));
+        assert_eq!(sample_rate("s16le 2ch 44100Hz").as_deref(), Some("44.1 kHz"));
+        assert_eq!(sample_rate("s24le 2ch 192000Hz").as_deref(), Some("192 kHz"));
+        assert_eq!(sample_rate(""), None);
+    }
 }

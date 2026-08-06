@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><script src="./llm-data.js"></script><style>@keyframes tzslide{from{transform:translateX(100%)}to{transform:none}}@keyframes tzcaret{0%,100%{opacity:1}50%{opacity:0}}.lp{display:flex;flex-direction:column;width:400px;flex:none;height:100%;background:var(--pop);border-left:1px solid var(--popline);color:var(--text);animation:tzslide .22s cubic-bezier(.2,.8,.3,1);overflow:hidden}.lprow{display:flex;align-items:center;gap:8px}.lpbtn{display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--muted);font-family:var(--mono);font-size:10.5px;cursor:pointer;transition:all .13s}.lpbtn:hover{color:var(--text);border-color:var(--popline)}.lpbtn[data-on="true"]{color:var(--accent);border-color:var(--popline);background:rgba(63,184,175,.1)}[data-look="cyber"] .lpbtn{border-radius:3px}[data-look="cyber"] .lpbtn[data-on="true"]{background:rgba(43,232,200,.1)}.lpmsg{display:flex;flex-direction:column;gap:5px}.lpwho{display:flex;align-items:baseline;gap:8px}.lpname{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}.lpbody{font-size:12.5px;line-height:1.62;color:var(--sub);white-space:pre-wrap}.lpuser .lpbody{color:var(--text);background:rgba(139,147,152,.09);border-radius:10px;padding:9px 11px}[data-look="cyber"] .lpuser .lpbody{border-radius:3px}.lpcode{position:relative;font-family:var(--mono);font-size:11px;line-height:1.65;color:var(--sub);background:rgba(4,8,9,.55);border:1px solid var(--line);border-radius:9px;padding:11px 12px;overflow-x:auto;white-space:pre}[data-look="cyber"] .lpcode{border-radius:3px}.lpcopy{position:absolute;top:7px;right:7px;font-family:var(--mono);font-size:9.5px;color:var(--faint);background:var(--pop);border:1px solid var(--line);border-radius:5px;padding:3px 6px;cursor:pointer;opacity:0;transition:opacity .13s}.lpcode:hover .lpcopy{opacity:1}.lpcopy:hover{color:var(--accent)}.lpmeta{font-family:var(--mono);font-size:9.5px;color:var(--faint)}.lpaccel{font-family:var(--mono);font-size:9px;letter-spacing:.06em;padding:1.5px 5px;border-radius:4px;color:var(--accent);background:rgba(63,184,175,.14);border:1px solid rgba(63,184,175,.28)}[data-look="cyber"] .lpaccel{border-radius:2px;background:rgba(43,232,200,.14)}.lpaccel[data-accel="CPU"]{color:var(--gold);background:rgba(201,162,75,.14);border-color:rgba(201,162,75,.3)}.lpsel{display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:8px;cursor:pointer;transition:background .13s}.lpsel:hover{background:rgba(139,147,152,.09)}[data-look="cyber"] .lpsel{border-radius:3px}.lpmenu{position:absolute;z-index:40;background:var(--pop);border:1px solid var(--popline);border-radius:11px;box-shadow:0 20px 50px rgba(0,0,0,.6);padding:6px;animation:tzpop .13s cubic-bezier(.2,.8,.3,1)}[data-look="cyber"] .lpmenu{border-radius:4px}.lpcaret{display:inline-block;width:7px;height:13px;background:var(--accent);vertical-align:-2px;margin-left:2px;animation:tzcaret 1s step-end infinite}.lpspark{display:flex;align-items:flex-end;gap:1.5px;height:16px}.lpspark>i{width:3px;border-radius:1px;background:var(--accent);opacity:.55}.lpta{width:100%;resize:none;background:transparent;border:none;outline:none;color:var(--text);font-family:var(--font);font-size:12.5px;line-height:1.55;max-height:120px}.lpta::placeholder{color:var(--faint)}</style></helmet><div class="lp"><div style="display:flex;align-items:center;gap:9px;padding:11px 12px;border-bottom:1px solid var(--line);flex:none;position:relative"><button onClick="{{ toggleModels }}" class="lpsel" style="flex:1;min-width:0;padding:5px 8px"><span style="width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none;box-shadow:0 0 7px var(--accent)"></span><div style="min-width:0;text-align:left;flex:1"><div style="font-size:12.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ model.name }}</div><div class="lprow" style="gap:6px;margin-top:2px"><span data-accel="{{ model.accel }}" class="lpaccel">{{ model.accel }}</span><span class="lpmeta">{{ model.meta }}</span></div></div><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.4"><path d="m8 10 4 4 4-4"></path></svg></button><button onClick="{{ toggleSessions }}" class="lpbtn" style="padding:6px" title="Conversations"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 6h16M4 12h16M4 18h10"></path></svg></button><button onClick="{{ toggleSettings }}" class="lpbtn" data-on="{{ settingsOn }}" style="padding:6px" title="System prompt & sampling"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v2.4M12 18.6V21M3 12h2.4M18.6 12H21M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"></path></svg></button><button onClick="{{ onClose }}" class="lpbtn" style="padding:6px" title="Close · SUPER I"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m6 6 12 12M18 6 6 18"></path></svg></button><sc-if value="{{ modelsOpen }}" hint-placeholder-val="{{ false }}"><div class="lpmenu" style="top:56px;left:10px;width:310px"><div class="lpmeta" style="padding:6px 9px 7px">Resident</div><sc-for list="{{ resident }}" as="m" hint-placeholder-count="2"><div onClick="{{ m.pick }}" class="lpsel"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none"></span><div style="flex:1;min-width:0"><div style="font-size:12px;color:var(--text)">{{ m.name }}</div><div class="lprow" style="gap:5px;margin-top:2px"><span data-accel="{{ m.accel }}" class="lpaccel">{{ m.accel }}</span><span class="lpmeta">{{ m.offload }}</span></div></div><span class="lpmeta">{{ m.vram }}</span></div></sc-for><div style="height:1px;background:var(--line);margin:6px 4px"></div><div class="lpmeta" style="padding:2px 9px 7px">Available locally</div><sc-for list="{{ available }}" as="m" hint-placeholder-count="2"><div onClick="{{ m.pick }}" class="lpsel"><span style="width:6px;height:6px;border-radius:50%;border:1px solid var(--faint);flex:none"></span><div style="flex:1;min-width:0"><div style="font-size:12px;color:var(--sub)">{{ m.name }}</div><div class="lprow" style="gap:5px;margin-top:2px"><span data-accel="{{ m.accel }}" class="lpaccel">{{ m.accel }}</span><span class="lpmeta">{{ m.offload }}</span></div></div><span class="lpmeta">{{ m.vram }}</span></div></sc-for><div style="height:1px;background:var(--line);margin:6px 4px"></div><div class="lpmeta" style="padding:2px 9px 7px">Pulling</div><div style="padding:5px 9px 8px"><div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:12px;color:var(--sub)">qwen2.5-coder:32b</span><span class="lpmeta">61%</span></div><div class="tzmeter"><i data-w="pull61"></i></div><div class="lpmeta" style="margin-top:5px">11.2 / 18.4 GB · 24 MB/s · 5m left</div></div></div></sc-if><sc-if value="{{ sessionsOpen }}" hint-placeholder-val="{{ false }}"><div class="lpmenu" style="top:56px;right:10px;width:262px"><div class="lpmeta" style="padding:6px 9px 7px">Conversations</div><sc-for list="{{ sessions }}" as="c" hint-placeholder-count="4"><div onClick="{{ c.pick }}" class="lpsel" style="align-items:flex-start"><div style="flex:1;min-width:0"><div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.title }}</div><div class="lpmeta" style="margin-top:2px">{{ c.meta }}</div></div></div></sc-for><div style="height:1px;background:var(--line);margin:6px 4px"></div><div onClick="{{ newChat }}" class="lpsel"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg><span style="font-size:12px;color:var(--accent)">New conversation</span></div></div></sc-if></div><sc-if value="{{ settingsOn }}" hint-placeholder-val="{{ false }}"><div style="flex:none;padding:12px;border-bottom:1px solid var(--line);background:rgba(139,147,152,.04)"><div class="lpmeta" style="margin-bottom:6px">System prompt</div><div style="font-size:11.5px;line-height:1.55;color:var(--sub);background:var(--field,rgba(4,8,9,.4));border:1px solid var(--line);border-radius:8px;padding:9px 10px">You are a terse assistant embedded in the Tezca desktop. Prefer shell and Rust. Answer in under six lines unless asked.</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:11px"><div><div class="lprow" style="justify-content:space-between;margin-bottom:5px"><span class="lpmeta">temperature</span><span class="lpmeta" style="color:var(--sub)">0.7</span></div><input type="range" data-slider="" min="0" max="100" value="70" style="width:100%;height:16px;accent-color:var(--accent)"></div><div><div class="lprow" style="justify-content:space-between;margin-bottom:5px"><span class="lpmeta">top-p</span><span class="lpmeta" style="color:var(--sub)">0.90</span></div><input type="range" data-slider="" min="0" max="100" value="90" style="width:100%;height:16px;accent-color:var(--accent)"></div></div><div class="lpmeta" style="margin:12px 0 6px">accelerator</div><div class="lprow" style="gap:6px"><sc-for list="{{ backends }}" as="k" hint-placeholder-count="4"><button onClick="{{ k.pick }}" class="lpbtn" data-on="{{ k.on }}" title="{{ k.note }}">{{ k.id }}</button></sc-for></div><div class="lprow" style="gap:6px;margin-top:11px"><button class="lpbtn" data-on="true">keep-alive 5m</button><button class="lpbtn">num_ctx {{ ctxWindow }}</button><button class="lpbtn">gpu layers {{ gpuLayers }}</button></div></div></sc-if><div ref="{{ scrollRef }}" style="flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:16px"><sc-for list="{{ messages }}" as="m" hint-placeholder-count="3"><div class="lpmsg {{ m.cls }}"><div class="lpwho"><span class="lpname">{{ m.who }}</span><span class="lpmeta">{{ m.stamp }}</span></div><div class="lpbody">{{ m.text }}</div><sc-if value="{{ m.hasCode }}" hint-placeholder-val="{{ false }}"><div class="lpcode"><button onClick="{{ m.copy }}" class="lpcopy">{{ m.copyLabel }}</button>{{ m.code }}</div></sc-if><sc-if value="{{ m.hasFoot }}" hint-placeholder-val="{{ false }}"><div class="lprow" style="gap:12px;margin-top:1px"><span class="lpmeta">{{ m.foot }}</span><span style="flex:1"></span><button onClick="{{ m.regen }}" class="lpbtn" style="padding:3px 7px">regenerate</button></div></sc-if></div></sc-for><sc-if value="{{ streaming }}" hint-placeholder-val="{{ false }}"><div class="lpmsg"><div class="lpwho"><span class="lpname">llama3.1</span><span class="lpmeta">{{ liveStat }}</span></div><div class="lpbody">{{ live }}<span class="lpcaret"></span></div></div></sc-if></div><div style="flex:none;border-top:1px solid var(--line);padding:10px 12px 11px"><div class="lprow" style="gap:6px;margin-bottom:9px;flex-wrap:wrap"><button onClick="{{ sendSelection }}" class="lpbtn" title="Send the focused window's selection"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3M8 12h8"></path></svg>selection</button><button onClick="{{ attach }}" class="lpbtn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.4 3.4 0 0 1 4.8 4.8L9.7 17.4a1.8 1.8 0 0 1-2.5-2.5l7.8-7.8"></path></svg>attach</button><button onClick="{{ attachShot }}" class="lpbtn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2.5"></rect><circle cx="12" cy="13" r="3.4"></circle><path d="M8.5 6 10 3.5h4L15.5 6"></path></svg>screenshot</button></div><sc-if value="{{ hasAttach }}" hint-placeholder-val="{{ false }}"><div class="lprow" style="gap:7px;margin-bottom:9px;padding:6px 8px;border:1px solid var(--line);border-radius:8px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2.5"></rect><circle cx="12" cy="13" r="3.4"></circle></svg><span style="font-size:11.5px;color:var(--sub);flex:1">{{ attachName }}</span><button onClick="{{ clearAttach }}" class="lpmeta" style="background:none;border:none;cursor:pointer">✕</button></div></sc-if><div style="display:flex;align-items:flex-end;gap:9px;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:rgba(4,8,9,.35)"><textarea ref="{{ inputRef }}" value="{{ draft }}" onInput="{{ onDraft }}" onKeyDown="{{ onKey }}" rows="1" placeholder="Ask llama3.1 — ⏎ send, ⇧⏎ newline" class="lpta"></textarea><sc-if value="{{ streaming }}" hint-placeholder-val="{{ false }}"><button onClick="{{ stopGen }}" class="lpbtn" style="color:var(--urgent);border-color:rgba(224,108,117,.4);flex:none">stop</button></sc-if><sc-if value="{{ canSend }}" hint-placeholder-val="{{ true }}"><button onClick="{{ send }}" style="flex:none;display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:var(--accent);color:var(--onacc);border:none;cursor:pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button></sc-if></div><div class="lprow" style="justify-content:space-between;margin-top:9px"><div class="lprow" style="gap:10px"><span class="lpmeta">{{ tps }}</span><div class="lpspark"><sc-for list="{{ spark }}" as="b" hint-placeholder-count="12"><i data-h="{{ b.h }}"></i></sc-for></div></div><span class="lpmeta">{{ ctxLine }}</span></div><div class="lprow" style="justify-content:space-between;margin-top:6px"><div class="lprow" style="gap:6px"><span data-accel="{{ accel }}" class="lpaccel">{{ accel }}</span><span class="lpmeta">{{ layers }}</span></div><span class="lpmeta">SUPER I</span></div><div class="lprow" style="justify-content:space-between;margin-top:5px"><span class="lpmeta">{{ vramLine }}</span><span class="lpmeta">{{ device }}</span></div><div class="tzmeter" style="margin-top:5px"><i data-vram=""></i></div></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:400,&quot;height&quot;:620},&quot;onClose&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;function&quot;},&quot;backend&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;modelId&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;setBackend&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;function&quot;},&quot;setModel&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;function&quot;},&quot;tps&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;setTps&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;function&quot;}}">
+const SEED = [
+  { who:'you', text:'why is my bar module redrawing every second even when nothing changed?' },
+  { who:'ai', text:'Because the poll timer calls set_label unconditionally. GTK marks the widget dirty on every set_label, even with an identical string — so you repaint at the poll rate rather than the change rate.\n\nGuard it:',
+    code: 'let prev = self.last.replace(text.clone());\nif prev != text {\n    self.label.set_label(&text);\n}',
+    foot: '312 tok · 7.4s · 42 tok/s' }
+];
+
+const REPLIES = [
+  'Cheapest fix is to keep the last rendered string on the widget and compare before writing. For the metric modules you can go further and skip the poll entirely while the bar is occluded — Hyprland fires a visibility event you can subscribe to.',
+  'Two options. Reserve the exclusive zone once at startup and never resize it, or recompute on output change only. Resizing per frame is what causes the workspace shuffle you are seeing.',
+  'Yes — put the sparkline on a separate cairo surface and only redraw it when a sample lands. The text and the graph do not need to share an invalidation.'
+];
+
+class Component extends DCLogic {
+  // model + backend are owned by TezcaBar so the bar module agrees with us.
+  state = {
+    modelsOpen:false, sessionsOpen:false, settings:false,
+    msgs: SEED, draft:'', streaming:false, live:'', attach:null, copied:null, session:'Bar redraw cost'
+  };
+  scrollRef = React.createRef();
+  inputRef = React.createRef();
+
+  vramPct(){
+    return window.TezcaLlm.resolve(this.props.backend, this.props.modelId).vramPct;
+  }
+  componentDidMount(){ this.paint(); }
+  componentDidUpdate(){ this.paint(); this.scrollDown(); }
+  componentWillUnmount(){ clearInterval(this._iv); clearTimeout(this._ct); (this.props.setTps || (()=>{}))(0); }
+
+  paint(){
+    document.querySelectorAll('[data-w="pull61"]').forEach(el => { el.style.width = '61%'; });
+    const pct = this.vramPct();
+    document.querySelectorAll('[data-vram]').forEach(el => { el.style.width = pct + '%'; });
+    document.querySelectorAll('.lpspark [data-h]').forEach(el => { el.style.height = el.getAttribute('data-h') + 'px'; });
+  }
+  scrollDown(){
+    const el = this.scrollRef.current;
+    if (el && !this._pinned) el.scrollTop = el.scrollHeight;
+  }
+
+  stream(text){
+    clearInterval(this._iv);
+    let i = 0;
+    const t0 = Date.now();
+    const setTps = this.props.setTps || (()=>{});
+    setTps(42);
+    this.setState({ streaming:true, live:'' });
+    this._iv = setInterval(() => {
+      i += 3 + Math.floor(Math.random()*4);
+      if (i >= text.length){
+        clearInterval(this._iv);
+        setTps(0);
+        const secs = ((Date.now()-t0)/1000).toFixed(1);
+        const tok = Math.round(text.length/4);
+        this.setState(s => ({
+          streaming:false, live:'',
+          msgs: s.msgs.concat([{ who:'ai', text, foot: tok+' tok · '+secs+'s · '+Math.round(tok/Math.max(0.1,secs))+' tok/s' }])
+        }));
+      } else {
+        this.setState({ live: text.slice(0, i) });
+      }
+    }, 34);
+  }
+
+  send = () => {
+    const d = this.state.draft.trim();
+    if (!d || this.state.streaming) return;
+    const attach = this.state.attach;
+    this.setState(s => ({
+      msgs: s.msgs.concat([{ who:'you', text: attach ? d + '\n[' + attach + ']' : d }]),
+      draft:'', attach:null
+    }));
+    const reply = REPLIES[this.state.msgs.length % REPLIES.length];
+    setTimeout(() => this.stream(reply), 220);
+  };
+
+  renderVals(){
+    const st = this.state;
+    const backend = this.props.backend || 'ROCm';
+    const modelId = this.props.modelId || 'llama3.1:70b';
+    const m = window.TezcaLlm.MODELS[modelId] || window.TezcaLlm.MODELS['llama3.1:70b'];
+    const short = m.short;
+
+    const messages = st.msgs.map((x, i) => ({
+      cls: x.who === 'you' ? 'lpuser' : '',
+      who: x.who === 'you' ? 'you' : short,
+      stamp: x.who === 'you' ? '' : (x.foot ? '' : ''),
+      text: x.text,
+      hasCode: !!x.code, code: x.code || '',
+      copyLabel: st.copied === i ? 'copied' : 'copy',
+      copy: () => { if (x.code && navigator.clipboard) navigator.clipboard.writeText(x.code).catch(()=>{});
+        this.setState({ copied:i }); clearTimeout(this._ct); this._ct = setTimeout(()=>this.setState({copied:null}), 1400); },
+      hasFoot: !!x.foot, foot: x.foot || '',
+      regen: () => this.setState(s => ({ msgs: s.msgs.slice(0, i) }), () => this.stream(x.text))
+    }));
+
+    const setModel = this.props.setModel || (()=>{});
+    const mk = (id) => ({ ...window.TezcaLlm.MODELS[id], pick: () => { setModel(id); this.setState({ modelsOpen:false }); } });
+
+    const spark = [5,9,6,12,8,14,10,7,13,9,11,6].map(h => ({ h }));
+
+    const L = window.TezcaLlm;
+    const r = L.resolve(backend, modelId);
+    const setBackend = this.props.setBackend || (()=>{});
+
+    return {
+      model: { ...r.model, accel: r.accel },
+      accel: r.accel, layers: r.layers, device: r.device, vramLine: r.vramLine,
+      gpuLayers: r.gpuLayers, ctxWindow: r.ctxWindow, ctxLine: r.ctxLine,
+      backends: L.BACKENDS.map(k => ({
+        id: k.id, note: k.note, on: k.id === backend,
+        pick: () => { if (k.ok) setBackend(k.id); }
+      })),
+      messages, spark,
+      resident: L.RESIDENT.map(mk), available: L.AVAILABLE.map(mk),
+      sessions: [
+        { title:'Bar redraw cost', meta:'now · 6 messages', pick: ()=>this.setState({sessionsOpen:false}) },
+        { title:'hyprland exclusive zone', meta:'2h ago · 14 messages', pick: ()=>this.setState({sessionsOpen:false}) },
+        { title:'wgpu surface lost on VT switch', meta:'yesterday · 9 messages', pick: ()=>this.setState({sessionsOpen:false}) },
+        { title:'mayan numeral glyph metrics', meta:'3d ago · 22 messages', pick: ()=>this.setState({sessionsOpen:false}) }
+      ],
+      modelsOpen: st.modelsOpen, sessionsOpen: st.sessionsOpen, settingsOn: st.settings,
+      toggleModels: () => this.setState(s=>({ modelsOpen:!s.modelsOpen, sessionsOpen:false })),
+      toggleSessions: () => this.setState(s=>({ sessionsOpen:!s.sessionsOpen, modelsOpen:false })),
+      toggleSettings: () => this.setState(s=>({ settings:!s.settings })),
+      newChat: () => this.setState({ msgs:[], sessionsOpen:false, session:'New conversation' }),
+      streaming: st.streaming, live: st.live,
+      liveStat: st.streaming ? 'generating · ' + (this.props.tps || '') : '',
+      draft: st.draft, canSend: !st.streaming,
+      onDraft: (e) => this.setState({ draft:e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); this.send(); } },
+      send: this.send,
+      stopGen: () => { clearInterval(this._iv); (this.props.setTps || (()=>{}))(0);
+        this.setState(s => ({ streaming:false, msgs: s.live ? s.msgs.concat([{who:'ai', text:s.live, foot:'stopped'}]) : s.msgs, live:'' })); },
+      sendSelection: () => this.setState({ draft:'fn poll(&self) {\n    self.label.set_label(&read_temp());\n}\n\nwhy does this repaint every tick?' }),
+      attach: () => this.setState({ attach:'arrange.rs' }),
+      attachShot: () => this.setState({ attach:'screenshot · DP-2 · 3440×1440' }),
+      hasAttach: !!st.attach, attachName: st.attach || '', clearAttach: () => this.setState({ attach:null }),
+      tps: this.props.tps || 'idle',
+      scrollRef: this.scrollRef, inputRef: this.inputRef,
+      onClose: this.props.onClose || (()=>{})
+    };
+  }
+}
+</script>
+</body>
+</html>

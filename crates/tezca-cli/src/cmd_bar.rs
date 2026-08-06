@@ -25,6 +25,8 @@ const SCALARS: &[(&str, &str)] = &[
     ("gpu_interval", "3"),
     ("net_interval", "5"),
     ("clock_format", "%a %d %b   %H:%M"),
+    // Extra zones for the clock popover: `Label=Area/City`, comma separated.
+    ("clock_zones", ""),
     ("compact_width", "3000"),
     ("workspace_numerals", "arabic"),
     ("workspace_hide_empty", "false"),

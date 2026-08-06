@@ -185,7 +185,7 @@ async function renderPage() {
 /* ── Command palette (§1.4) ──────────────────────────────────────────────── */
 
 /**
- * The 22 index entries, each pointing at the page that owns it.
+ * The index entries, each pointing at the page that owns it.
  *
  * The values are read live rather than sampled: a palette that says "165 Hz"
  * when the display is at 60 is worse than one that says nothing.
@@ -206,6 +206,7 @@ function paletteIndex() {
         ['dock', 'Pinned favourites', 'reorder'],
         ['displays', 'Arrangement', 'drag to arrange'],
         ['displays', 'Refresh rate', 'per monitor'],
+        ['displays', 'Brightness', 'DDC/CI'],
         ['displays', 'Layout profiles', 'save & apply'],
         ['sound', 'Output device', 'and volume'],
         ['sound', 'Microphone', 'level & mute'],

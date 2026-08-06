@@ -11,6 +11,7 @@
 //!   clear --monitor <NAME>       drop the override (back to the global image)
 //!   clear --all                  drop every override
 //!   list                         show each monitor's effective wallpaper
+//!   fit [mode]                   how an image is scaled onto the screen
 //!   apply                        paint global everywhere, then each override
 
 use crate::{atomic, repo, term, util};
@@ -18,8 +19,22 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// How an image is mapped onto a screen, and the awww `--resize` value each
+/// choice means. awww has no tiling mode, so the fourth choice centres the image
+/// at its own size instead of repeating it.
+const FITS: &[(&str, &str, &str)] = &[
+    ("fill", "crop", "cover the screen, cropping the overflow"),
+    ("fit", "fit", "fit inside the screen, letterboxed"),
+    ("stretch", "stretch", "fill the screen, ignoring the aspect ratio"),
+    ("center", "no", "centre at the image's own size"),
+];
+
 fn state_path() -> Result<PathBuf, String> {
     Ok(repo::config_home()?.join("tezca").join("monitor-wallpapers"))
+}
+
+fn fit_path() -> Result<PathBuf, String> {
+    Ok(repo::config_home()?.join("tezca").join("wallpaper-fit"))
 }
 
 fn global_path() -> Result<PathBuf, String> {
@@ -31,13 +46,15 @@ pub fn run(args: &[&str]) -> i32 {
         Some("set") => cmd_set(&args[1..]),
         Some("clear") | Some("reset") => cmd_clear(&args[1..]),
         None | Some("list") => cmd_list(),
+        Some("library") | Some("lib") => cmd_library(),
+        Some("fit") => cmd_fit(args.get(1).copied()),
         Some("apply") => cmd_apply(),
         Some("-h") | Some("--help") => {
             print_help();
             Ok(())
         }
         Some(other) => Err(format!(
-            "unknown wallpaper subcommand: {other}\n  try: set <img> --monitor <name> · clear · list · apply"
+            "unknown wallpaper subcommand: {other}\n  try: set <img> --monitor <name> · clear · list · fit <mode> · apply"
         )),
     };
     match r {
@@ -127,6 +144,88 @@ fn cmd_list() -> Result<(), String> {
     Ok(())
 }
 
+/// `tezca wallpaper library` — every image the picker can offer, one absolute
+/// path per line, deduplicated and sorted.
+///
+/// The same two places `wallpaper.sh` walks — the repo's shipped set and the
+/// user's own directory — so cycling with SUPER+ALT+arrows and picking in
+/// Settings see one library rather than two.
+fn cmd_library() -> Result<(), String> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(root) = repo::root() {
+        dirs.push(root.join("wallpapers"));
+    }
+    // Exactly the directory `wallpaper.sh` cycles — the FIRST candidate that
+    // exists, not all of them — so SUPER+ALT+arrows and this picker walk one set.
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let candidates: Vec<PathBuf> = std::env::var_os("TEZCA_WALLPAPER_DIR")
+        .filter(|s| !s.is_empty())
+        .map(|d| vec![PathBuf::from(d)])
+        .unwrap_or_else(|| {
+            home.iter()
+                .flat_map(|h| [h.join("Pictures").join("wallpapers"), h.join("Pictures")])
+                .collect()
+        });
+    if let Some(d) = candidates.into_iter().find(|d| d.is_dir()) {
+        dirs.push(d);
+    }
+
+    let mut found: Vec<PathBuf> = Vec::new();
+    for dir in dirs {
+        let Ok(rd) = fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+            if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp") {
+                continue;
+            }
+            let abs = fs::canonicalize(&p).unwrap_or(p);
+            if !found.contains(&abs) {
+                found.push(abs);
+            }
+        }
+    }
+    found.sort();
+    for p in found {
+        println!("{}", p.display());
+    }
+    Ok(())
+}
+
+/// `tezca wallpaper fit [mode]` — read or set how images are scaled, repainting
+/// so the change is visible immediately rather than at the next wallpaper switch.
+fn cmd_fit(mode: Option<&str>) -> Result<(), String> {
+    let Some(mode) = mode else {
+        println!("{}", read_fit());
+        return Ok(());
+    };
+    let (name, _, desc) = FITS.iter().find(|(n, _, _)| *n == mode).ok_or_else(|| {
+        let names: Vec<&str> = FITS.iter().map(|(n, _, _)| *n).collect();
+        format!("unknown fit mode '{mode}' — try: {}", names.join(" · "))
+    })?;
+    atomic::write(&fit_path()?, &format!("{name}\n"))?;
+    println!("  {} {} {}", term::green("✓"), term::bold(name), term::dim(&format!("— {desc}")));
+    cmd_apply()
+}
+
+/// The stored fit mode, defaulting to awww's own default.
+pub fn read_fit() -> String {
+    let stored = fit_path().ok().and_then(|p| fs::read_to_string(p).ok());
+    let stored = stored.as_deref().map(str::trim).unwrap_or("");
+    FITS.iter()
+        .find(|(n, _, _)| *n == stored)
+        .map(|(n, _, _)| (*n).to_string())
+        .unwrap_or_else(|| "fill".into())
+}
+
+/// The awww `--resize` value for the stored fit mode. Public so `tezca theme`
+/// paints the global wallpaper the same way this command paints an override —
+/// one setting, one behaviour, whichever side set the picture.
+pub fn resize_arg() -> &'static str {
+    let fit = read_fit();
+    FITS.iter().find(|(n, _, _)| *n == fit).map(|(_, r, _)| *r).unwrap_or("crop")
+}
+
 /// `tezca wallpaper apply` — paint the global wallpaper on all outputs, then each
 /// override on its output. Called from session autostart (best-effort).
 fn cmd_apply() -> Result<(), String> {
@@ -163,6 +262,7 @@ fn paint(path: &Path, output: Option<&str>) -> Result<(), String> {
     if let Some(o) = output {
         cmd.arg("--outputs").arg(o);
     }
+    cmd.arg("--resize").arg(resize_arg());
     cmd.arg("--transition-type").arg("grow").arg("--transition-pos").arg("center");
     let out = cmd.output().map_err(|e| format!("awww img: {e}"))?;
     if out.status.success() {
@@ -233,6 +333,12 @@ fn print_help() {
     println!("  {}  override one output", term::cyan("set <img> --monitor <NAME>"));
     println!("  {}       drop an override (or --all)", term::cyan("clear --monitor <NAME>"));
     println!("  {}                       show each monitor's wallpaper", term::cyan("list"));
+    println!("  {}                    every image the picker offers", term::cyan("library"));
+    println!(
+        "  {}                 how images are scaled ({})",
+        term::cyan("fit <mode>"),
+        FITS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>().join(" · ")
+    );
     println!(
         "  {}                      repaint global + overrides (autostart)",
         term::cyan("apply")

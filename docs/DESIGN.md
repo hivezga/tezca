@@ -150,8 +150,12 @@ gtk4-layer-shell** top menubar replacing Waybar, built on the same pattern as
 `~/.config/tezca/current/colors.css` and repainted on **SIGUSR2** (so `tezca theme`
 reskins it with no restart). Left cluster = Tezca "mirror" menu · per-app label ·
 per-output workspaces; centre = MPRIS now-playing; right = live CPU/MEM/GPU sparklines ·
-network/volume/brightness/battery · notification bell · clock · power, each clock/
-audio/network module expanding into a glass popover. Per-monitor adaptive: the
+network/volume/brightness/battery · notification bell · clock · power. Nearly every
+module expands into a glass popover: the clock's carries the month, any extra time
+zones (`clock_zones`) and uptime; the volume module's carries the mixer, the output
+device picker and the input device; the media pill's carries cover art, a progress
+trace and the transport; the power glyph's carries the five session actions with
+their chords. Per-monitor adaptive: the
 ultrawide shows the full cluster, the 1440p secondary drops the per-app label and
 tightens. It also introduces the **four Tezcatlipoca themes** (`obsidian` · `xipe` ·
 `huitzilopochtli` · `quetzalcoatl`) — one obsidian base, one accent per direction.
@@ -260,7 +264,16 @@ feel like *one* designed system instead of a rice.
    from the image and re-skins everything. Effortless variety.
 2. **Curated** — named themes in `themes/` (e.g. `obsidian`, the signature dark;
    `smoke`, a soft light variant) that pin a hand-tuned palette + wallpaper + accent,
-   overriding extraction when you want a specific look.
+   overriding extraction when you want a specific look. Each carries a `label` in
+   `theme.meta` — the display name Settings puts on its theme card, beside a swatch
+   strip drawn from that theme's own `colors.css`.
+
+Which mode a *new picture* lands in is a preference, not a property of the command:
+`tezca theme derive off` makes `theme wallpaper <img>` change the picture and leave the
+curated palette alone (Settings ▸ Appearance switches it). Scaling is separate again —
+`tezca wallpaper fit fill|fit|stretch|center` maps onto awww's `--resize`, and both the
+global image and every per-monitor override honour it, so a theme switch cannot quietly
+re-crop what you set.
 
 **Mechanism (omarchy-inspired, proven):**
 
@@ -283,11 +296,11 @@ opacity with blur. A `smoke` light variant ships alongside.
 A single ergonomic binary that *is* the DE's control surface. Rust workspace crate.
 
 ```
-tezca theme list | names | set <name> | wallpaper <img> | reload
+tezca theme list | names | info | set <name> | wallpaper <img> | derive on|off | reload
 tezca game on | off            # toggle gaming profile (blur off, tearing on, MangoHud)
 tezca dock ...                 # talk to tezca-dock
 tezca display list | set <name> … | reset | brightness <name>   # per-monitor mode/scale/pos + DDC brightness
-tezca wallpaper set <img> --monitor <name> | clear | apply      # per-monitor wallpaper overrides
+tezca wallpaper set <img> --monitor <name> | clear | library | fit <mode> | apply  # per-monitor overrides, image library, scaling
 tezca hypr get | set <opt> <val>… | reset | list                # live Hyprland option tuning that persists
 tezca keybind list | rebind --line N … | restore                # inspect + rebind keybindings safely
 tezca settings [--page ...]    # open tezca-settings, the GUI control center

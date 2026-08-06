@@ -29,6 +29,12 @@ net_interval = 5  # network glyph + throughput
 # strftime-style; matches the Waybar format the bar reaches parity with.
 clock_format = %a %d %b   %H:%M
 
+# Extra time zones listed in the clock popover, comma separated. Each entry is
+# `Label=Area/City`, or just `Area/City` to label it with the city name. The
+# times come from `date` with TZ set, so anything in /usr/share/zoneinfo works.
+# Empty (the default) hides the section.
+# clock_zones = Berlin=Europe/Berlin, San Francisco=America/Los_Angeles, UTC
+
 # --- AI provider usage -----------------------------------------------------
 # The [󰚩 41%] module: how much of your AI subscription's rate-limit window
 # you've burned. Click it for the per-provider breakdown.

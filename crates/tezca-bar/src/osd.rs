@@ -18,15 +18,15 @@ use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
 
+use crate::draw::SharedPalette;
+use crate::icon::{self, Icon};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Label, LevelBar, Orientation, Window};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 
-// Glyphs (MDI, supplementary plane so the Write tool keeps them).
-const G_VOL: [&str; 3] = ["\u{F057F}", "\u{F0580}", "\u{F057E}"]; // low / mid / high
-const G_MUTED: &str = "\u{F075F}";
-const G_BRIGHT: &str = "\u{F00DF}"; // matches the bar's brightness module glyph
+/// The pill's glyph, at the size the design's OSD draws it.
+const GLYPH_PX: i32 = 22;
 
 /// Watch PipeWire/PulseAudio for default-sink changes on a background thread,
 /// pinging `tx` (with no payload — the GTK side re-reads the real volume) each
@@ -61,7 +61,7 @@ pub fn subscribe(tx: async_channel::Sender<()>) {
 pub struct Osd {
     window: Window,
     root: GtkBox,
-    glyph: Label,
+    glyph: icon::IconArea,
     level: LevelBar,
     value: Label,
     timeout_ms: u32,
@@ -77,10 +77,11 @@ impl Osd {
     pub fn build(
         app: &gtk4::Application,
         monitor: &gtk4::gdk::Monitor,
+        pal: &SharedPalette,
         timeout_ms: u32,
     ) -> Rc<Osd> {
-        let glyph = Label::new(Some(G_VOL[2]));
-        glyph.add_css_class("osd-glyph");
+        let glyph = icon::icon_at(pal, Icon::VolumeHigh, GLYPH_PX);
+        glyph.area.add_css_class("osd-glyph");
 
         let level = LevelBar::new();
         level.set_min_value(0.0);
@@ -94,7 +95,7 @@ impl Osd {
         value.add_css_class("osd-value");
 
         let row = GtkBox::new(Orientation::Horizontal, 12);
-        row.append(&glyph);
+        row.append(&glyph.area);
         row.append(&level);
         row.append(&value);
 
@@ -125,11 +126,34 @@ impl Osd {
         })
     }
 
+    /// Put the pill away: cancel any pending fade and unmap it. Used when the
+    /// monitor it belongs to goes away, so a pill caught mid-flash isn't left
+    /// for the compositor to re-home onto some other screen.
+    pub fn park(&self) {
+        cancel(&self.fade);
+        cancel(&self.hide);
+        self.root.remove_css_class("show");
+        self.window.set_visible(false);
+    }
+
+    /// Re-bind the overlay to `monitor`.
+    ///
+    /// Layer surfaces do not follow their output across a power cycle — see
+    /// `Bar::sync_monitors` — so the pill has to be re-anchored alongside its
+    /// bar. It stays unmapped: the next volume change maps it on the new output.
+    pub fn set_output(&self, monitor: &gtk4::gdk::Monitor) {
+        self.park();
+        self.window.set_monitor(Some(monitor));
+    }
+
     /// Reveal the OSD for the given sink state, then arm the auto-hide. Called on
     /// every volume change event; re-calling resets the timer.
     pub fn show(self: &Rc<Self>, volume: u32, muted: bool) {
         if muted {
-            self.glyph.set_text(G_MUTED);
+            self.glyph.set(Icon::VolumeMuted);
+            // The stylesheet haloed this with `text-shadow`, which a drawn icon
+            // does not answer to; the glow moves onto the icon itself.
+            self.glyph.set_glow(true);
             self.value.set_text("Muted");
             self.level.set_value(0.0);
             self.root.add_css_class("muted");
@@ -139,7 +163,8 @@ impl Osd {
                 1..=50 => 1,
                 _ => 2,
             };
-            self.glyph.set_text(G_VOL[idx]);
+            self.glyph.set([Icon::VolumeLow, Icon::VolumeMid, Icon::VolumeHigh][idx]);
+            self.glyph.set_glow(false);
             self.value.set_text(&format!("{volume}%"));
             self.level.set_value(volume.min(100) as f64);
             self.root.remove_css_class("muted");
@@ -150,7 +175,8 @@ impl Osd {
     /// Reveal the OSD for a backlight brightness change (laptop panels). Same
     /// pill as the volume OSD, a sun glyph, no mute concept.
     pub fn show_brightness(self: &Rc<Self>, percent: u32) {
-        self.glyph.set_text(G_BRIGHT);
+        self.glyph.set(Icon::Brightness);
+        self.glyph.set_glow(false);
         self.value.set_text(&format!("{percent}%"));
         self.level.set_value(percent.min(100) as f64);
         self.root.remove_css_class("muted");

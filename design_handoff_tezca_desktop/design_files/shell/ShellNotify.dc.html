@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>.nt{width:400px;display:flex;gap:10px;padding:12px;background:var(--cardbase);border:1px solid color-mix(in srgb, var(--accent) 14%, transparent);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.45);backdrop-filter:var(--blur);animation:shslide .2s cubic-bezier(.2,.8,.3,1);position:relative}
+[data-look="cyber"] .nt{border-radius:4px}
+.nt[data-urgency="critical"]{border:1px solid color-mix(in srgb, var(--urgent) 55%, transparent)}
+.nt[data-urgency="low"]{opacity:.9}
+.ntico{width:48px;height:48px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font:700 17px/1 var(--font);flex:none}
+[data-look="cyber"] .ntico{border-radius:3px}
+.ntsummary{font-size:14px;font-weight:600;color:var(--text)}
+.nttime{font-size:12px;color:var(--muted);white-space:nowrap;flex:none}
+.nthead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding-right:22px}
+.ntbody{font-size:13px;line-height:1.45;color:var(--sub);margin-top:4px}
+.ntact{display:flex;gap:7px;margin-top:10px}
+.ntbtn{font-size:13px;margin:4px 0;padding:6px 10px;border-radius:12px;border:1px solid color-mix(in srgb, var(--accent) 18%, transparent);background:color-mix(in srgb, var(--accent) 6%, transparent);color:var(--text);cursor:pointer;transition:all .13s}
+.ntbtn:hover{background:color-mix(in srgb, var(--accent) 18%, transparent);border-color:color-mix(in srgb, var(--accent) 40%, transparent)}
+.ntclose{position:absolute;top:6px;right:6px;padding:2px 6px;border-radius:8px;color:var(--muted);font-size:13px;cursor:pointer;transition:all .13s}
+.ntclose:hover{background:color-mix(in srgb, var(--urgent) 85%, transparent);color:var(--onacc)}
+[data-look="cyber"] .ntbtn{border-radius:2px}
+.nttimer{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);opacity:.6}
+.ntstack{position:absolute;inset:0;border-radius:var(--r);border:1px solid var(--line);background:var(--glass2)}
+.ntcard{border:1px solid var(--line);border-radius:14px;background:var(--card);padding:13px 14px}
+[data-look="cyber"] .ntcard{border-radius:4px}
+.ntname{font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:5px}
+.ntwhy{font-size:11.5px;line-height:1.55;color:var(--muted)}</style></helmet><div><div class="shstage" style="padding:18px 18px 46px;display:flex;justify-content:flex-end"><div class="shscrim"></div><div style="position:relative;display:flex;flex-direction:column;gap:10px"><div class="nt" data-urgency="normal"><span class="ntico" data-bg="signal">S</span><div style="flex:1;min-width:0"><div class="nthead"><span class="ntsummary">Ana Rivera</span><span class="nttime">Signal · now</span></div><div class="ntbody">pushed the arrange.rs fix — mind taking a look before standup?</div><div class="ntact"><span class="ntbtn">Reply</span><span class="ntbtn">Mark read</span></div></div><span class="ntclose">✕</span><i class="nttimer" data-w="72" title="PROPOSED — swaync draws no timeout indicator"></i></div><div class="nt" data-urgency="critical"><span class="ntico" data-bg="power">!</span><div style="flex:1;min-width:0"><div class="nthead"><span class="ntsummary">Battery at 6%</span><span class="nttime">System · critical</span></div><div class="ntbody">About 11 minutes left. Suspending automatically at 3%.</div><div class="ntact"><span class="ntbtn">Suspend now</span><span class="ntbtn">Power saver</span></div></div><span class="ntclose">✕</span></div><div style="position:relative"><div class="nt" data-urgency="low" style="position:relative;z-index:3"><span class="ntico" data-bg="ghostty">G</span><div style="flex:1;min-width:0"><div class="nthead"><span class="ntsummary">cargo build finished</span><span class="nttime">Ghostty · 11m</span></div><div class="ntbody">tezca-bar · 48s · 0 warnings</div></div><span class="ntclose">✕</span><span class="shmono" style="align-self:flex-start">3</span></div><div class="ntstack" style="top:6px;left:6px;right:-6px;bottom:-6px;z-index:2;opacity:.6"></div><div class="ntstack" style="top:11px;left:11px;right:-11px;bottom:-11px;z-index:1;opacity:.3"></div></div></div><span class="shmono" style="position:absolute;left:18px;bottom:14px;color:var(--onwall)">positionX right · positionY top · 400px · 200ms transition</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px"><div class="ntcard"><div class="ntname">Three urgency levels<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--gold);margin-left:7px">TIMER PROPOSED</span></div><div class="ntwhy">Straight from <span style="font-family:var(--mono);color:var(--sub)">config.json</span>: <span style="font-family:var(--mono);color:var(--sub)">timeout-low</span> 4s, <span style="font-family:var(--mono);color:var(--sub)">timeout</span> 8s, <span style="font-family:var(--mono);color:var(--sub)">timeout-critical</span> 0 — critical never dismisses itself and takes a red rim, the same colour the bar uses for battery and recording. The 2px countdown hairline on the Signal toast is <span style="color:var(--gold)">proposed</span> — swaync renders no timeout indicator today.</div></div><div class="ntcard"><div class="ntname">Stacking, not flooding<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--gold);margin-left:7px">PROPOSED</span></div><div class="ntwhy">swaync exposes no grouping option — today the third toast simply stacks vertically. Collapsing same-app runs behind a counted card would need a fork or a wrapper; the bell module already keeps the full history.</div></div><div class="ntcard"><div class="ntname">Actions in the toast</div><div class="ntwhy"><span style="font-family:var(--mono);color:var(--sub)">notification-inline-replies</span> and <span style="font-family:var(--mono);color:var(--sub)">notification-2fa-action</span> are both on, so Signal can be answered from the toast without focusing the app.</div></div><div class="ntcard"><div class="ntname">Do not disturb</div><div class="ntwhy">The <span style="font-family:var(--mono);color:var(--sub)">dnd</span> widget is in the control-center widget list. Toasts queue into the bell with a count; critical still gets through.</div></div></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const BG = {
+  signal:'linear-gradient(145deg,#4a7fd4,#24468a)',
+  ghostty:'linear-gradient(145deg,#2f3b3d,#161d1e)',
+  power:'linear-gradient(145deg,#e06c75,#8c3238)'
+};
+class Component extends DCLogic {
+  componentDidMount(){ this.paint(); }
+  componentDidUpdate(){ this.paint(); }
+  paint(){
+    document.querySelectorAll('[data-bg]').forEach(el => {
+      const b = BG[el.getAttribute('data-bg')]; if (b) el.style.background = b;
+    });
+    document.querySelectorAll('.nttimer[data-w]').forEach(el => { el.style.width = el.getAttribute('data-w') + '%'; });
+  }
+  renderVals(){ return {}; }
+}
+</script>
+</body>
+</html>

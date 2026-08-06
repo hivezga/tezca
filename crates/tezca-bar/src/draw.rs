@@ -1,8 +1,12 @@
 //! Self-drawn bits — the pieces a config bar can't render, painted with cairo
-//! from the live [`Palette`]: the Tezca "mirror" glyph, the CPU/MEM sparklines,
-//! and the now-playing equaliser. Each is a [`gtk4::DrawingArea`]; the sparkline
-//! and equaliser own a little state (history buffer / animation phase). All read
-//! a shared `Rc<RefCell<Palette>>` so a theme reload repaints them.
+//! from the live [`Palette`]: the CPU/MEM sparklines, the now-playing
+//! equaliser, and the Mayan workspace numerals. Each is a
+//! [`gtk4::DrawingArea`]; the sparkline and equaliser own a little state
+//! (history buffer / animation phase). All read a shared `Rc<RefCell<Palette>>`
+//! so a theme reload repaints them.
+//!
+//! The status icons live in [`crate::icon`] instead — they are the design's own
+//! path data rather than shapes composed here.
 
 use crate::theme::Palette;
 use gtk4::cairo::Context;
@@ -19,45 +23,6 @@ pub type SharedPalette = Rc<RefCell<Palette>>;
 
 fn set_src(cr: &Context, c: gtk4::gdk::RGBA, a: f64) {
     cr.set_source_rgba(c.red() as f64, c.green() as f64, c.blue() as f64, c.alpha() as f64 * a);
-}
-
-/// The rotated obsidian-mirror square with an accent gradient + glow. `edge` is
-/// the square's side length in px; the area is sized generously so the glow room
-/// isn't clipped.
-pub fn mirror_glyph(pal: &SharedPalette, edge: f64) -> DrawingArea {
-    let area = DrawingArea::new();
-    let box_side = (edge * 2.0).ceil() as i32;
-    area.set_content_width(box_side);
-    area.set_content_height(box_side);
-    let pal = pal.clone();
-    area.set_draw_func(move |_, cr, w, h| {
-        let p = pal.borrow();
-        let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
-
-        // Soft glow behind the square.
-        let glow = gtk4::cairo::RadialGradient::new(cx, cy, 0.0, cx, cy, edge * 0.95);
-        let a = p.accent;
-        glow.add_color_stop_rgba(0.0, a.red() as f64, a.green() as f64, a.blue() as f64, 0.55);
-        glow.add_color_stop_rgba(1.0, a.red() as f64, a.green() as f64, a.blue() as f64, 0.0);
-        let _ = cr.set_source(&glow);
-        cr.arc(cx, cy, edge * 0.95, 0.0, 2.0 * PI);
-        let _ = cr.fill();
-
-        // Rotated gradient square (135° accent → accent_dim).
-        cr.save().ok();
-        cr.translate(cx, cy);
-        cr.rotate(PI / 4.0);
-        let half = edge / 2.0;
-        let lin = gtk4::cairo::LinearGradient::new(-half, -half, half, half);
-        let ad = p.accent_dim;
-        lin.add_color_stop_rgba(0.0, a.red() as f64, a.green() as f64, a.blue() as f64, 1.0);
-        lin.add_color_stop_rgba(1.0, ad.red() as f64, ad.green() as f64, ad.blue() as f64, 1.0);
-        let _ = cr.set_source(&lin);
-        rounded_rect(cr, -half, -half, edge, edge, 3.0);
-        let _ = cr.fill();
-        cr.restore().ok();
-    });
-    area
 }
 
 /// Which theme token a sparkline strokes with — one per metric so CPU, MEM, and
@@ -104,18 +69,11 @@ pub fn sparkline(pal: &SharedPalette, color: SparkColor) -> Sparkline {
         let dx = w / (n - 1) as f64;
         let xy = |i: usize, v: f64| (i as f64 * dx, h - v.clamp(0.0, 1.0) * (h - 1.0) - 0.5);
 
-        // Filled area under the line.
-        cr.move_to(0.0, h);
-        for (i, &v) in hist.iter().enumerate() {
-            let (x, y) = xy(i, v);
-            cr.line_to(x, y);
-        }
-        cr.line_to(w, h);
-        cr.close_path();
-        set_src(cr, col, 0.14);
-        let _ = cr.fill();
-
-        // Stroke on top.
+        // Stroke only — no area under it. The design's sparkline is a bare
+        // `<polyline>` on an `fill="none"` svg, and the wash this used to lay
+        // down did not read as a subtle tint at bar size: against the glass it
+        // filled in as a solid block, so a steady metric showed up as a bar
+        // rather than as the flat trace it actually is.
         for (i, &v) in hist.iter().enumerate() {
             let (x, y) = xy(i, v);
             if i == 0 {
@@ -209,9 +167,18 @@ const DOT_GAP: f64 = 2.5;
 const BAR_W: f64 = 13.0;
 const BAR_H: f64 = 2.5;
 const ROW_GAP: f64 = 2.0;
-const NUMERAL_W: i32 = 20;
-/// Fixed, so a "1" and a "19" occupy the same box and the pills stay aligned.
+/// Fixed height, so every numeral centres on the same line; the *width* follows
+/// the numeral, because the design's pill is sized by its content against a
+/// 26px floor. A fixed 20px box made a one-dot pill 43px where the mock's is 26.
 const NUMERAL_H: i32 = 18;
+
+/// How wide `value` draws — the wider of its dot row and its bar row.
+fn numeral_width(value: i32) -> f64 {
+    let dots = value % 5;
+    let dot_row = if dots > 0 { dots as f64 * DOT + DOT_GAP * (dots - 1) as f64 } else { 0.0 };
+    let bar_row = if value / 5 > 0 { BAR_W } else { 0.0 };
+    dot_row.max(bar_row)
+}
 
 /// The largest value that has a bar-and-dot form here. Mayan is vigesimal, so
 /// past this a numeral becomes a stack of positional digits — three rows of
@@ -230,7 +197,7 @@ pub const MAYAN_MAX: i32 = 19;
 /// pill through idle → occupied → active without knowing those states exist.
 pub fn mayan_numeral(value: i32) -> DrawingArea {
     let area = DrawingArea::new();
-    area.set_content_width(NUMERAL_W);
+    area.set_content_width(numeral_width(value).ceil() as i32);
     area.set_content_height(NUMERAL_H);
     area.set_valign(gtk4::Align::Center);
     area.set_halign(gtk4::Align::Center);

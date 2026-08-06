@@ -44,21 +44,22 @@ pub fn run(args: &[&str]) -> i32 {
         None | Some("list") | Some("ls") => cmd_list(),
         // Machine-readable name list (one per line) for scripts + tezca-settings.
         Some("names") => cmd_names(),
+        // Machine-readable records (name, label, swatch colours) for the
+        // Settings theme cards, which draw a real swatch strip per theme.
+        Some("info") => cmd_info(),
         Some("set") => match it.next() {
             Some(name) => cmd_set(name),
             None => Err("usage: tezca theme set <name>".into()),
         },
-        Some("wallpaper") | Some("wall") => match it.next() {
-            Some(img) => cmd_wallpaper(img),
-            None => Err("usage: tezca theme wallpaper <image>".into()),
-        },
+        Some("wallpaper") | Some("wall") => cmd_wallpaper(&args[1..]),
+        Some("derive") => cmd_derive(it.next()),
         Some("reload") => cmd_reload(),
         Some("-h") | Some("--help") => {
             print_help();
             Ok(())
         }
         Some(other) => Err(format!(
-            "unknown theme subcommand: {other}\n  try: list · set <name> · wallpaper <img> · reload"
+            "unknown theme subcommand: {other}\n  try: list · set <name> · wallpaper <img> · derive on|off · reload"
         )),
     };
     match r {
@@ -136,12 +137,147 @@ fn cmd_names() -> Result<(), String> {
     Ok(())
 }
 
+/// One record per curated theme, for the Settings theme cards.
+///
+/// The cards draw a real swatch strip, so they need the palette itself and not
+/// just the name — and resolving `themes/<name>/colors.css` is the CLI's job,
+/// since it is the only side that knows where the repo lives.
+fn cmd_info() -> Result<(), String> {
+    let root = repo::root()?;
+    let active = read_state();
+    for (name, desc) in curated_themes()? {
+        let dir = root.join("themes").join(&name);
+        let meta = read_meta(&dir.join("theme.meta")).unwrap_or_default();
+        println!("@theme");
+        println!("name={name}");
+        println!("label={}", meta_get(&meta, "label").unwrap_or(&capitalize(&name)));
+        println!("description={desc}");
+        println!("mode={}", meta_get(&meta, "mode").unwrap_or("dark"));
+        println!("active={}", active.as_deref() == Some(name.as_str()));
+        if let Some(w) = meta_get(&meta, "wallpaper") {
+            println!("wallpaper={}", resolve_wallpaper(&root, w).display());
+        }
+        // The four bars the card's swatch strip draws, widest first.
+        let colors = read_tokens(&dir.join("colors.css"));
+        for token in ["tz_base", "tz_surface", "tz_accent", "tz_gold", "tz_urgent", "tz_text"] {
+            if let Some(hex) = colors.iter().find(|(k, _)| k == token) {
+                println!("{}={}", token.trim_start_matches("tz_"), hex.1);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `@define-color <name> <value>;` pairs out of a GTK palette file.
+fn read_tokens(path: &Path) -> Vec<(String, String)> {
+    let Ok(text) = fs::read_to_string(path) else { return Vec::new() };
+    text.lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix("@define-color")?;
+            let rest = rest.trim().strip_suffix(';')?;
+            let (k, v) = rest.split_once(char::is_whitespace)?;
+            Some((k.trim().to_string(), v.trim().to_string()))
+        })
+        .collect()
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
 fn cmd_set(name: &str) -> Result<(), String> {
     apply_curated(name, Opts { set_wallpaper: true, reload: true, announce: true })
 }
 
-fn cmd_wallpaper(img: &str) -> Result<(), String> {
-    apply_dynamic(img, Opts { set_wallpaper: true, reload: true, announce: true })
+/// `tezca theme wallpaper <img> [--derive|--no-derive]`.
+///
+/// Whether a new picture also re-derives the palette is a preference, not a
+/// property of the command: someone running a curated theme wants the picture to
+/// change without matugen repainting the desktop under them. The flags force
+/// either behaviour for scripts that need to be explicit.
+fn cmd_wallpaper(args: &[&str]) -> Result<(), String> {
+    let mut img: Option<&str> = None;
+    let mut derive: Option<bool> = None;
+    for a in args {
+        match *a {
+            "--derive" => derive = Some(true),
+            "--no-derive" | "--keep-palette" => derive = Some(false),
+            other if !other.starts_with('-') => img = Some(other),
+            other => return Err(format!("unknown flag: {other}")),
+        }
+    }
+    let img = img.ok_or("usage: tezca theme wallpaper <image> [--no-derive]")?;
+    let opts = Opts { set_wallpaper: true, reload: true, announce: true };
+    if derive.unwrap_or_else(read_derive) {
+        apply_dynamic(img, opts)
+    } else {
+        set_picture_only(img, &opts)
+    }
+}
+
+/// Paint `img` and record it as the session wallpaper, leaving the palette — and
+/// so `theme.state` — exactly as it was.
+fn set_picture_only(img: &str, opts: &Opts) -> Result<(), String> {
+    let abs = fs::canonicalize(img).map_err(|e| format!("cannot read image '{img}': {e}"))?;
+    let current = current_dir()?;
+    fs::create_dir_all(&current)
+        .map_err(|e| format!("cannot create {}: {e}", current.display()))?;
+
+    if opts.announce {
+        announce_header("wallpaper");
+        println!("  {} {}", term::dim("picture:"), term::cyan(&abs.display().to_string()));
+        println!("  {}", term::dim("palette unchanged (`tezca theme derive on` to re-derive)"));
+    }
+    atomic::write(&current.join("wallpaper"), &format!("{}\n", abs.display()))?;
+    set_wallpaper(&abs);
+    crate::cmd_wallpaper::apply_overrides();
+    if opts.announce {
+        println!();
+        println!("  {} wallpaper set", term::green("done:"));
+    }
+    Ok(())
+}
+
+/// `tezca theme derive [on|off]` — whether a new wallpaper re-derives the palette.
+fn cmd_derive(arg: Option<&str>) -> Result<(), String> {
+    match arg {
+        None => {
+            println!("{}", if read_derive() { "on" } else { "off" });
+            Ok(())
+        }
+        Some(v) => {
+            let on = match v {
+                "on" | "true" | "yes" | "1" => true,
+                "off" | "false" | "no" | "0" => false,
+                other => return Err(format!("expected on|off, got '{other}'")),
+            };
+            atomic::write(&derive_path()?, if on { "true\n" } else { "false\n" })?;
+            println!(
+                "  {} new wallpapers {} the palette",
+                term::green("✓"),
+                if on { "re-derive" } else { "leave" }
+            );
+            Ok(())
+        }
+    }
+}
+
+fn derive_path() -> Result<PathBuf, String> {
+    Ok(repo::config_home()?.join("tezca").join("wallpaper-derive"))
+}
+
+/// The stored preference, defaulting to on — matugen theming is the headline
+/// behaviour of `tezca theme`, so an unset preference keeps it.
+pub fn read_derive() -> bool {
+    derive_path()
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .map(|s| s.trim() != "false")
+        .unwrap_or(true)
 }
 
 /// Re-apply the current theme: set its wallpaper and re-send reload signals.
@@ -476,6 +612,11 @@ fn set_wallpaper(path: &Path) {
     let o = Command::new("awww")
         .arg("img")
         .arg(path)
+        // The fit mode is `tezca wallpaper`'s setting, but it has to apply to the
+        // global image too — otherwise the picture Settings previews as "fit"
+        // comes back cropped the moment a theme switch repaints it.
+        .arg("--resize")
+        .arg(crate::cmd_wallpaper::resize_arg())
         .arg("--transition-type")
         .arg("grow")
         .arg("--transition-pos")
@@ -638,8 +779,16 @@ fn print_help() {
     println!();
     println!("  {}             curated themes, marking the active one", term::cyan("list"));
     println!("  {}            bare names, one per line (for scripts)", term::cyan("names"));
+    println!("  {}             one record per theme, with its palette", term::cyan("info"));
     println!("  {}       apply a curated palette", term::cyan("set <name>"));
-    println!("  {}  extract a palette from any image (matugen)", term::cyan("wallpaper <img>"));
+    println!(
+        "  {}  set the picture (and, if deriving, the palette)",
+        term::cyan("wallpaper <img>")
+    );
+    println!(
+        "  {}      whether a new wallpaper re-derives the palette",
+        term::cyan("derive [on|off]")
+    );
     println!(
         "  {}           re-apply the active theme and re-send reload signals",
         term::cyan("reload")

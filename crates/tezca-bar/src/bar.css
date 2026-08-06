@@ -106,13 +106,19 @@ button.mirror:hover {
 .workspaces {
     padding: 0 4px;
 }
+/* 8px, not the design's 26px — the two box models disagree.
+   The prototype sets `*{box-sizing:border-box}`, so its `min-width:26px` is the
+   pill's OUTSIDE edge and the 9px padding lives inside it. GTK's `min-width` is
+   a floor on the CONTENT box and padding is added on top, so 26px here drew a
+   44px pill. 26 − 2×9 = 8 puts the smallest pill back on the design's 26px
+   while leaving wider numerals to grow past it exactly as the mock's do. */
 button.ws {
     color: @tz_muted;
     background: transparent;
     border-radius: 9px;
     padding: 0 9px;
     margin: 0 2px;
-    min-width: 26px;
+    min-width: 8px;
     min-height: 26px;
     transition: all 180ms cubic-bezier(0.25, 0.1, 0.25, 1);
 }
@@ -122,9 +128,13 @@ button.ws:hover {
 }
 /* Bar-and-dot numerals are painted by draw.rs, so this needs no font — only
    the room the glyph occupies. The pill's `color` is what the numeral strokes
-   with, which is why active/occupied need no rule of their own here. */
+   with, which is why active/occupied need no rule of their own here.
+
+   Same 9px as the arabic pill: the numeral is content-width now, so the two
+   spellings land on the design's 26px floor instead of the mayan one running
+   wide. */
 button.ws.mayan {
-    padding: 0 8px;
+    padding: 0 9px;
 }
 /* Occupied-but-not-focused: a step brighter than empty, a step below active.
    Without this a workspace holding windows is indistinguishable from one that
@@ -261,6 +271,9 @@ button.ws.urgent {
 .control.active {
     color: @tz_accent;
 }
+/* The status icons are drawn (icon.rs) and take their colour from whatever the
+   module sets here. A community module may still supply its own glyph as text,
+   which is what still needs the font. */
 .glyph {
     font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
 }
@@ -515,8 +528,26 @@ button.bell:hover {
 button.bell.unread {
     color: @tz_accent;
 }
+/* The count, not a dot. Reversed out of the accent so it reads as a badge
+   rather than as one more number in the cluster. */
+.notif-count {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: @tz_base;
+    background: @tz_accent;
+    border-radius: 7px;
+    padding: 1px 5px;
+}
 
 /* ── Clock ──────────────────────────────────────────────────────────────── */
+/* The time half only. Mono with tabular figures because it is the part that
+   changes: Inter's proportional digits make a minute tick shuffle the whole
+   module sideways. The date keeps the button's own face. */
+.clock-time {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-feature-settings: "tnum" 1;
+}
 button.clock {
     background: transparent;
     color: @tz_text;
@@ -545,15 +576,15 @@ button.clock:hover {
 }
 
 /* ── Game mode ──────────────────────────────────────────────────────────── */
+/* Only ever visible while it is on, so the module has one look and the icon
+   carries its glow unconditionally. */
 .gamemode {
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
     color: @tz_gold;
     padding: 0;
 }
 .gamemode.active {
     padding: 0 8px;
     color: @tz_gold;
-    text-shadow: 0 0 8px alpha(@tz_gold, 0.60);
 }
 .gamemode-fps {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
@@ -563,27 +594,28 @@ button.clock:hover {
 }
 
 /* ── Camera-in-use privacy indicator ────────────────────────────────────── */
-/* A lone webcam glyph that appears only while an app holds the camera open.
-   Urgent-red with a soft glow so it reads as "you're on camera", not decoration. */
+/* A lone webcam icon that appears only while an app holds the camera open.
+   Urgent-red with a soft glow so it reads as "you're on camera", not decoration.
+
+   The glow is no longer here. These icons are drawn (see icon.rs), and
+   `text-shadow` is a property of *text* — it had stopped rendering the moment
+   the glyph became a widget. `IconArea::set_glow` paints the halo instead; what
+   stays in CSS is the colour, which the icon reads back as its `currentColor`. */
 .camera {
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
     color: @tz_urgent;
     padding: 0 8px;
 }
 .camera .glyph {
     color: @tz_urgent;
-    text-shadow: 0 0 8px alpha(@tz_urgent, 0.55);
 }
 /* Microphone-in-use — same privacy-dot family as the camera, but gold so the
    two read as distinct at a glance (camera = red, mic = gold). */
 .mic {
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
     color: @tz_gold;
     padding: 0 8px;
 }
 .mic .glyph {
     color: @tz_gold;
-    text-shadow: 0 0 8px alpha(@tz_gold, 0.55);
 }
 
 /* ── Volume OSD (tezca-osd overlay window) ──────────────────────────────── */
@@ -606,9 +638,8 @@ window.tezca-osd {
 .osd.show {
     opacity: 1;
 }
+/* Drawn at 22px by icon.rs; this is only its colour. */
 .osd-glyph {
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
-    font-size: 22px;
     color: @tz_accent;
 }
 .osd-value {
@@ -634,7 +665,6 @@ window.tezca-osd {
 /* Muted → the whole pill goes urgent and the fill drains. */
 .osd.muted .osd-glyph {
     color: @tz_urgent;
-    text-shadow: 0 0 8px alpha(@tz_urgent, 0.5);
 }
 .osd.muted .osd-level block.filled {
     background: alpha(@tz_urgent, 0.5);
@@ -710,6 +740,72 @@ popover.tz-popover > contents {
 .pop-big.tz-xl {
     font-size: 34px;
 }
+/* ── Now-playing popover ────────────────────────────────────────────────── */
+/* The pill's art at popover size. Same gradient placeholder as the strip, so a
+   player that publishes no cover still reads as artwork rather than a hole. */
+.np-art-lg {
+    border-radius: 10px;
+    min-width: 58px;
+    min-height: 58px;
+    background: linear-gradient(135deg, @tz_accent_dim, @tz_gold);
+    box-shadow: 0 4px 14px alpha(black, 0.45);
+}
+.np-transport {
+    font-family: "JetBrainsMono Nerd Font", "Symbols Nerd Font", monospace;
+    font-size: 17px;
+    color: @tz_subtext;
+    background: transparent;
+    padding: 2px 4px;
+    min-height: 0;
+    min-width: 0;
+}
+.np-transport:hover {
+    color: @tz_text;
+}
+.np-transport.primary {
+    font-size: 21px;
+    color: @tz_text;
+}
+
+/* A two-state chip: shuffle and repeat, off until the player says otherwise. */
+.pop-chip {
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    font-size: 10px;
+    color: @tz_muted;
+    background: alpha(@tz_muted, 0.10);
+    border-radius: 5px;
+    padding: 2px 8px;
+    min-height: 0;
+}
+.pop-chip.on {
+    color: @tz_accent;
+    background: alpha(@tz_accent, 0.12);
+}
+
+/* The output picker's selection marker — filled for the device in use, an
+   outline for the ones a click would switch to. */
+.dot-on,
+.dot-off {
+    min-width: 6px;
+    min-height: 6px;
+    border-radius: 50%;
+}
+.dot-on {
+    background: @tz_accent;
+}
+.dot-off {
+    border: 1px solid @tz_faint;
+}
+.appmenu-item.selected {
+    color: @tz_text;
+    background: alpha(@tz_accent, 0.10);
+    border-radius: 7px;
+}
+.appmenu-item.danger:hover {
+    color: @tz_urgent;
+    background: alpha(@tz_urgent, 0.10);
+}
+
 /* Per-core grid and the battery trace: many small vertical bars read as one
    shape, so they get no gap of their own beyond the box spacing. */
 .core-grid {
@@ -726,6 +822,13 @@ levelbar.core block.filled {
 }
 levelbar.core block.empty {
     background: transparent;
+}
+
+/* Network throughput chart: down and up share a column, so they need to read
+   apart at a glance. Down keeps the accent (it is the number you are usually
+   watching); up takes the dimmer partner. */
+levelbar.core.net-up block.filled {
+    background: @tz_accent_dim;
 }
 
 /* Calendar (clock popover). */
@@ -771,34 +874,26 @@ levelbar.mix block.empty {
 
 /* --- Session indicators (recording · caffeine · night light) ------------- */
 /* Recording joins the camera/microphone privacy family: red and glowing, so
-   "something is capturing" reads the same way whatever the source. */
+   "something is capturing" reads the same way whatever the source. Glow as
+   above — drawn, not shadowed. */
 .recording {
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
     padding: 0 8px;
 }
 .recording .glyph {
     color: @tz_urgent;
-    text-shadow: 0 0 8px alpha(@tz_urgent, 0.55);
 }
 /* Keep-awake and night light are states you chose, not warnings — accent and
-   gold rather than the urgent red. */
+   gold rather than the urgent red, and no halo: the three that glow are the
+   three that report something watching you. */
 .caffeine {
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
     padding: 0 8px;
 }
 .caffeine .glyph {
     color: @tz_accent;
 }
-.caffeine:hover .glyph {
-    text-shadow: 0 0 8px alpha(@tz_accent, 0.5);
-}
 .night {
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
     padding: 0 8px;
 }
 .night .glyph {
     color: @tz_gold;
-}
-.night:hover .glyph {
-    text-shadow: 0 0 8px alpha(@tz_gold, 0.5);
 }

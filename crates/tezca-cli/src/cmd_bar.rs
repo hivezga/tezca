@@ -7,8 +7,9 @@
 //! palette (sent by `tezca theme`).
 
 use crate::{atomic, repo, term, util};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use tezca_barlayout::{unknown_ids, Mod, Region};
 
 const BIN: &str = "tezca-bar";
 
@@ -42,25 +43,18 @@ const SCALARS: &[(&str, &str)] = &[
     ("weather_interval", "900"),
     ("weather_unit", "celsius"),
     ("weather_aqi", "false"),
-    // Local AI (Ollama). Loopback only — see crates/tezca-bar/src/llm.rs.
-    ("llm_enabled", "false"),
-    ("llm_backend", "auto"),
-    ("llm_port", "0"),
-    ("llm_interval", "5"),
-    ("llm_model", ""),
-    ("llm_system", ""),
     // How the right cluster copes with its own length: all / grouped / hover /
     // tiers. See crates/tezca-bar/src/config.rs::Clutter.
     ("clutter", "all"),
-    // Per-region module layout (ordered, comma-separated ids). Defaults mirror
-    // crates/tezca-bar/src/config.rs so `config` reports the real arrangement.
-    ("layout_left", "mirror, sep, appname, sep, workspaces, submap"),
-    ("layout_center", "nowplaying"),
-    (
-        "layout_right",
-        "gamemode, camera, microphone, recording, caffeine, night, ai, tray, cpu, mem, gpu, sep, network, bluetooth, volume, brightness, battery, sep, bell, clock, power",
-    ),
 ];
+
+/// Per-region module layout (ordered, comma-separated ids). Not in `SCALARS`
+/// because the defaults come from `tezca-barlayout`, which the bar itself reads
+/// too — the CLI used to keep its own copy of the right cluster and there is no
+/// reason for two.
+fn layout_scalars() -> Vec<(&'static str, &'static str)> {
+    Region::ALL.into_iter().map(|r| (r.key(), r.default_layout())).collect()
+}
 
 /// Per-output workspace assignment keys look like `workspaces.<connector>` and
 /// so can't live in the fixed `SCALARS` table; `set` accepts anything under
@@ -75,14 +69,16 @@ pub fn run(args: &[&str]) -> i32 {
         Some("restart") => cmd_restart(),
         Some("toggle") => cmd_toggle(),
         Some("config") => cmd_config(),
+        Some("modules") => cmd_modules(),
         Some("set") => cmd_set(&args[1..]),
+        Some("unset") => cmd_unset(&args[1..]),
         Some("weather") => cmd_weather(&args[1..]),
         Some("-h") | Some("--help") => {
             print_help();
             Ok(())
         }
         Some(other) => Err(format!(
-            "unknown bar subcommand: {other}\n  try: status · start · stop · restart · toggle · config · set · weather"
+            "unknown bar subcommand: {other}\n  try: status · start · stop · restart · toggle · config · modules · set · unset · weather"
         )),
     };
     match r {
@@ -157,6 +153,20 @@ fn bar_toml() -> Result<PathBuf, String> {
     Ok(repo::config_home()?.join("tezca-bar").join("config.toml"))
 }
 
+/// `tezca bar modules` — every placeable module id, one per line as
+/// `id<TAB>label<TAB>hint`.
+///
+/// Machine-readable on purpose: it is what the settings Modules editor reads to
+/// populate its picker. That editor used to carry its own hardcoded list, which
+/// drifted until it was offering two modules the bar has never had and spelling
+/// three more by their aliases. Now there is one list and everyone asks it.
+fn cmd_modules() -> Result<(), String> {
+    for m in Mod::ALL {
+        println!("{}\t{}\t{}", m.id(), m.label(), m.hint());
+    }
+    Ok(())
+}
+
 /// `tezca bar config` — the effective values (file over defaults), one per line
 /// (`key = value`). Machine-readable for tezca-settings.
 fn cmd_config() -> Result<(), String> {
@@ -165,7 +175,13 @@ fn cmd_config() -> Result<(), String> {
         let val = read_scalar(&text, key).unwrap_or_else(|| default.to_string());
         println!("{key} = {val}");
     }
-    // Plus any per-output workspace assignments the file defines (dynamic keys).
+    for (key, default) in layout_scalars() {
+        let val = read_scalar(&text, key).unwrap_or_else(|| default.to_string());
+        println!("{key} = {val}");
+    }
+    // Plus the dynamic keys the file defines: per-output workspace sets and
+    // per-monitor layout overrides. Both are `<base>.<connector>`, so neither
+    // can live in a fixed table and both have to be read back off the file.
     for l in text.lines() {
         let t = l.trim();
         if t.starts_with('#') {
@@ -173,7 +189,8 @@ fn cmd_config() -> Result<(), String> {
         }
         if let Some((k, v)) = t.split_once('=') {
             let k = k.trim();
-            if k.starts_with(WS_ASSIGN_PREFIX) {
+            if k.starts_with(WS_ASSIGN_PREFIX) || matches!(Region::parse_key(k), Some((_, Some(_))))
+            {
                 let v = v
                     .split('#')
                     .next()
@@ -273,6 +290,28 @@ fn parse_places(out: &str) -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// `tezca bar unset <key>…` — delete a key so it falls back to its default (or,
+/// for a `layout_*.<connector>` override, back to following the global layout).
+fn cmd_unset(args: &[&str]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("usage: tezca bar unset <key> [<key>…]".into());
+    }
+    let path = bar_toml()?;
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let mut hit = false;
+    for key in args {
+        hit |= unset_line(&mut lines, key);
+    }
+    if !hit {
+        // Not an error: "make sure this isn't set" is a reasonable thing to ask,
+        // and it already isn't.
+        println!("  {} nothing to remove", term::dim("·"));
+        return Ok(());
+    }
+    write_and_reload(&path, lines)
+}
+
 fn cmd_set(args: &[&str]) -> Result<(), String> {
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err("usage: tezca bar set <key> <value> [<key> <value>…]".into());
@@ -283,6 +322,30 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
 
     for pair in args.chunks(2) {
         let (key, val) = (pair[0], pair[1]);
+        // `layout_<region>` and `layout_<region>.<connector>` carry module ids,
+        // and those are checked here rather than left to the bar. The bar drops
+        // an id it doesn't know — the right call at render time, since a config
+        // from another build must still produce a usable bar — but that makes a
+        // typo invisible: you set it, the bar restarts, and the module simply is
+        // not there. Refusing at the point of writing is where the mistake is
+        // still attached to the thing that made it.
+        if let Some((_, output)) = Region::parse_key(key) {
+            if let Some(out) = output {
+                if out.contains(char::is_whitespace) {
+                    return Err(format!("`{out}` is not a monitor connector name"));
+                }
+            }
+            let bad = unknown_ids(val);
+            if !bad.is_empty() {
+                return Err(format!(
+                    "no bar module called {} \n  {} tezca bar modules  lists every id",
+                    bad.iter().map(|b| format!("`{b}`")).collect::<Vec<_>>().join(" or "),
+                    term::dim("try:"),
+                ));
+            }
+            set_line(&mut lines, key, val);
+            continue;
+        }
         if SCALARS.iter().any(|(k, _)| *k == key) || key.starts_with(WS_ASSIGN_PREFIX) {
             set_line(&mut lines, key, val);
         } else {
@@ -290,9 +353,15 @@ fn cmd_set(args: &[&str]) -> Result<(), String> {
         }
     }
 
+    write_and_reload(&path, lines)
+}
+
+/// Save the edited file and put the change on screen, shared by `set` and
+/// `unset` so both report the same way.
+fn write_and_reload(path: &Path, lines: Vec<String>) -> Result<(), String> {
     let mut body = lines.join("\n");
     body.push('\n');
-    atomic::write(&path, &body)?;
+    atomic::write(path, &body)?;
 
     if running() {
         let _ = cmd_restart();
@@ -346,6 +415,27 @@ fn set_line(lines: &mut Vec<String>, key: &str, value: &str) {
         }
     }
     lines.push(format!("{key} = {value}"));
+}
+
+/// Delete `key`'s line outright, comment and all.
+///
+/// Distinct from setting it empty, which for a per-monitor layout override is a
+/// meaningful value ("this monitor shows nothing here"). Without a way to remove
+/// the line there would be no way back from an override to inheriting the global
+/// layout — a one-way door in the settings editor.
+fn unset_line(lines: &mut Vec<String>, key: &str) -> bool {
+    let before = lines.len();
+    lines.retain(|l| {
+        let trimmed = l.trim_start();
+        if trimmed.starts_with('#') {
+            return true;
+        }
+        match trimmed.strip_prefix(key) {
+            Some(rest) => !rest.trim_start().starts_with('='),
+            None => true,
+        }
+    });
+    lines.len() != before
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -407,7 +497,9 @@ fn print_help() {
         term::cyan("toggle")
     );
     println!("  {}                  print the effective configuration", term::cyan("config"));
+    println!("  {}                 every placeable module id", term::cyan("modules"));
     println!("  {}      edit ~/.config/tezca-bar/config.toml", term::cyan("set <key> <value>…"));
+    println!("  {}              drop a key back to its default", term::cyan("unset <key>…"));
     println!();
     println!("{}", term::dim("  weather — find coordinates for the weather module"));
     println!("  {}   look a town or city up by name", term::cyan("weather search <place…>"));
@@ -419,5 +511,6 @@ fn print_help() {
     println!("  {}  save them and switch the module on", term::cyan("weather set <lat> <lon>"));
     println!();
     println!("{}", term::dim("  e.g. tezca bar set height 38 layout_center nowplaying"));
+    println!("{}", term::dim("       tezca bar set layout_right.DP-3 \"cpu, mem, clock, power\""));
     println!("{}", term::dim("       tezca bar weather search Guadalajara"));
 }

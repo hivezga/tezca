@@ -131,47 +131,6 @@ weather_unit = celsius
 # it on means a second request to a second host per poll — hence its own switch.
 weather_aqi = false
 
-# --- Local AI (Ollama) -----------------------------------------------------
-# The [󰍛 18.9G GPU] module and the SUPER+I chat panel.
-#
-# Unlike `ai` and `weather`, this one touches NO remote host. It talks to
-# 127.0.0.1 and nothing else — the address is a constant in the source, not a
-# key here, so it cannot be repointed at a remote server by editing this file.
-# The models are on your disk and your prompts never leave loopback. If you want
-# a remote Ollama, that is a different feature with a different privacy
-# conversation, and this is deliberately not it.
-#
-# Off by default only because most machines have no local model server; there is
-# nothing to disclose by turning it on.
-llm_enabled = false
-
-# Which server: "auto" (default) probes for whichever is running, "llamacpp" for
-# llama.cpp's `llama serve`, "ollama" for Ollama. Set it explicitly when you have
-# both installed and want the bar pinned to one.
-#
-# The two differ in what they can tell you. Ollama reports the GPU/CPU offload
-# split, so the module can say "split · 81% on GPU" — the thing that explains why
-# a model that was fast yesterday is slow today. llama.cpp publishes no such
-# figure, so nothing is shown for it rather than a guess dressed up as a reading;
-# in exchange it reports its own measured tok/s on every chunk, so the panel's
-# rate is llama.cpp's number rather than us timing a pipe.
-llm_backend = auto
-
-# Where it listens. 0 means "the resolved backend's default" — 11434 for Ollama,
-# 8080 for llama.cpp — so the common case needs no port line at all. The port is
-# settable; the host is not, and is pinned to 127.0.0.1 in the source.
-llm_port = 0
-
-# Seconds between status polls — a loopback GET the daemon answers from memory.
-llm_interval = 5
-
-# Which model the panel opens with. Empty means "whatever is already resident",
-# so the first message never loads a second copy of a model already in VRAM.
-llm_model =
-
-# Prepended to every conversation in the panel. Empty for none.
-llm_system =
-
 # --- Per-monitor adaptive --------------------------------------------------
 # Monitors narrower than this (px) render the COMPACT layout — no per-app menu
 # label, tighter padding. The 3440×1440 ultrawide primary stays full; the
@@ -259,7 +218,6 @@ clutter = all
 #   night       night light; shown only while the filter is on, click to toggle
 #   ai          AI provider usage (auto-hides; see the AI section above)
 #   weather     current conditions (auto-hides; see the Weather section above)
-#   llm         local Ollama status; click for the SUPER+I panel (auto-hides)
 #   tray        system tray / StatusNotifierItem icons (auto-hides)
 #   cpu mem gpu hardware metric sparklines (gpu auto-hides without a source)
 #   network     wifi/ethernet glyph → detail + radio toggle popover
@@ -275,7 +233,36 @@ clutter = all
 # see the example + README in that folder) and reference it in a region as
 # `custom:<name>`, e.g.  layout_right = cpu, sep, custom:weather, clock
 #
+# A module may appear in only ONE region. A GTK widget has a single parent, so
+# the bar renders it wherever it is reached first (left, then centre, then right)
+# and logs the duplicate; listing `nowplaying` in both left and centre does not
+# put it in both places, it quietly takes it out of the centre.
+#
+# `tezca bar modules` prints every id with a one-line description, and
+# `tezca bar set layout_<region> …` refuses a value naming a module that does not
+# exist rather than dropping it silently at the next restart.
+#
 # The defaults below reproduce the original built-in arrangement exactly.
 layout_left = mirror, sep, appname, sep, workspaces, submap
 layout_center = nowplaying
 layout_right = gamemode, camera, microphone, recording, caffeine, night, ai, tray, cpu, mem, gpu, sep, network, bluetooth, volume, brightness, battery, sep, bell, clock, power
+
+# --- Per-monitor layout ----------------------------------------------------
+# Append `.<connector>` to any of the three keys above to give one monitor its
+# own arrangement; monitors with no override for a region use the shared key, so
+# the common case still needs only the three lines above. Same connector names as
+# `workspaces.<connector>` (see `hyprctl monitors`).
+#
+# This is how you thin out a narrower monitor. The centre region is centred on
+# the *screen*, which means the pill can only be as wide as the room the wider
+# side cluster leaves mirrored on both sides — on a 2560px monitor a twenty-module
+# right cluster leaves almost none, and the now-playing pill shrinks to fit or
+# hides. Moving a few modules off the right cluster there gives it back.
+#
+#   layout_right.DP-3 = ai, cpu, mem, sep, network, volume, sep, bell, clock, power
+#   layout_left.DP-3 = mirror, sep, workspaces
+#
+# An override set to nothing at all means "this monitor shows no modules in this
+# region" — the one case where an empty value is a value. `tezca bar unset
+# layout_right.DP-3` removes the override so the monitor follows the shared key
+# again (Settings ▸ Bar ▸ Modules has the same control).

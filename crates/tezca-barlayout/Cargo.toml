@@ -1,0 +1,23 @@
+# tezca-barlayout — the bar's module vocabulary, and nothing else.
+#
+# Three programs need to agree on what a bar module is called: `tezca-bar`
+# renders them, `tezca bar set` validates what you write, and the settings
+# Modules editor offers them to you. They used to each keep their own list, and
+# they drifted — the editor offered `appmenu` and `privacy`, which the bar has
+# never had and silently dropped, and spelled three real modules by their
+# aliases (`net`, `notifications`, `mic`) so its own duplicate check could not
+# see them. That is what this crate exists to make impossible.
+#
+# Std-only with no external dependencies, deliberately: `tezca-cli` is a
+# dependency-free binary by design (offline-buildable, tiny, nothing to audit)
+# and a path dependency that pulls in nothing keeps all three properties.
+[package]
+name = "tezca-barlayout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Shared module vocabulary for the Project:Tezca bar (ids, aliases, labels, region defaults)"
+
+[dependencies]

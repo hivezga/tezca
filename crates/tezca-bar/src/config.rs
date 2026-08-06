@@ -5,7 +5,6 @@
 //! partial file still runs.
 
 use crate::ai::AiConfig;
-use crate::llm::LlmConfig;
 use crate::weather::WeatherConfig;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -78,153 +77,17 @@ impl Clutter {
     }
 }
 
-/// A placeable bar module — one widget slot in a region's ordered layout.
-/// `Sep` is a thin vertical divider and may repeat; every other variant maps to
-/// exactly one built-in widget built in `bar.rs`. Unknown names never parse (so
-/// a typo in config can't inject anything), mirroring how `ai_providers` filters.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Mod {
-    Mirror,
-    Appname,
-    Workspaces,
-    Submap,
-    NowPlaying,
-    GameMode,
-    Camera,
-    Microphone,
-    Recording,
-    Caffeine,
-    NightLight,
-    Ai,
-    Weather,
-    Llm,
-    Tray,
-    Cpu,
-    Mem,
-    Gpu,
-    Network,
-    Bluetooth,
-    Volume,
-    Brightness,
-    Battery,
-    Bell,
-    Clock,
-    Power,
-    Sep,
-}
+/// The module vocabulary lives in `tezca-barlayout`, shared with the CLI so
+/// that what `tezca bar set` accepts and what the bar can render are the same
+/// list by construction rather than by two people remembering. Re-exported here
+/// because every call site in the bar already says `config::Mod`.
+pub use tezca_barlayout::{parse_layout, Mod, Region, Slot};
 
-impl Mod {
-    /// Parse one module id (with a few friendly aliases). None for anything
-    /// unrecognised — the caller drops it.
-    pub fn parse(s: &str) -> Option<Mod> {
-        Some(match s.trim().to_lowercase().as_str() {
-            "mirror" | "menu" => Mod::Mirror,
-            "appname" | "app" | "window" | "title" => Mod::Appname,
-            "workspaces" | "ws" => Mod::Workspaces,
-            "submap" => Mod::Submap,
-            "nowplaying" | "now-playing" | "media" | "mpris" => Mod::NowPlaying,
-            "gamemode" | "game" => Mod::GameMode,
-            "camera" | "cam" | "webcam" => Mod::Camera,
-            "microphone" | "mic" => Mod::Microphone,
-            "recording" | "record" | "screenrec" => Mod::Recording,
-            "caffeine" | "keepawake" | "keep-awake" | "inhibit" => Mod::Caffeine,
-            "night" | "nightlight" | "night-light" | "bluelight" => Mod::NightLight,
-            "ai" => Mod::Ai,
-            "weather" | "forecast" => Mod::Weather,
-            "llm" | "ollama" | "localai" | "local-ai" => Mod::Llm,
-            "tray" => Mod::Tray,
-            "cpu" => Mod::Cpu,
-            "mem" | "memory" | "ram" => Mod::Mem,
-            "gpu" => Mod::Gpu,
-            "network" | "net" | "wifi" => Mod::Network,
-            "bluetooth" | "bt" => Mod::Bluetooth,
-            "volume" | "vol" | "audio" => Mod::Volume,
-            "brightness" | "backlight" => Mod::Brightness,
-            "battery" | "bat" => Mod::Battery,
-            "bell" | "notifications" | "notif" => Mod::Bell,
-            "clock" | "time" | "date" => Mod::Clock,
-            "power" | "logout" => Mod::Power,
-            "sep" | "separator" | "|" => Mod::Sep,
-            _ => return None,
-        })
-    }
-
-    /// Modules the [`Clutter::Tiers`] strategy drops.
-    ///
-    /// The test is "would you notice this were gone for an hour". A GPU
-    /// percentage and a keep-awake glyph both fail it; a clock and a battery
-    /// do not. Deliberately not configurable — a per-module priority list is a
-    /// second layout to keep in step with the first, and the layout keys
-    /// already let you remove anything outright.
-    pub fn is_tier3(self) -> bool {
-        matches!(self, Mod::Caffeine | Mod::NightLight | Mod::Tray | Mod::Gpu | Mod::Brightness)
-    }
-
-    /// Modules the [`Clutter::Hover`] strategy fades until the bar is hovered.
-    ///
-    /// A superset of [`Self::is_tier3`] minus the GPU (a metric you glance at
-    /// mid-task) plus Bluetooth (a battery you check on purpose, never by
-    /// accident).
-    pub fn is_ambient(self) -> bool {
-        matches!(
-            self,
-            Mod::Caffeine | Mod::NightLight | Mod::Tray | Mod::Bluetooth | Mod::Brightness
-        )
-    }
-}
-
-/// One entry in a region's layout: either a built-in module or a user/community
-/// `custom:<name>` exec module (see `custom.rs`). Kept separate from `Mod` so the
-/// built-in vocabulary stays `Copy` and exhaustively matched.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Slot {
-    Mod(Mod),
-    Custom(String),
-}
-
-impl Slot {
-    /// Parse one layout token. `custom:<name>` is the explicit escape hatch for a
-    /// third-party module; every other token must be a known built-in id (a bare
-    /// unknown token is dropped, so only an intentional `custom:` prefix can ever
-    /// introduce a non-built-in slot).
-    pub fn parse(s: &str) -> Option<Slot> {
-        let t = s.trim();
-        if let Some(rest) = t.strip_prefix("custom:") {
-            let name = rest.trim();
-            return (!name.is_empty()).then(|| Slot::Custom(name.to_string()));
-        }
-        Mod::parse(t).map(Slot::Mod)
-    }
-
-    pub fn is_sep(&self) -> bool {
-        matches!(self, Slot::Mod(Mod::Sep))
-    }
-    pub fn is_appname(&self) -> bool {
-        matches!(self, Slot::Mod(Mod::Appname))
-    }
-}
-
-/// Parse a comma-separated region layout into slots, dropping unknown ids.
-fn parse_layout(v: &str) -> Vec<Slot> {
-    v.split(',').filter_map(Slot::parse).collect()
-}
-
-fn default_layout_left() -> Vec<Slot> {
-    use Mod::*;
-    [Mirror, Sep, Appname, Sep, Workspaces, Submap].into_iter().map(Slot::Mod).collect()
-}
-fn default_layout_center() -> Vec<Slot> {
-    vec![Slot::Mod(Mod::NowPlaying)]
-}
-fn default_layout_right() -> Vec<Slot> {
-    use Mod::*;
-    [
-        GameMode, Camera, Microphone, Recording, Caffeine, NightLight, Ai, Tray, Cpu, Mem, Gpu,
-        Sep, Network, Bluetooth, Volume, Brightness, Battery, Sep, Bell, Clock, Power,
-    ]
-    .into_iter()
-    .map(Slot::Mod)
-    .collect()
+/// The built-in arrangement for a region. Sourced from `tezca-barlayout` rather
+/// than spelled out again here, so the bar's defaults, the CLI's `SCALARS`
+/// table and the settings editor's "reset" all show the same thing.
+fn default_layout(region: Region) -> Vec<Slot> {
+    parse_layout(region.default_layout())
 }
 
 #[derive(Clone, Debug)]
@@ -269,8 +132,6 @@ pub struct Config {
     /// Weather module — opt-in, and the second (and only other) module that can
     /// make a network request. See `weather.rs` for the privacy posture.
     pub weather: WeatherConfig,
-    /// Local AI (Ollama). Loopback only — see `llm.rs`.
-    pub llm: LlmConfig,
     /// Show the transient volume on-screen display (the glass pill that fades in
     /// when the volume changes or mutes). See `osd.rs`.
     pub osd_enabled: bool,
@@ -285,6 +146,11 @@ pub struct Config {
     pub layout_left: Vec<Slot>,
     pub layout_center: Vec<Slot>,
     pub layout_right: Vec<Slot>,
+    /// Per-monitor layout overrides, keyed by the full config key
+    /// (`layout_right.DP-3`). A monitor with no entry for a region falls back to
+    /// that region's global key, so the common case still needs three lines
+    /// rather than three per output.
+    pub layout_overrides: HashMap<String, Vec<Slot>>,
 }
 
 impl Default for Config {
@@ -307,13 +173,13 @@ impl Default for Config {
             compact: false,
             ai: AiConfig::default(),
             weather: WeatherConfig::default(),
-            llm: LlmConfig::default(),
             osd_enabled: true,
             osd_timeout_ms: 2600,
             clutter: Clutter::All,
-            layout_left: default_layout_left(),
-            layout_center: default_layout_center(),
-            layout_right: default_layout_right(),
+            layout_left: default_layout(Region::Left),
+            layout_center: default_layout(Region::Center),
+            layout_right: default_layout(Region::Right),
+            layout_overrides: HashMap::new(),
         }
     }
 }
@@ -331,11 +197,31 @@ impl Config {
 
     /// Does any region's layout include this built-in module? Lets callers skip
     /// work for a module the user has removed (e.g. the camera `/proc` scan).
+    ///
+    /// Per-monitor overrides count: a module that appears only on the second
+    /// monitor still needs its data source running, and polling is shared across
+    /// every surface.
     pub fn uses_mod(&self, m: Mod) -> bool {
         let want = Slot::Mod(m);
         self.layout_left.contains(&want)
             || self.layout_center.contains(&want)
             || self.layout_right.contains(&want)
+            || self.layout_overrides.values().any(|l| l.contains(&want))
+    }
+
+    /// The slots `region` shows on `output`, preferring a
+    /// `layout_<region>.<connector>` override over the global key.
+    pub fn layout_for(&self, region: Region, output: &str) -> &[Slot] {
+        if !output.is_empty() {
+            if let Some(l) = self.layout_overrides.get(&format!("{}.{output}", region.key())) {
+                return l;
+            }
+        }
+        match region {
+            Region::Left => &self.layout_left,
+            Region::Center => &self.layout_center,
+            Region::Right => &self.layout_right,
+        }
     }
 
     pub fn path() -> Option<PathBuf> {
@@ -414,19 +300,6 @@ impl Config {
                     )
                 }
                 "weather_aqi" => set_bool(&mut self.weather.aqi, v),
-                // --- Local AI (Ollama) ------------------------------------
-                "llm_enabled" => set_bool(&mut self.llm.enabled, v),
-                // Blank / "auto" leaves it None, which probes for whichever
-                // server is actually running.
-                "llm_backend" => self.llm.backend = crate::llm::Backend::parse(v),
-                "llm_port" => {
-                    if let Ok(n) = v.parse() {
-                        self.llm.port = n;
-                    }
-                }
-                "llm_interval" => set_u32(&mut self.llm.interval, v),
-                "llm_model" => self.llm.model = v.to_string(),
-                "llm_system" => self.llm.system = v.to_string(),
                 // --- Volume OSD ------------------------------------------
                 "osd_enabled" => set_bool(&mut self.osd_enabled, v),
                 "osd_timeout_ms" | "osd_timeout" => set_u32(&mut self.osd_timeout_ms, v),
@@ -436,24 +309,33 @@ impl Config {
                     }
                 }
                 // --- Module layout (per region, ordered) -----------------
-                // An empty / all-unknown value keeps the built-in default so a
-                // stray line can never blank out a region.
-                "layout_left" => {
+                // `layout_<region>` sets every monitor; `layout_<region>.<connector>`
+                // overrides one. An empty / all-unknown value keeps whatever it
+                // would otherwise inherit, so a stray line can never blank out a
+                // region — except an override written as literally nothing, which
+                // is how you say "this monitor shows no modules here".
+                _ if Region::parse_key(k).is_some() => {
+                    let Some((region, output)) = Region::parse_key(k) else { continue };
                     let l = parse_layout(v);
-                    if !l.is_empty() {
-                        self.layout_left = l;
-                    }
-                }
-                "layout_center" => {
-                    let l = parse_layout(v);
-                    if !l.is_empty() {
-                        self.layout_center = l;
-                    }
-                }
-                "layout_right" => {
-                    let l = parse_layout(v);
-                    if !l.is_empty() {
-                        self.layout_right = l;
+                    match output {
+                        None => {
+                            if !l.is_empty() {
+                                *match region {
+                                    Region::Left => &mut self.layout_left,
+                                    Region::Center => &mut self.layout_center,
+                                    Region::Right => &mut self.layout_right,
+                                } = l;
+                            }
+                        }
+                        Some(out) => {
+                            let key = format!("{}.{out}", region.key());
+                            // A blank override is meaningful (hide the region on
+                            // this monitor); an override naming only unknown ids
+                            // is a typo, and inheriting beats blanking.
+                            if v.trim().is_empty() || !l.is_empty() {
+                                self.layout_overrides.insert(key, l);
+                            }
+                        }
                     }
                 }
                 // `workspaces.<connector> = <spec>` — per-output workspace sets.
@@ -589,7 +471,7 @@ mod tests {
     #[test]
     fn layout_defaults_match_historical_arrangement() {
         let c = Config::default();
-        assert_eq!(c.layout_left, default_layout_left());
+        assert_eq!(c.layout_left, default_layout(Region::Left));
         assert_eq!(c.layout_center, vec![m(Mod::NowPlaying)]);
         // The right cluster, in the exact order bar.rs used to hardcode.
         use Mod::*;
@@ -624,8 +506,48 @@ mod tests {
     fn empty_or_all_unknown_layout_keeps_default() {
         let mut c = Config::default();
         c.apply("layout_left =\nlayout_right = nonsense, alsobad");
-        assert_eq!(c.layout_left, default_layout_left());
-        assert_eq!(c.layout_right, default_layout_right());
+        assert_eq!(c.layout_left, default_layout(Region::Left));
+        assert_eq!(c.layout_right, default_layout(Region::Right));
+    }
+
+    #[test]
+    fn a_monitor_without_an_override_inherits_the_global_layout() {
+        let mut c = Config::default();
+        c.apply("layout_right = clock, power");
+        assert_eq!(c.layout_for(Region::Right, "DP-3"), [m(Mod::Clock), m(Mod::Power)]);
+        // And a bar built before any monitor is known still gets something.
+        assert_eq!(c.layout_for(Region::Right, ""), [m(Mod::Clock), m(Mod::Power)]);
+    }
+
+    #[test]
+    fn a_per_monitor_override_applies_to_that_monitor_only() {
+        let mut c = Config::default();
+        c.apply("layout_right = clock, power\nlayout_right.DP-3 = cpu, mem");
+        assert_eq!(c.layout_for(Region::Right, "DP-3"), [m(Mod::Cpu), m(Mod::Mem)]);
+        assert_eq!(c.layout_for(Region::Right, "DP-1"), [m(Mod::Clock), m(Mod::Power)]);
+        // Other regions on the overridden monitor are untouched.
+        assert_eq!(c.layout_for(Region::Center, "DP-3"), [m(Mod::NowPlaying)]);
+    }
+
+    #[test]
+    fn a_blank_override_empties_that_region_but_a_typo_does_not() {
+        let mut c = Config::default();
+        // Deliberately empty: "this monitor shows nothing in the centre".
+        c.apply("layout_center.DP-3 =");
+        assert!(c.layout_for(Region::Center, "DP-3").is_empty());
+        // All-unknown is a typo, not an intention — inherit rather than blank a
+        // region because someone misspelled one id.
+        c.apply("layout_center.DP-1 = appmenu, privacy");
+        assert_eq!(c.layout_for(Region::Center, "DP-1"), [m(Mod::NowPlaying)]);
+    }
+
+    #[test]
+    fn a_module_used_only_on_one_monitor_still_counts_as_used() {
+        let mut c = Config::default();
+        c.apply("layout_right = clock\nlayout_right.DP-3 = weather, clock");
+        // `weather` appears in no global region, but its poll must still run or
+        // the monitor that does show it renders an empty module forever.
+        assert!(c.uses_mod(Mod::Weather));
     }
 
     #[test]

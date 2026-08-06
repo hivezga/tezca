@@ -10,17 +10,18 @@
 //! Data all comes from std/shell-out readers (see `hypr`, `sysinfo`,
 //! `nowplaying`, `notify`); this file is purely the GTK4 widget tree + wiring.
 
-use crate::config::{Clutter, Config, Mod, Numerals, Shape, Slot};
+use crate::config::{Clutter, Config, Mod, Numerals, Region, Shape, Slot};
 use crate::draw::{self, SharedPalette, Sparkline};
 use crate::icon::{self, Icon};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
 use crate::{
-    ai, bluetooth, camera, custom, hypr, llm, mic, notify, nowplaying, osd, popovers, session,
-    tray, weather,
+    ai, bluetooth, camera, custom, hypr, mic, notify, nowplaying, osd, popovers, session, tray,
+    weather,
 };
 use gtk4::gdk;
 use gtk4::glib::{self, ControlFlow};
+use gtk4::pango;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, CenterBox, Image, Label, Orientation, Popover, Window};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
@@ -206,6 +207,7 @@ impl Bar {
         bar.reseed();
         let all = bar.surfaces.borrow().clone();
         bar.wire_layout_freeze(&all);
+        Bar::wire_center_sizing(&all);
         bar.watch_monitors();
         bar.start_timers();
         bar
@@ -230,8 +232,8 @@ impl Bar {
         self.rebuild_tray();
         // The AI and weather snapshots live behind the same handles the
         // surfaces read, so replaying them is how a new surface learns what the
-        // poll threads last said. (The LLM and custom modules keep no snapshot;
-        // they redraw on their own next tick.)
+        // poll threads last said. (Custom modules keep no snapshot; they redraw
+        // on their own next tick.)
         let ai = self.ai.borrow().clone();
         self.apply_ai(ai);
         let weather = self.weather.borrow().clone();
@@ -362,6 +364,13 @@ impl Bar {
             s.clock_label.set_text(date);
             s.clock_time.set_text(time);
             s.clock_time.set_visible(!time.is_empty());
+            // Piggy-backed on the one timer that already runs every second. The
+            // side clusters change width when a module appears, a tray icon
+            // registers or the clock string itself gets longer, and the centre's
+            // budget moves with them; recomputing is two `measure` calls and a
+            // comparison, and lands on the same answer (and so does nothing)
+            // every tick but the ones where the layout actually changed.
+            s.retarget_center();
         }
     }
 
@@ -580,20 +589,6 @@ impl Bar {
         }
     }
 
-    /// Apply an Ollama status from the poll thread.
-    pub fn apply_llm(&self, st: llm::Status) {
-        for s in self.surfaces.borrow().iter() {
-            s.set_llm(&st);
-        }
-    }
-
-    /// Apply a generation rate pushed by the AI panel. Zero means it stopped.
-    pub fn apply_llm_rate(&self, tps: f64) {
-        for s in self.surfaces.borrow().iter() {
-            s.set_llm_rate(tps);
-        }
-    }
-
     /// Apply an AI usage snapshot from the poll thread. The module shows the
     /// single highest window utilisation across every provider — the number
     /// that actually constrains you — and colours itself at the configured
@@ -750,6 +745,7 @@ impl Bar {
             return;
         }
         self.wire_layout_freeze(&fresh);
+        Bar::wire_center_sizing(&fresh);
         self.surfaces.borrow_mut().extend(fresh);
         self.reseed();
     }
@@ -768,6 +764,27 @@ impl Bar {
     /// Takes the surfaces explicitly rather than reading `self.surfaces`, so a
     /// monitor arriving late wires only its own popovers — running over the
     /// whole list again would give every existing popover a second handler.
+    /// Give each surface its first centre measurement.
+    ///
+    /// [`Surface::retarget_center`] needs a real allocation to measure, and a
+    /// freshly presented layer surface has none — so ride the frame clock until
+    /// the width is non-zero, size the centre once, and stop. From then on the
+    /// per-second clock tick keeps it current. Without this the pill would spend
+    /// its first second at whatever width it was built with.
+    fn wire_center_sizing(surfaces: &[Rc<Surface>]) {
+        for s in surfaces {
+            let sw = Rc::downgrade(s);
+            s.bar_box.add_tick_callback(move |b, _| {
+                let Some(s) = sw.upgrade() else { return ControlFlow::Break };
+                if b.width() <= 0 {
+                    return ControlFlow::Continue;
+                }
+                s.retarget_center();
+                ControlFlow::Break
+            });
+        }
+    }
+
     fn wire_layout_freeze(self: &Rc<Self>, surfaces: &[Rc<Surface>]) {
         for s in surfaces {
             for pop in &s.popovers {
@@ -900,6 +917,19 @@ struct Surface {
     /// the connector comes back. See [`Bar::sync_monitors`].
     detached: Cell<bool>,
     bar_box: CenterBox,
+    /// The three regions, kept so [`Surface::retarget_center`] can measure the
+    /// side clusters and size the centre to whatever room they leave.
+    left: GtkBox,
+    center: GtkBox,
+    right: GtkBox,
+    /// The last text width handed to `np_text`, so a recompute that lands on the
+    /// same answer — which is almost all of them — does no work and queues no
+    /// resize.
+    np_text_w: Cell<i32>,
+    /// Whether a player is reporting a track. Kept apart from the pill's
+    /// visibility because that is now the *conjunction* of "something is playing"
+    /// and "there is room to show it" — two facts arriving from two directions.
+    np_playing: Cell<bool>,
 
     ws_box: GtkBox,
     /// Fixed workspace ids this output's bar always shows (from config), or None
@@ -914,6 +944,9 @@ struct Surface {
     submap_label: Label,
 
     np_box: GtkBox,
+    /// The title/artist column. Its width is *set*, not measured — see
+    /// [`Surface::retarget_center`].
+    np_text: GtkBox,
     np_title: Label,
     np_artist: Label,
     np_art_pic: gtk4::Image,
@@ -977,11 +1010,6 @@ struct Surface {
     weather_box: GtkBox,
     weather_val: Label,
     weather_sub: Label,
-
-    llm_box: GtkBox,
-    llm_val: Label,
-    llm_sub: Label,
-    llm_tps: Label,
 
     /// The two collapsible runs: chip, its summary label, and the box the
     /// members live in. `grouped_*` is which of the pair is currently showing.
@@ -1130,13 +1158,28 @@ impl Surface {
         np_art_pic.set_pixel_size(26);
         np_art_pic.set_visible(false);
         art.append(&np_art_pic);
+        // The text column. Its width comes from `retarget_center`, never from the
+        // track: a label sized to its own text is what made the pill breathe on
+        // every song change, and a pill that changes width changes where its
+        // centre is. Both labels therefore ellipsize and are told to ask for
+        // almost nothing (`max_width_chars(1)`), so the column measures exactly
+        // the width it is given and no more.
+        //
+        // `halign: Fill` with `xalign: 0` rather than `halign: Start` — Start
+        // would allocate each label only its own natural width, which after
+        // capping the natural is a couple of characters, and the title would
+        // ellipsize to nothing in a column with room to spare.
         let np_text = GtkBox::new(Orientation::Vertical, 0);
         let np_title = Label::new(None);
         np_title.add_css_class("np-title");
-        np_title.set_halign(Align::Start);
         let np_artist = Label::new(None);
         np_artist.add_css_class("np-artist");
-        np_artist.set_halign(Align::Start);
+        for l in [&np_title, &np_artist] {
+            l.set_halign(Align::Fill);
+            l.set_xalign(0.0);
+            l.set_ellipsize(pango::EllipsizeMode::End);
+            l.set_max_width_chars(1);
+        }
         np_text.append(&np_title);
         np_text.append(&np_artist);
         let eq = draw::equalizer(pal);
@@ -1307,42 +1350,6 @@ impl Surface {
         weather_box.set_has_tooltip(true);
         let weather_pop = popovers::weather_detail(&weather_box, weather_state);
         attach_detail(&weather_box, weather_pop.clone());
-
-        // Local AI (Ollama). Clicking opens the lateral panel rather than a
-        // popover: the thing you want from this module is a conversation, and
-        // that does not fit — or survive — inside a popover that closes on the
-        // first click outside it.
-        let llm_box = GtkBox::new(Orientation::Horizontal, 7);
-        llm_box.add_css_class("llm");
-        llm_box.add_css_class("clickable");
-        llm_box.set_valign(Align::Center);
-        let llm_glyph = icon::icon(pal, Icon::Llm);
-        llm_glyph.area.add_css_class("glyph");
-        let llm_val = Label::new(None);
-        llm_val.add_css_class("control-val");
-        // The accelerator badge, not a generic sub-value: it carries its own
-        // colour rule (accent on GPU, gold otherwise) rather than following the
-        // module the way a second number would.
-        let llm_sub = Label::new(None);
-        llm_sub.add_css_class("llm-accel");
-        llm_sub.set_visible(false);
-        // The live generation rate, pushed by the panel. Hidden while nothing
-        // is generating rather than parking `idle` on the bar — the module
-        // already says a model is loaded, and "0 tok/s" is not news.
-        let llm_tps = Label::new(None);
-        llm_tps.add_css_class("control-sub");
-        llm_tps.set_visible(false);
-        llm_box.append(&llm_glyph.area);
-        llm_box.append(&llm_val);
-        llm_box.append(&llm_sub);
-        llm_box.append(&llm_tps);
-        llm_box.set_visible(false);
-        llm_box.set_has_tooltip(true);
-        {
-            let click = gtk4::GestureClick::new();
-            click.connect_released(|_, _, _, _| open_llm_panel());
-            llm_box.add_controller(click);
-        }
 
         // System tray (StatusNotifierItem icons) — filled live by the tray
         // thread; hidden until the first item registers.
@@ -1555,7 +1562,6 @@ impl Surface {
                     Mod::Microphone => mic_box.clone().upcast(),
                     Mod::Ai => ai_box.clone().upcast(),
                     Mod::Weather => weather_box.clone().upcast(),
-                    Mod::Llm => llm_box.clone().upcast(),
                     Mod::Tray => tray_box.clone().upcast(),
                     Mod::Cpu => cpu_metric.clone().upcast(),
                     Mod::Mem => mem_metric.clone().upcast(),
@@ -1595,9 +1601,24 @@ impl Surface {
             privacy: (&priv_chip_rev, &priv_box_rev),
             system: (&sys_chip_rev, &sys_box_rev),
         };
-        place_region(&left, &cfg.layout_left, compact, drop_tier3, None, &resolve);
-        place_region(&center, &cfg.layout_center, compact, drop_tier3, None, &resolve);
-        place_region(&right, &cfg.layout_right, compact, drop_tier3, Some(&clusters), &resolve);
+        // One `placed` set across all three regions, not one per region. A GTK
+        // widget has exactly one parent, so a module listed in two regions can
+        // only ever render in the first — sharing the set makes the second
+        // listing a no-op *and* says so, instead of leaving a module apparently
+        // configured into a region it will never appear in. (That is not
+        // hypothetical: the settings editor's "+ add" button used to drop
+        // `nowplaying` into the left region while it was still in the centre,
+        // which silently un-centred the bar.)
+        let mut placed: HashSet<Slot> = HashSet::new();
+        let regions = [
+            (&left, Region::Left, None),
+            (&center, Region::Center, None),
+            (&right, Region::Right, Some(&clusters)),
+        ];
+        for (container, region, clusters) in regions {
+            let slots = cfg.layout_for(region, &output);
+            place_region(container, slots, compact, drop_tier3, clusters, &resolve, &mut placed);
+        }
 
         // Grouping only exists where a run actually got placed — a layout with
         // no privacy modules must not grow a chip that stands for nothing.
@@ -1655,6 +1676,11 @@ impl Surface {
         let surface = Rc::new(Surface {
             window,
             output,
+            left,
+            center: center.clone(),
+            right,
+            np_text_w: Cell::new(-1),
+            np_playing: Cell::new(false),
             compact,
             detached: Cell::new(false),
             bar_box,
@@ -1666,6 +1692,7 @@ impl Surface {
             submap_box,
             submap_label,
             np_box,
+            np_text,
             np_title,
             np_artist,
             np_art_pic,
@@ -1714,10 +1741,6 @@ impl Surface {
             weather_box,
             weather_val,
             weather_sub,
-            llm_box,
-            llm_val,
-            llm_sub,
-            llm_tps,
             priv_chip_rev,
             priv_box_rev,
             sys_chip_rev,
@@ -2017,46 +2040,6 @@ impl Surface {
         self.weather_box.set_tooltip_text(Some(&s.tooltip()));
     }
 
-    /// The local-AI readout: what is loaded, and where it is running.
-    fn set_llm(&self, st: &llm::Status) {
-        self.show(&self.llm_box, !st.is_empty());
-        if st.is_empty() {
-            return;
-        }
-        match st.primary() {
-            Some(r) => {
-                // Name over size: llama.cpp serves one model and its name is
-                // the useful fact; the size is only interesting next to a
-                // VRAM budget, which only Ollama reports.
-                let size = r.size_text();
-                self.llm_val.set_text(if size.is_empty() { &r.name } else { &size });
-                set_sub(&self.llm_sub, r.accel().unwrap_or(""));
-                // Gold for both states that leave work on the CPU — see
-                // `Resident::accel_degraded`. The tooltip names which one.
-                Self::toggle_class(&self.llm_box, "warn", r.accel_degraded());
-            }
-            None => {
-                self.llm_val.set_text("idle");
-                set_sub(&self.llm_sub, "");
-                self.llm_box.remove_css_class("warn");
-            }
-        }
-        self.llm_box.set_tooltip_text(Some(&st.tooltip()));
-    }
-
-    /// The rate the panel is generating at, in the module's third slot.
-    ///
-    /// Accent while it is moving, because a number that is changing is the one
-    /// worth looking at; hidden at zero.
-    fn set_llm_rate(&self, tps: f64) {
-        let live = tps > 0.0;
-        set_sub(
-            &self.llm_tps,
-            &if live { format!("{} tok/s", tps.round() as i64) } else { String::new() },
-        );
-        Self::toggle_class(&self.llm_tps, "on", live);
-    }
-
     fn set_custom(&self, out: &custom::Output) {
         if let Some(cell) = self.custom.get(&out.name) {
             cell.set(out);
@@ -2094,6 +2077,96 @@ impl Surface {
     /// True while at least one popover anchored to this bar is open.
     fn layout_frozen(&self) -> bool {
         self.open_popovers.get() > 0
+    }
+
+    /// Size the centre region to the room the side clusters leave, so that GTK's
+    /// own centring is never the thing that has to give.
+    ///
+    /// `GtkCenterBox` centres its middle child only while
+    /// `end ≤ (width − centre) / 2`. Past that it stops centring and pins the
+    /// centre against the wider side — silently, and by however much it is over.
+    /// The bar was over on the 2560px monitor, and because the pill used to be
+    /// sized by the track title, *whether the bar centred depended on the name of
+    /// the song*: measured, a 428px pill sat 74px left of centre and a 223px one
+    /// sat dead centre.
+    ///
+    /// So rather than fight the clamp, keep the centre inside the budget that
+    /// makes the clamp unreachable:
+    ///
+    /// ```text
+    ///   centre_half  ≤  width/2 − max(left, right) − gap
+    /// ```
+    ///
+    /// Two consequences worth naming. The pill's width is now a function of the
+    /// *layout* — it changes when a module comes or goes, not when a song does —
+    /// which is the property that was actually being asked for. And when the
+    /// centre region holds more than the pill (weather to its left, say), the
+    /// margins below pad the shorter side so the region's midpoint is the pill's
+    /// midpoint: centring the region then centres the pill rather than the group
+    /// the pill happens to sit in.
+    fn retarget_center(&self) {
+        let w = self.bar_box.width();
+        if w <= 0 {
+            return; // not allocated yet; the next tick catches it
+        }
+        // Resizing under an open popover would drag it off its anchor, which is
+        // the whole point of the freeze — see `show`.
+        if self.layout_frozen() {
+            return;
+        }
+        let nat = |w: &GtkBox| w.measure(Orientation::Horizontal, -1).1;
+        let side = nat(&self.left).max(nat(&self.right));
+
+        // Anything else sharing the centre region, split by which side of the
+        // pill it sits on. Hidden children measure 0 and are skipped anyway.
+        let pill = self.np_box.clone().upcast::<gtk4::Widget>();
+        let (mut lead, mut trail, mut past) = (0, 0, false);
+        let mut child = self.center.first_child();
+        while let Some(c) = child {
+            child = c.next_sibling();
+            if c == pill {
+                past = true;
+                continue;
+            }
+            if !c.is_visible() {
+                continue;
+            }
+            let n = c.measure(Orientation::Horizontal, -1).1;
+            if past {
+                trail += n;
+            } else {
+                lead += n;
+            }
+        }
+        // The pill is centred by padding the region out to symmetry around it.
+        let sat = lead.max(trail);
+        let budget = 2 * (w / 2 - side - sat - NP_GAP);
+        let mut text = (budget - NP_CHROME).clamp(0, NP_TEXT_MAX);
+        if text < NP_TEXT_MIN {
+            // More ellipsis than title. Better hidden than shown as a stub.
+            text = 0;
+        }
+        if self.np_text_w.replace(text) != text {
+            self.np_text.set_size_request(text, -1);
+            self.apply_np_visibility();
+        }
+        // Only pad while the pill is actually there to be centred. With nothing
+        // playing there is no anchor, and holding its place would strand the
+        // weather chip half a pill-width off centre beside a gap — which reads as
+        // a bug, where a chip that recentres when the music stops reads as the
+        // module appearing and disappearing, which is what happened.
+        let (pad_start, pad_end) = if text > 0 && self.np_playing.get() {
+            ((trail - lead).max(0), (lead - trail).max(0))
+        } else {
+            (0, 0)
+        };
+        self.center.set_margin_start(pad_start);
+        self.center.set_margin_end(pad_end);
+    }
+
+    /// The pill shows when there is something playing *and* room to say so.
+    fn apply_np_visibility(&self) {
+        self.show(&self.np_box, self.np_playing.get() && self.np_text_w.get() > 0);
     }
 
     /// Show or hide a module — unless doing so would move an open popover.
@@ -2222,10 +2295,11 @@ impl Surface {
                         }
                     }
                 }
-                self.np_box.set_visible(true);
+                self.np_playing.set(true);
             }
-            None => self.np_box.set_visible(false),
+            None => self.np_playing.set(false),
         }
+        self.apply_np_visibility();
     }
 
     /// Repaint the cairo-drawn widgets after a palette reload.
@@ -2257,14 +2331,6 @@ const BATTERY_POINTS: usize = 60;
 /// At the 2-second controls tick that is the last ~48 seconds, which is the
 /// window in which "is something downloading right now" is a live question.
 const NET_POINTS: usize = 24;
-
-/// Open (or close) the SUPER+I lateral panel.
-///
-/// Open or close the AI panel — the same toggle `SUPER I` runs, so the click
-/// and the keybind cannot disagree about whether it is open.
-fn open_llm_panel() {
-    crate::toggle_ai_panel();
-}
 
 /// A collapsed-cluster chip: an optional fixed label, the live summary, and a
 /// chevron saying it opens. Returns the chip and the label to fill each tick.
@@ -2449,8 +2515,10 @@ impl ClusterSlots<'_> {
 ///   * separators are collapsed: leading, trailing, and runs of adjacent
 ///     `Sep`s render as at most one hairline (so a dropped module can't leave a
 ///     doubled or dangling divider),
-///   * a widget already placed in this region is skipped (a GTK widget can have
-///     only one parent, so a duplicate id would otherwise panic on reparent).
+///   * a widget already placed is skipped (a GTK widget can have only one
+///     parent, so a duplicate id would otherwise fail on reparent). `placed` is
+///     shared across all three regions by the caller, so this catches a module
+///     listed twice in one region *and* the same module listed in two.
 ///
 /// `clusters`, where given, additionally folds the collapsible runs into their
 /// chip + members pair — see [`Cluster`].
@@ -2461,6 +2529,7 @@ fn place_region(
     drop_tier3: bool,
     clusters: Option<&ClusterSlots>,
     resolve: &dyn Fn(&Slot) -> Option<gtk4::Widget>,
+    placed: &mut HashSet<Slot>,
 ) {
     // A cluster is a *contiguous run*. The first run of each kind gets the chip
     // and the members container; anything from that cluster appearing again
@@ -2470,7 +2539,7 @@ fn place_region(
     let mut open: Option<Cluster> = None;
     let mut used: Vec<Cluster> = Vec::new();
 
-    for slot in plan_region(slots, compact, drop_tier3) {
+    for slot in plan_region(slots, compact, drop_tier3, placed) {
         if slot.is_sep() {
             open = None;
             // A fresh hairline per occurrence.
@@ -2515,9 +2584,12 @@ fn place_region(
 ///     parent, so a duplicate would panic on reparent),
 ///   * separators collapse — leading, trailing, and adjacent `Sep`s reduce to
 ///     at most one, so a dropped module never leaves a doubled or dangling one.
-fn plan_region(slots: &[Slot], compact: bool, drop_tier3: bool) -> Vec<Slot> {
-    use std::collections::HashSet;
-    let mut placed: HashSet<Slot> = HashSet::new();
+fn plan_region(
+    slots: &[Slot],
+    compact: bool,
+    drop_tier3: bool,
+    placed: &mut HashSet<Slot>,
+) -> Vec<Slot> {
     let mut out: Vec<Slot> = Vec::new();
     let mut last_real = false; // suppress a leading separator
     let mut pending_sep = false; // only flushed when a real widget follows
@@ -2543,6 +2615,11 @@ fn plan_region(slots: &[Slot], compact: bool, drop_tier3: bool) -> Vec<Slot> {
             }
         }
         if !placed.insert(slot.clone()) {
+            eprintln!(
+                "tezca-bar: `{}` is listed more than once — it renders where it \
+                 was reached first and is ignored here",
+                slot.id()
+            );
             continue;
         }
         if pending_sep {
@@ -2554,6 +2631,22 @@ fn plan_region(slots: &[Slot], compact: bool, drop_tier3: bool) -> Vec<Slot> {
     }
     out
 }
+
+/// The now-playing pill's fixed furniture, in px: a 1px border and 9px of
+/// padding on each side, the 26px cover, the 13px equaliser, and the two 10px
+/// gaps its box puts between those three children. Everything except the text
+/// column — so the pill measures exactly `NP_CHROME + text`, and sizing the text
+/// sizes the pill.
+const NP_CHROME: i32 = 2 * (1 + 9) + 26 + 13 + 2 * 10;
+/// Widest the title/artist column is allowed to get, however much room there is.
+/// Past this the pill stops reading as a label and starts reading as a third
+/// cluster.
+const NP_TEXT_MAX: i32 = 240;
+/// Narrowest worth drawing. Below this a title is more ellipsis than title.
+const NP_TEXT_MIN: i32 = 88;
+/// Clearance kept between the centre region and each side cluster, so a centred
+/// pill never looks welded to the module beside it.
+const NP_GAP: i32 = 14;
 
 /// Digits a percent readout is padded to — enough for the widest, `100`.
 const PCT_DIGITS: usize = 3;
@@ -2631,12 +2724,26 @@ fn set_sub(l: &Label, text: &str) {
 /// download progress bar quotes, so it is the one that answers "is this as fast
 /// as it should be". Blank while nothing is moving, so an idle link does not
 /// park a row of zeroes on the bar.
+/// Padded to a fixed width for the same reason [`pct_text`] is: this label sits
+/// in the right-aligned cluster, so when `↓1.2` becomes `↓12.8` every module to
+/// its left slides over. Measured on the 2560px monitor, that one digit moved the
+/// cluster's edge by 48px — enough on its own to decide whether the centred
+/// now-playing pill had room to exist.
 fn rate_text(t: &sysinfo::Throughput) -> String {
     let (down, up) = (t.down_mbps / 8.0, t.up_mbps / 8.0);
     if down < 0.05 && up < 0.05 {
         return String::new();
     }
-    format!("↓{down:.1} ↑{up:.1} MB/s")
+    format!("↓{} ↑{} MB/s", rate_num(down), rate_num(up))
+}
+
+/// One throughput figure, padded to `NN.N` with U+2007 FIGURE SPACE — the
+/// character defined to be exactly one digit wide. Past 99.9 it simply grows: a
+/// truncated number would be worse than a one-off re-flow.
+fn rate_num(v: f64) -> String {
+    let s = format!("{v:.1}");
+    let int_digits = s.split('.').next().map(str::len).unwrap_or(1);
+    format!("{}{s}", "\u{2007}".repeat(2usize.saturating_sub(int_digits)))
 }
 
 /// Split a formatted clock into its date and time halves.
@@ -2824,16 +2931,38 @@ mod tests {
         assert_eq!(pct_text(1000), "1000%");
     }
 
+    #[test]
+    fn throughput_is_one_width_whatever_the_link_is_doing() {
+        // The right cluster is right-aligned, so a label that widens by a digit
+        // pushes every module left of it sideways. Same reasoning as `pct_text`,
+        // same U+2007 padding — this one was simply missed.
+        let w = |d: f64, u: f64| {
+            rate_text(&sysinfo::Throughput { down_mbps: d * 8.0, up_mbps: u * 8.0 }).chars().count()
+        };
+        assert_eq!(w(1.2, 0.1), w(12.8, 0.1));
+        assert_eq!(w(1.2, 0.1), w(99.9, 99.9));
+        assert!(rate_num(1.2).starts_with('\u{2007}'), "one-digit values are padded");
+        assert!(!rate_num(12.8).starts_with('\u{2007}'), "two-digit values are not");
+        // Past the reserved field it grows rather than lying about the rate.
+        assert_eq!(rate_num(123.4), "123.4");
+    }
+
     fn m(x: Mod) -> Slot {
         Slot::Mod(x)
     }
     fn slots(xs: &[Mod]) -> Vec<Slot> {
         xs.iter().copied().map(Slot::Mod).collect()
     }
+    /// One region in isolation. The real caller threads one `placed` set through
+    /// all three so a module listed twice renders once; these cases are about
+    /// what a single region does with its own list.
+    fn plan(slots: &[Slot], compact: bool, drop_tier3: bool) -> Vec<Slot> {
+        plan_region(slots, compact, drop_tier3, &mut HashSet::new())
+    }
 
     #[test]
     fn default_left_full_reproduces_the_old_layout() {
-        let plan = plan_region(&Config::default().layout_left, false, false);
+        let plan = plan(&Config::default().layout_left, false, false);
         use Mod::*;
         assert_eq!(plan, slots(&[Mirror, Sep, Appname, Sep, Workspaces, Submap]));
     }
@@ -2841,7 +2970,7 @@ mod tests {
     #[test]
     fn compact_drops_appname_and_collapses_the_freed_separator() {
         // mirror, sep, appname, sep, workspaces, submap  →  mirror | workspaces submap
-        let plan = plan_region(&Config::default().layout_left, true, false);
+        let plan = plan(&Config::default().layout_left, true, false);
         use Mod::*;
         assert_eq!(plan, slots(&[Mirror, Sep, Workspaces, Submap]));
     }
@@ -2850,13 +2979,13 @@ mod tests {
     fn default_right_plan_matches_the_old_hardcoded_order() {
         // The default right layout has no dups/edge seps, so the plan is identical.
         let right = Config::default().layout_right;
-        assert_eq!(plan_region(&right, false, false), right);
+        assert_eq!(plan(&right, false, false), right);
     }
 
     #[test]
     fn leading_trailing_and_doubled_separators_collapse() {
         use Mod::*;
-        let plan = plan_region(&slots(&[Sep, Sep, Cpu, Sep, Sep, Mem, Sep, Sep]), false, false);
+        let plan = plan(&slots(&[Sep, Sep, Cpu, Sep, Sep, Mem, Sep, Sep]), false, false);
         assert_eq!(plan, slots(&[Cpu, Sep, Mem]));
     }
 
@@ -2865,7 +2994,7 @@ mod tests {
         use Mod::*;
         // cpu, sep, cpu → the second cpu is a dup; the sep before it is then
         // trailing and disappears, leaving a single cpu.
-        let plan = plan_region(&slots(&[Cpu, Sep, Cpu]), false, false);
+        let plan = plan(&slots(&[Cpu, Sep, Cpu]), false, false);
         assert_eq!(plan, slots(&[Cpu]));
     }
 
@@ -2875,7 +3004,7 @@ mod tests {
         let weather = Slot::Custom("weather".into());
         let input = vec![m(Cpu), m(Sep), weather.clone(), m(Sep), weather.clone()];
         // second weather is a dup; its leading sep becomes trailing and drops.
-        assert_eq!(plan_region(&input, false, false), vec![m(Cpu), m(Sep), weather]);
+        assert_eq!(plan(&input, false, false), vec![m(Cpu), m(Sep), weather]);
     }
 
     #[test]
@@ -2884,9 +3013,9 @@ mod tests {
         // gpu and tray are tier-3; removing them must not leave the separators
         // that framed them dangling.
         let input = slots(&[Cpu, Sep, Gpu, Tray, Sep, Clock]);
-        assert_eq!(plan_region(&input, false, true), slots(&[Cpu, Sep, Clock]));
+        assert_eq!(plan(&input, false, true), slots(&[Cpu, Sep, Clock]));
         // The same layout keeps everything when the strategy is off.
-        assert_eq!(plan_region(&input, false, false), input);
+        assert_eq!(plan(&input, false, false), input);
     }
 
     #[test]
@@ -2895,7 +3024,7 @@ mod tests {
         // installed deliberately is not ours to rank.
         let weather = Slot::Custom("weather".into());
         let input = vec![m(Mod::Gpu), weather.clone()];
-        assert_eq!(plan_region(&input, false, true), vec![weather]);
+        assert_eq!(plan(&input, false, true), vec![weather]);
     }
 
     #[test]

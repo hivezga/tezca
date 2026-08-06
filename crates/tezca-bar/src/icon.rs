@@ -85,7 +85,6 @@ pub enum Icon {
     Night,
     AiUsage,
     Weather,
-    Llm,
     Wifi,
     Ethernet,
     Disconnected,
@@ -243,18 +242,6 @@ fn spec(icon: Icon) -> Spec {
                 ),
                 fill_in("M9 20.5h8.6a3.1 3.1 0 0 0 .3-6.2 4.4 4.4 0 0 0-8.5-.7A2.9 2.9 0 0 0 9 20.5z", Ink::Base),
                 stroke("M9 20.5h8.6a3.1 3.1 0 0 0 .3-6.2 4.4 4.4 0 0 0-8.5-.7A2.9 2.9 0 0 0 9 20.5z"),
-            ]
-            },
-        },
-        Llm => Spec {
-            w: 15,
-            h: 15,
-            sw: 1.7,
-            parts: &const {
-                [
-                stroke("M8 4h8a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4z"),
-                fill_in("M10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5v-3A1.5 1.5 0 0 1 10.5 9z", Ink::Accent),
-                stroke("M9 1.8v2.2M15 1.8v2.2M9 20v2.2M15 20v2.2M1.8 9H4M1.8 15H4M20 9h2.2M20 15h2.2"),
             ]
             },
         },
@@ -801,7 +788,6 @@ mod tests {
             Night,
             AiUsage,
             Weather,
-            Llm,
             Wifi,
             Ethernet,
             Disconnected,

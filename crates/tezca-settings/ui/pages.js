@@ -13,7 +13,7 @@
  */
 
 import {
-    el, row, section, toggle, segmented, slider, field, themeCard, icon,
+    el, clear, row, section, toggle, segmented, slider, field, themeCard, icon,
     asBool, asNum, kv, records, pairs, secsLabel, convertFileSrc,
 } from './lib.js';
 import { displaysPage } from './displays.js';
@@ -154,12 +154,16 @@ async function appearance(ctx) {
 
 /* ── Bar ─────────────────────────────────────────────────────────────────── */
 
-const BAR_MODULES = [
-    'mirror', 'appname', 'appmenu', 'workspaces', 'nowplaying', 'privacy', 'caffeine',
-    'night', 'ai', 'llm', 'tray', 'cpu', 'mem', 'gpu', 'net', 'bluetooth', 'volume',
-    'brightness', 'battery', 'weather', 'notifications', 'clock', 'power', 'gamemode',
-    'recording', 'camera', 'mic', 'submap', 'sep',
-];
+const REGIONS = [['layout_left', 'Left'], ['layout_center', 'Center'], ['layout_right', 'Right']];
+
+/**
+ * Which monitor the Modules editor is editing — '' for every monitor.
+ *
+ * Module scope, not page state: `ctx.reload()` rebuilds the page from scratch,
+ * and picking a monitor only to be bounced back to "All" by the reload that
+ * follows would make the control look broken.
+ */
+let barScope = '';
 
 async function bar(ctx) {
     const cfg = pairs(await ctx.invoke('tz_bar_config'));
@@ -229,74 +233,299 @@ async function bar(ctx) {
     out.push(row('Units', null,
         segmented([['c', '°C'], ['f', '°F']], g('weather_unit', 'c'), (v) => set('weather_unit', v))));
 
-    out.push(section('Local AI'));
-    out.push(row('Local AI module', 'Shows the resident model, where it is running, and the live rate.',
-        toggle(asBool(g('llm_enabled')), (v) => set('llm_enabled', v ? 'true' : 'false'))));
-    out.push(row('Backend', null,
-        segmented([['auto', 'auto'], ['ollama', 'ollama'], ['llamacpp', 'llama.cpp']],
-            g('llm_backend', 'auto'), (v) => set('llm_backend', v))));
-    out.push(row('Port', null,
-        slider({ min: 1024, max: 65535, step: 1, value: asNum(g('llm_port'), 11434) }, (v) => set('llm_port', v))));
-
     out.push(section('Modules'));
-    const known = BAR_MODULES.concat(custom.map(([id]) => id));
-    for (const [key, label] of [['layout_left', 'Left'], ['layout_center', 'Center'], ['layout_right', 'Right']]) {
-        const ids = String(g(key, '')).split(',').map((s) => s.trim()).filter(Boolean);
-        out.push(row(`${label} · ${ids.length}`, null, moduleList(ids, known, (next) => set(key, next.join(','))), { stack: true }));
-    }
+    out.push(...(await barModules(ctx, cfg)));
     out.push(el('div.pagehint', 'Custom modules: drop a <name>.toml manifest in ~/.config/tezca-bar/modules/ and it appears here.'));
     return out;
 }
 
-/** A reorderable region list of drag chips (§1.6). */
-function moduleList(ids, known, onChange) {
-    const wrap = el('div.chips');
-    let order = ids.slice();
+/**
+ * The Modules editor: three ordered regions, a picker, and a monitor scope.
+ *
+ * Everything here is deliberately a *move*, never a copy. A GTK widget has one
+ * parent, so the bar can only render a module in the first region that claims
+ * it; an editor that let you add `nowplaying` to the left while it sat in the
+ * centre would be showing you a layout the bar cannot build. (It did, and the
+ * result was a media pill silently docked to the left edge.)
+ */
+async function barModules(ctx, cfg) {
+    const [builtin, custom, monitors] = await Promise.all([
+        ctx.invoke('tz_bar_modules'),
+        ctx.invoke('tz_custom_modules'),
+        ctx.invoke('tz_monitor_names'),
+    ]);
+    // id → {label, hint}. Custom modules are indistinguishable from built-ins
+    // here on purpose: they place, drag and remove the same way.
+    const catalog = new Map(builtin.map(([id, label, hint]) => [id, { id, label, hint }]));
+    for (const [id, label] of custom) {
+        catalog.set(id, { id, label, hint: 'Custom module (~/.config/tezca-bar/modules)' });
+    }
+
+    // The key a region writes under this scope, and whether an override exists.
+    const keyFor = (region) => (barScope ? `${region}.${barScope}` : region);
+    const overridden = REGIONS.some(([r]) => cfg.has(`${r}.${barScope}`));
+
+    // Canonicalised through the bar's own parser, so a chip on screen is a
+    // module that will actually be on the bar — aliases resolved, unknown ids
+    // dropped rather than displayed as if they meant something.
+    const state = new Map();
+    for (const [region] of REGIONS) {
+        const raw = cfg.get(keyFor(region)) ?? cfg.get(region) ?? '';
+        state.set(region, await ctx.invoke('tz_bar_layout', { value: String(raw) }));
+    }
+
+    /** Write the regions that changed — one command, so one bar restart. */
+    const commit = (regions) => {
+        const args = ['bar', 'set'];
+        for (const r of new Set(regions)) args.push(keyFor(r), state.get(r).join(', '));
+        return ctx.run(args);
+    };
+
+    const out = [];
+    if (monitors.length > 1) {
+        const opts = [['', 'All monitors'], ...monitors.map((m) => [m, m])];
+        out.push(row(
+            'Applies to',
+            barScope
+                ? (overridden
+                    ? `${barScope} has its own layout.`
+                    : `${barScope} follows the all-monitors layout until you change something here.`)
+                : 'One layout for every monitor. Pick a connector to give it its own.',
+            segmented(opts, barScope, (v) => {
+                barScope = v;
+                ctx.reload();
+            }),
+        ));
+        if (barScope && overridden) {
+            const b = el('button.linkbtn', { type: 'button' }, `Reset ${barScope} to follow all monitors`);
+            b.addEventListener('click', async () => {
+                await ctx.run(['bar', 'unset', ...REGIONS.map(([r]) => `${r}.${barScope}`)]);
+                ctx.reload();
+            });
+            out.push(row('Override', null, b));
+        }
+    }
+    out.push(moduleEditor(state, catalog, commit));
+    return out;
+}
+
+/**
+ * The three region rows, sharing one drag session and one chip vocabulary.
+ *
+ * `state` is a Map of region key → ordered ids, mutated in place; `commit` is
+ * handed the regions that changed. Drag carries the source *region* as well as
+ * the index — without that, dropping a chip from one region onto another ran the
+ * destination's handler against the source's index and quietly deleted an
+ * unrelated module from the destination.
+ */
+function moduleEditor(state, catalog, commit) {
+    const host = el('div.modeditor');
+    let drag = null;
+
+    const labelOf = (id) => catalog.get(id)?.label ?? id;
+    /** Placed anywhere. Separators are exempt — the bar allows any number. */
+    const placed = () => new Set([...state.values()].flat().filter((id) => id !== 'sep'));
+
+    /** Move `drag` to `region` at `index`, then write whatever that touched. */
+    const drop = (region, index) => {
+        if (!drag) return;
+        const src = state.get(drag.region);
+        const dst = state.get(region);
+        if (drag.region === region) {
+            if (drag.index === index || drag.index + 1 === index) return;
+            const [moved] = src.splice(drag.index, 1);
+            dst.splice(drag.index < index ? index - 1 : index, 0, moved);
+            commit([region]);
+        } else {
+            const [moved] = src.splice(drag.index, 1);
+            dst.splice(index, 0, moved);
+            commit([drag.region, region]);
+        }
+        drag = null;
+        render();
+    };
+
+    const chip = (region, id, i) => {
+        const isSep = id === 'sep';
+        const c = el(
+            'div.chip' + (isSep ? '.sep' : '') + (id === 'ai' ? '.ai' : ''),
+            { draggable: true, title: isSep ? 'Separator' : `${labelOf(id)} — ${id}` },
+        );
+        if (!isSep) c.append(el('span.grip', '⠿'), el('span.chip-name', labelOf(id)));
+        // A visible affordance, not a double-click. Removal used to be dblclick
+        // and nothing said so, which reads exactly like removal being impossible.
+        const x = el('button.chip-x', { type: 'button', title: `Remove ${labelOf(id)}` }, '×');
+        x.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.get(region).splice(i, 1);
+            commit([region]);
+            render();
+        });
+        c.append(x);
+
+        c.addEventListener('dragstart', (e) => {
+            drag = { region, index: i, id };
+            e.dataTransfer.effectAllowed = 'move';
+            // Firefox will not start a drag without payload; the real state is
+            // in `drag`, because dataTransfer is unreadable during dragover and
+            // the drop targets need to know where the chip came from.
+            e.dataTransfer.setData('text/plain', id);
+            c.classList.add('dragging');
+        });
+        c.addEventListener('dragend', () => {
+            drag = null;
+            c.classList.remove('dragging');
+            render();
+        });
+        c.addEventListener('dragover', (e) => {
+            if (!drag) return;
+            e.preventDefault();
+            e.stopPropagation();
+            // Past the midpoint means "after this one" — otherwise a chip can
+            // never be dropped at the very end of a run.
+            const r = c.getBoundingClientRect();
+            c.classList.toggle('over-after', e.clientX > r.left + r.width / 2);
+            c.classList.toggle('over', e.clientX <= r.left + r.width / 2);
+        });
+        c.addEventListener('dragleave', () => c.classList.remove('over', 'over-after'));
+        c.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const after = c.classList.contains('over-after');
+            c.classList.remove('over', 'over-after');
+            drop(region, after ? i + 1 : i);
+        });
+        return c;
+    };
+
+    const addButton = (region) => {
+        const b = el('button.adddrop', { type: 'button' }, '+ add');
+        b.addEventListener('click', () => {
+            const used = placed();
+            const items = [...catalog.values()].filter((m) => m.id === 'sep' || !used.has(m.id));
+            openPicker(b, items, (id) => {
+                state.get(region).push(id);
+                commit([region]);
+                render();
+            });
+        });
+        return b;
+    };
 
     const render = () => {
-        wrap.textContent = '';
+        clear(host);
+        for (const [region, label] of REGIONS) {
+            const ids = state.get(region);
+            const wrap = el('div.chips');
+            ids.forEach((id, i) => wrap.append(chip(region, id, i)));
+            wrap.append(addButton(region));
+            // The row itself is a drop target so a chip can be dropped into the
+            // gap after the last one — and into a region that is empty, which
+            // has no chip to aim at.
+            wrap.addEventListener('dragover', (e) => {
+                if (!drag) return;
+                e.preventDefault();
+                wrap.classList.add('over');
+            });
+            wrap.addEventListener('dragleave', () => wrap.classList.remove('over'));
+            wrap.addEventListener('drop', (e) => {
+                e.preventDefault();
+                wrap.classList.remove('over');
+                drop(region, ids.length);
+            });
+            host.append(row(`${label} · ${ids.length}`, null, wrap, { stack: true }));
+        }
+    };
+    render();
+    return host;
+}
+
+/** The add-module menu: every module not already placed, with what it does. */
+function openPicker(anchor, items, onPick) {
+    const list = el('div.modpick');
+    if (!items.length) {
+        list.append(el('div.modpick-empty', 'Every module is already placed somewhere.'));
+    }
+    for (const m of items) {
+        const b = el('button.modpick-row', { type: 'button' },
+            el('span.modpick-label', m.label),
+            el('span.modpick-hint', m.hint));
+        b.addEventListener('click', () => {
+            close();
+            onPick(m.id);
+        });
+        list.append(b);
+    }
+    const scrim = el('div.modpick-scrim', list);
+    const close = () => {
+        scrim.remove();
+        window.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => {
+        if (e.key === 'Escape') {
+            e.stopPropagation();
+            close();
+        }
+    };
+    scrim.addEventListener('mousedown', (e) => {
+        if (e.target === scrim) close();
+    });
+    document.body.append(scrim);
+
+    // Anchored under the button, then pulled back inside the window — a picker
+    // opened from the right cluster's "+ add" would otherwise hang off the edge.
+    const a = anchor.getBoundingClientRect();
+    const r = list.getBoundingClientRect();
+    const x = Math.max(8, Math.min(a.left, window.innerWidth - r.width - 8));
+    const below = a.bottom + 6;
+    list.style.left = `${Math.round(x)}px`;
+    list.style.top = `${Math.round(
+        below + r.height > window.innerHeight - 8 ? Math.max(8, a.top - r.height - 6) : below,
+    )}px`;
+    window.addEventListener('keydown', onKey);
+}
+
+/** A plain reorderable chip list with per-chip removal (the dock's favourites). */
+function chipList(ids, onChange) {
+    const wrap = el('div.chips');
+    const order = ids.slice();
+    let from = null;
+
+    const render = () => {
+        clear(wrap);
         order.forEach((id, i) => {
-            const isSep = id === 'sep';
-            const chip = el(
-                'div.chip' + (isSep ? '.sep' : '') + (id === 'llm' || id === 'ai' ? '.ai' : ''),
-                { draggable: true, title: isSep ? 'separator' : id },
-            );
-            if (!isSep) chip.append(el('span.grip', '⠿'), el('span', id));
-            chip.addEventListener('dragstart', (e) => {
-                e.dataTransfer.setData('text/plain', String(i));
-                chip.classList.add('dragging');
-            });
-            chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
-            chip.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                chip.classList.add('over');
-            });
-            chip.addEventListener('dragleave', () => chip.classList.remove('over'));
-            chip.addEventListener('drop', (e) => {
-                e.preventDefault();
-                chip.classList.remove('over');
-                const from = Number(e.dataTransfer.getData('text/plain'));
-                if (Number.isNaN(from) || from === i) return;
-                const [moved] = order.splice(from, 1);
-                order.splice(i, 0, moved);
-                render();
-                onChange(order);
-            });
-            chip.addEventListener('dblclick', () => {
+            const c = el('div.chip', { draggable: true, title: id },
+                el('span.grip', '⠿'), el('span.chip-name', id));
+            const x = el('button.chip-x', { type: 'button', title: `Remove ${id}` }, '×');
+            x.addEventListener('click', (e) => {
+                e.stopPropagation();
                 order.splice(i, 1);
                 render();
                 onChange(order);
             });
-            wrap.append(chip);
+            c.append(x);
+            c.addEventListener('dragstart', () => {
+                from = i;
+                c.classList.add('dragging');
+            });
+            c.addEventListener('dragend', () => c.classList.remove('dragging'));
+            c.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                c.classList.add('over');
+            });
+            c.addEventListener('dragleave', () => c.classList.remove('over'));
+            c.addEventListener('drop', (e) => {
+                e.preventDefault();
+                c.classList.remove('over');
+                if (from === null || from === i) return;
+                const [moved] = order.splice(from, 1);
+                order.splice(i, 0, moved);
+                from = null;
+                render();
+                onChange(order);
+            });
+            wrap.append(c);
         });
-        const add = el('button.adddrop', { type: 'button' }, '+ add');
-        add.addEventListener('click', () => {
-            const pick = known.find((k) => !order.includes(k)) || 'sep';
-            order.push(pick);
-            render();
-            onChange(order);
-        });
-        wrap.append(add);
     };
     render();
     return wrap;
@@ -327,8 +556,8 @@ async function dock(ctx) {
 
     out.push(section('Pinned favourites'));
     const pinned = String(g('pinned', '')).split(',').map((s) => s.trim()).filter(Boolean);
-    out.push(row(`${pinned.length} pinned`, 'Drag to reorder; double-click to unpin.',
-        moduleList(pinned, [], (next) => set('pinned', next.join(','))), { stack: true }));
+    out.push(row(`${pinned.length} pinned`, 'Drag to reorder; × to unpin.',
+        chipList(pinned, (next) => set('pinned', next.join(','))), { stack: true }));
     return out;
 }
 

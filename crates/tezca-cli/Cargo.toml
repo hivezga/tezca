@@ -14,3 +14,9 @@ name = "tezca"
 path = "src/main.rs"
 
 [dependencies]
+# The bar's module vocabulary, shared with `tezca-bar` itself. Std-only with no
+# external dependencies of its own, so the "nothing to audit, builds offline"
+# property above still holds. It is here so `bar set layout_*` can reject a
+# module id the bar would silently drop — which is exactly how the settings
+# editor once wrote `appmenu` and `privacy` into a live config.
+tezca-barlayout = { path = "../tezca-barlayout" }

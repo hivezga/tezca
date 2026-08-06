@@ -7,7 +7,6 @@ Cargo.lock.orig
 # from the permissions the crate actually uses, so they are build output, not
 # source — the checked-in thing is capabilities/default.json.
 crates/tezca-settings/gen/
-crates/tezca-chat/gen/
 
 # tezca link backups (should never be committed)
 *.bak.*

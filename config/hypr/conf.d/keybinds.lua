@@ -9,7 +9,6 @@
 --   • Game mode sits on SUPER+ALT+G — which is exactly where HyDE puts it too.
 -- Cheat-sheet: SUPER+/  (Walker keybind hint, see scripts/cheatsheet.sh).
 -- Control center (full GUI): SUPER+SHIFT+A  →  tezca-settings.
--- Local AI panel: SUPER+I  →  the docked Ollama chat column.
 --
 -- HYPRLANG → LUA BIND FLAGS. The bind variants became an options table:
 --   bind   →  (no options)      binde  →  { repeating = true }
@@ -115,7 +114,6 @@ hl.bind(mod .. " + SHIFT + A", hl.dsp.exec_cmd("$HOME/.local/bin/tezca settings"
 -- area reflows around it rather than being covered. The same command opens and
 -- closes it — the panel is a single-instance GtkApplication, so pressing this
 -- again reaches the running one and it closes itself.
-hl.bind(mod .. " + I",         hl.dsp.exec_cmd("$HOME/.local/bin/tezca-chat"))                    -- local AI chat panel (Ollama)
 
 -- ============================== Hardware — audio =============================
 -- HyDE binds the bare F10-F12 keys as well. These grab those keys globally, so

@@ -702,8 +702,119 @@ body {
     opacity: 0.4;
 }
 
+/* Where the chip would land. A left/right edge rather than a whole-chip glow,
+   because "before this one" and "after this one" are different drops and the
+   pointer is often nearer the seam than the middle. */
 .chip.over {
-    border-color: rgba(var(--tz-accent-rgb), 0.55);
+    box-shadow: inset 2px 0 0 var(--tz-accent);
+}
+
+.chip.over-after {
+    box-shadow: inset -2px 0 0 var(--tz-accent);
+}
+
+.chips.over {
+    outline: 1px dashed rgba(var(--tz-accent-rgb), 0.5);
+    outline-offset: 3px;
+    border-radius: 8px;
+}
+
+.chip-name {
+    white-space: nowrap;
+}
+
+/* Removal has to be visible. It was a double-click on a draggable element with
+   nothing on screen to say so, which is indistinguishable from "you cannot
+   remove modules". */
+.chip-x {
+    all: unset;
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    margin-right: -3px;
+    border-radius: 4px;
+    color: var(--tz-faint);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+}
+
+.chip-x:hover {
+    background: rgba(var(--tz-danger-rgb, var(--tz-accent-rgb)), 0.18);
+    color: var(--tz-text);
+}
+
+.modeditor {
+    display: contents;
+}
+
+/* The add-module picker. A menu, because "+ add" used to mean "append whatever
+   module happens to be first in an internal array" — which was always `mirror`
+   for two of the three regions. */
+.modpick-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+}
+
+.modpick {
+    position: fixed;
+    width: 280px;
+    max-height: min(420px, 70vh);
+    overflow-y: auto;
+    padding: 5px;
+    background: var(--tz-elevated, var(--tz-surface));
+    border: 1px solid var(--tz-line-strong);
+    border-radius: 11px;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
+}
+
+.modpick-row {
+    all: unset;
+    display: block;
+    width: calc(100% - 18px);
+    padding: 7px 9px;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.modpick-row:hover {
+    background: rgba(var(--tz-accent-rgb), 0.14);
+}
+
+.modpick-label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--tz-text);
+}
+
+.modpick-hint {
+    display: block;
+    margin-top: 1px;
+    font-size: 11px;
+    color: var(--tz-muted);
+}
+
+.modpick-empty {
+    padding: 12px 10px;
+    font-size: 12px;
+    color: var(--tz-muted);
+}
+
+/* A text button for the one-off "reset this monitor" action — not a form
+   control, so it should not look like one. */
+.linkbtn {
+    all: unset;
+    color: var(--tz-accent);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.linkbtn:hover {
+    text-decoration: underline;
 }
 
 /* The AI module is the one new capability in the bar, and the module editor is

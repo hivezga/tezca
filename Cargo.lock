@@ -3876,25 +3876,20 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
- "tezca-llm",
+ "tezca-barlayout",
  "zbus",
 ]
 
 [[package]]
-name = "tezca-chat"
+name = "tezca-barlayout"
 version = "0.1.0"
-dependencies = [
- "async-channel",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tezca-llm",
-]
 
 [[package]]
 name = "tezca-cli"
 version = "0.1.0"
+dependencies = [
+ "tezca-barlayout",
+]
 
 [[package]]
 name = "tezca-dock"
@@ -3909,14 +3904,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tezca-llm"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "serde_json",
-]
-
-[[package]]
 name = "tezca-settings"
 version = "0.1.0"
 dependencies = [
@@ -3924,6 +3911,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tezca-barlayout",
 ]
 
 [[package]]

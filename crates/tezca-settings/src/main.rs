@@ -303,6 +303,46 @@ async fn tz_dock_config() -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
+/// Every placeable bar module as `(id, label, hint)`.
+///
+/// Straight from `tezca-barlayout`, the same crate the bar parses its config
+/// with, rather than the hand-kept list this page used to carry. That list had
+/// drifted into offering `appmenu` and `privacy` — modules the bar has never
+/// had, which it silently dropped on load — and into spelling three real ones by
+/// their aliases (`net`, `notifications`, `mic`), which defeated its own
+/// duplicate check. Neither can happen to a list nobody writes twice.
+#[tauri::command]
+fn tz_bar_modules() -> Vec<(String, String, String)> {
+    tezca_barlayout::Mod::ALL
+        .iter()
+        .map(|m| (m.id().to_string(), m.label().to_string(), m.hint().to_string()))
+        .collect()
+}
+
+/// A layout value as the bar will actually read it: canonical ids, aliases
+/// resolved, unknown tokens dropped.
+///
+/// The editor shows the *result* of this rather than the raw config text, so a
+/// chip on screen is a module that will be on the bar. It also means an id the
+/// file spells as an alias (`mic`) can't be added a second time under its
+/// canonical name (`microphone`).
+#[tauri::command]
+fn tz_bar_layout(value: String) -> Vec<String> {
+    tezca_barlayout::parse_layout(&value).iter().map(|s| s.id()).collect()
+}
+
+/// Connector names of the attached monitors, for the per-monitor layout picker.
+#[tauri::command]
+async fn tz_monitor_names() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        backend::without_echo(|| {
+            backend::monitors().into_iter().filter(|m| !m.disabled).map(|m| m.name).collect()
+        })
+    })
+    .await
+    .unwrap_or_default()
+}
+
 #[tauri::command]
 async fn tz_custom_modules() -> Vec<(String, String)> {
     tauri::async_runtime::spawn_blocking(|| backend::without_echo(backend::custom_bar_modules))
@@ -439,6 +479,9 @@ fn main() {
         tz_layout_status,
         tz_hypr,
         tz_bar_config,
+        tz_bar_modules,
+        tz_bar_layout,
+        tz_monitor_names,
         tz_dock_config,
         tz_custom_modules,
         tz_keybinds,

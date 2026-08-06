@@ -32,3 +32,6 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The bar's module vocabulary, shared with `tezca-bar` and the CLI. The Modules
+# editor offers exactly what the bar can render because it is the same list.
+tezca-barlayout = { path = "../tezca-barlayout" }

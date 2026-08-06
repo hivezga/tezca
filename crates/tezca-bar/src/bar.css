@@ -163,7 +163,12 @@ button.ws.urgent {
     background: alpha(@tz_text, 0.055);
     border: 1px solid alpha(@tz_text, 0.06);
     border-radius: 12px;
-    padding: 3px 13px 3px 5px;
+    /* Symmetric on purpose. It used to be 13px right against 5px left, which put
+       the pill's *contents* 4px left of its own middle — so even a perfectly
+       centred widget looked off-centre by 4px, on both monitors, always. The
+       cover sitting flush left is what the extra right padding was balancing;
+       the box's own 10px child spacing already does that. */
+    padding: 3px 9px;
 }
 .np-title {
     font-size: 11px;
@@ -229,7 +234,6 @@ button.ws.urgent {
 .control,
 .ai,
 .weather,
-.llm,
 .cluster-chip {
     padding: 0 9px;
     background: transparent;
@@ -249,7 +253,6 @@ button.ws.urgent {
 .control:hover,
 .ai.clickable:hover,
 .weather.clickable:hover,
-.llm.clickable:hover,
 .cluster-chip:hover {
     background: alpha(@tz_accent, 0.09);
 }
@@ -365,125 +368,6 @@ button.cluster-collapse:hover {
    urgent, and colouring a temperature would imply one. */
 .weather {
     color: @tz_subtext;
-}
-
-/* ── Local AI (Ollama) ───────────────────────────────────────────────────── */
-.llm {
-    color: @tz_subtext;
-}
-/* The accelerator badge — which backend the resident model is actually running
-   on. This is the only part of the module that changes colour: gold when the
-   model is not fully on the GPU, accent when it is. CPU-only and a split
-   offload are both worth flagging (they are the two states that explain why
-   generation went slow) and the tooltip says which one you have. Golding the
-   whole module instead would put a warning colour on the model size and the
-   generation rate, neither of which is what went wrong. */
-.llm-accel {
-    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
-    font-size: 9.5px;
-    /* .06em at 9.5px. */
-    letter-spacing: 0.57px;
-    text-transform: uppercase;
-    color: @tz_accent;
-}
-.llm.warn .llm-accel {
-    color: @tz_gold;
-}
-/* The live generation rate, pushed by the panel over the rate socket. Accent
-   while it is moving: a number that is changing is the one worth looking at,
-   and it is the only thing on this module that ever does. */
-.control-sub.on {
-    color: @tz_accent;
-}
-
-/* ── The SUPER+I lateral panel ─────────────────────────────────────────────
-   A docked column, not a floating window: square on the anchored edges, with
-   only the inner corner rounded, so it reads as part of the screen edge. */
-window.tezca-llm {
-    background: transparent;
-}
-.llm-panel {
-    background: alpha(@tz_base, 0.94);
-    border-left: 1px solid alpha(@tz_accent, 0.18);
-    color: @tz_text;
-}
-.llm-head {
-    padding: 11px 12px;
-    border-bottom: 1px solid alpha(@tz_muted, 0.14);
-}
-.llm-dot {
-    min-width: 7px;
-    min-height: 7px;
-    border-radius: 7px;
-    background: @tz_accent;
-}
-.llm-model {
-    font-size: 12.5px;
-    font-weight: 600;
-    color: @tz_text;
-}
-button.llm-icon {
-    background: transparent;
-    color: @tz_muted;
-    padding: 2px 6px;
-    min-width: 0;
-    min-height: 0;
-}
-button.llm-icon:hover {
-    color: @tz_text;
-}
-.llm-messages {
-    padding: 16px 14px;
-}
-.llm-who {
-    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
-    font-size: 10px;
-    color: @tz_faint;
-}
-.llm-body {
-    font-size: 12.5px;
-    color: @tz_subtext;
-}
-/* Your own turns get a surface so the transcript is skimmable — you can find
-   what you asked without reading what was answered. */
-.llm-user .llm-body {
-    color: @tz_text;
-    background: alpha(@tz_muted, 0.10);
-    border-radius: 10px;
-    padding: 9px 11px;
-}
-.llm-foot {
-    padding: 10px 12px 11px 12px;
-    border-top: 1px solid alpha(@tz_muted, 0.14);
-}
-.llm-composer {
-    border: 1px solid alpha(@tz_muted, 0.20);
-    border-radius: 11px;
-    padding: 7px 9px;
-    background: alpha(@tz_base, 0.6);
-}
-textview.llm-input,
-textview.llm-input text {
-    background: transparent;
-    color: @tz_text;
-    font-size: 12.5px;
-}
-button.llm-send {
-    background: @tz_accent;
-    color: @tz_on_accent;
-    border-radius: 8px;
-    min-width: 26px;
-    min-height: 26px;
-    padding: 0;
-}
-button.llm-send:disabled {
-    background: alpha(@tz_muted, 0.25);
-    color: @tz_faint;
-}
-.llm-status {
-    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
-    font-size: 10px;
-    color: @tz_faint;
 }
 
 /* ── Custom (community / user exec) modules ─────────────────────────────────

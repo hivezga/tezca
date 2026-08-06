@@ -69,29 +69,6 @@ hl.window_rule({
     center = true,
 })
 
--- tezca-chat — the SUPER+I local-model chat panel.
---
--- Named `tezca-chat`, not `tezca-ai`: that class already belongs to the
--- drop-down Claude Code terminal in conf.d/ai.lua, and a second window wearing
--- it silently inherited that terminal's float/centre/special-workspace rules.
---
--- Deliberately *not* floated. The design calls it "a lateral dock, not a
--- popover", and the GTK build got that from a layer surface with an exclusive
--- zone: it reserved the screen edge, which shrinks the tiled area but leaves
--- the panel outside the layout. A tiled window is the honest version — the
--- other windows lay out around it, and closing it gives the space back without
--- anything having to recompute a zone.
---
--- The design's 400px is a *starting* width. Hyprland has no rule that pins a
--- tiled window's size — `size` applies to floating windows only — so the split
--- ratio sets it and dragging the edge works as it does for anything else.
--- Pinning it exactly would mean floating it, which is the thing this stopped
--- being.
-hl.window_rule({
-    match = { class = "^(tezca-chat)$" },
-    float = false,
-})
-
 -- Suppress the "maximize" activate events some apps spam.
 hl.window_rule({
     name           = "suppress-maximize-events",

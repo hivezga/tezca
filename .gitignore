@@ -18,6 +18,11 @@ crates/tezca-chat/gen/
 *~
 .DS_Store
 
+# Design handoffs and the like arrive as archives and are unpacked in place. The
+# unpacked tree is what gets read (and, when it is a spec worth keeping, tracked
+# — see design_handoff_tezca_desktop/); the archive itself is never the artefact.
+*.zip
+
 # Machine-local state is NOT in this repo at all — it lives in ~/.config/tezca/ and
 # in the real (un-symlinked) ~/.config/tezca-bar/ and ~/.config/tezca-dock/
 # directories, so `tezca hypr set` / `keybind rebind` / `bar set` never dirty the

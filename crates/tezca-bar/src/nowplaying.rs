@@ -31,11 +31,33 @@ pub struct NowPlaying {
 impl NowPlaying {
     /// The strip's sub-line: `artist · 2:14`, dropping whichever half is absent.
     pub fn subtitle(&self) -> String {
-        match (self.artist.is_empty(), self.position.map(clock)) {
+        match (self.artist.is_empty(), self.elapsed()) {
             (true, Some(p)) => p,
             (false, Some(p)) => format!("{} \u{00B7} {p}", self.artist),
             (_, None) => self.artist.clone(),
         }
+    }
+
+    /// The elapsed clock, held to the width the track's *total* will need.
+    ///
+    /// [`clock`] does not zero-pad its minutes, so a track ticking past `9:59`
+    /// gains a character. This is the only label on the pill that rewrites
+    /// itself every couple of seconds, which makes it the only place that
+    /// digit-count change is a recurring re-flow rather than a one-off — and in
+    /// a sub-line that ellipsizes, a character gained at the end is a character
+    /// the artist's name loses.
+    ///
+    /// Reserved with U+2007 FIGURE SPACE, one digit wide, exactly as every other
+    /// readout on the bar reserves. The width comes from the *length* rather
+    /// than a fixed number of places, so a three-minute track carries no blank
+    /// column while an hour-long one still has room for its hours — the same
+    /// derive-it-from-the-total rule the memory figure uses. A stream has no
+    /// length to derive from, so it gets `MM:SS`, the boundary it will cross.
+    fn elapsed(&self) -> Option<String> {
+        let now = clock(self.position?);
+        let want = self.length.map(|l| clock(l).chars().count()).unwrap_or(5);
+        let pad = want.saturating_sub(now.chars().count());
+        Some(format!("{}{now}", "\u{2007}".repeat(pad)))
     }
 }
 
@@ -297,9 +319,47 @@ mod tests {
         assert!(np.playing);
         assert_eq!(np.length, None);
         assert!(np.art_url.is_empty());
-        assert_eq!(np.subtitle(), "0:42");
+        // No length to size the elapsed column from, so it reserves `MM:SS` —
+        // a stream is precisely the thing you leave running past ten minutes,
+        // and the digit it gains there would otherwise re-flow the sub-line.
+        assert_eq!(np.subtitle(), "\u{2007}0:42");
         // A player that is up but holds no track publishes empty fields.
         assert!(parse_current("Stopped\x1f\x1f\x1f\x1f\x1f").is_none());
+    }
+
+    #[test]
+    fn the_elapsed_clock_holds_one_width_for_the_whole_track() {
+        let at = |pos: u64, len: Option<u64>| {
+            NowPlaying {
+                title: "t".into(),
+                artist: String::new(),
+                playing: true,
+                position: Some(pos),
+                length: len,
+                art_url: String::new(),
+            }
+            .subtitle()
+        };
+
+        // A 26:50 track: the minute place is two wide for its whole length, so
+        // 9:59 ticking over to 10:00 no longer lengthens the sub-line.
+        let len = Some(1610);
+        let widths: Vec<usize> =
+            [0, 59, 599, 600, 1609].iter().map(|p| at(*p, len).chars().count()).collect();
+        assert!(widths.iter().all(|w| *w == widths[0]), "{widths:?}");
+        assert_eq!(at(33, len), "\u{2007}0:33");
+        assert_eq!(at(600, len), "10:00");
+
+        // A three-minute track never reaches two minute-digits, so it carries no
+        // blank column — the reservation follows the length, it is not fixed.
+        assert_eq!(at(33, Some(225)), "0:33");
+
+        // An hour-long one keeps room for the hours it will grow.
+        assert_eq!(at(33, Some(3725)).chars().count(), at(3724, Some(3725)).chars().count());
+        assert_eq!(at(3725, Some(3725)), "1:02:05");
+
+        // A player reporting past its own length grows rather than truncating.
+        assert_eq!(at(600, Some(30)), "10:00");
     }
 
     #[test]

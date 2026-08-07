@@ -809,6 +809,7 @@ pub fn mem_detail() -> MemDetail {
 }
 
 /// Expanded GPU telemetry for the metric popover (fields absent → `None`).
+#[derive(Default)]
 pub struct GpuDetail {
     pub name: String,
     pub temp_c: Option<f64>,

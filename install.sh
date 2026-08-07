@@ -145,7 +145,52 @@ else
 fi
 echo
 
-# --- 4. next steps --------------------------------------------------------
+# --- 4. KDE crash handler -------------------------------------------------
+# DrKonqi is KDE's coredump handler, and on a Plasma-derived install (CachyOS
+# ships Plasma) its *user* units stay enabled in every session — including this
+# one. It is the wrong shape for Hyprland twice over.
+#
+# Its dialog has nowhere to go: the launcher logs `There are no outputs -
+# creating placeholder screen` and then sits there as a running unit. And the
+# notification it raises first is Qt rich text —
+#
+#     <html><tt>/path/to/binary</tt> has encountered a fatal error and was closed.</html>
+#
+# — which swaync cannot render. swaync accepts Pango markup only (<b> <i> <u>
+# <a> <span> <img>); a body that fails the Pango parse is escaped whole, so the
+# user is shown the literal tags. There is no swaync setting for this.
+#
+# It also ships drkonqi-sentry-postman, which uploads crash data to KDE.
+#
+# Masking is per-user and reversible, and crashes still land in `coredumpctl`.
+# It does cover the Plasma fallback session too, so there are no crash dialogs
+# there either until these are unmasked.
+DRKONQI_UNITS=(drkonqi-coredump-launcher.socket
+               drkonqi-coredump-launcher@.service
+               drkonqi-coredump-pickup.service
+               drkonqi-sentry-postman.path
+               drkonqi-sentry-postman.service
+               drkonqi-sentry-postman.timer)
+if [[ -n "$(systemctl --user list-unit-files 'drkonqi-*' --no-legend 2>/dev/null)" ]]; then
+    say "KDE crash handler (DrKonqi)"
+    info "DrKonqi's user units are enabled. Under Hyprland it cannot show its"
+    info "dialog, and its crash notification reaches swaync as unparseable Qt"
+    info "rich text — the raw ${DIM}<html><tt>${RST} tags end up on screen."
+    if confirm "Mask DrKonqi's user units?"; then
+        systemctl --user stop 'drkonqi-coredump-launcher@*.service' 2>/dev/null || true
+        if systemctl --user mask "${DRKONQI_UNITS[@]}" >/dev/null 2>&1; then
+            info "${GREEN}✓${RST} masked — crashes still recorded in ${BOLD}coredumpctl${RST}"
+            info "${DIM}undo: systemctl --user unmask ${DRKONQI_UNITS[*]}${RST}"
+        else
+            warn "could not mask them — is this a systemd user session?"
+        fi
+    else
+        warn "skipped — KDE crash notices will show raw <html> tags in swaync"
+    fi
+    echo
+fi
+
+# --- 5. next steps --------------------------------------------------------
 if (( ${#MISSING_AUR[@]} )); then
     say "Packages that did NOT install"
     for p in "${MISSING_AUR[@]}"; do

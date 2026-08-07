@@ -266,6 +266,12 @@ fn run_popover_demo(name: String) -> glib::ExitCode {
             "volume" | "mixer" | "audio" => popovers::mixer(&anchor),
             "bt" | "bluetooth" => popovers::bluetooth(&anchor),
             "mirror" => popovers::tezca_menu(&anchor),
+            // The hardware panels are the ones worth being able to open on
+            // demand: they carry the figures the modules stopped showing on the
+            // bar, and the CPU one fills part of itself a beat after it opens.
+            "cpu" => popovers::cpu_detail(&anchor),
+            "mem" | "memory" => popovers::mem_detail(&anchor),
+            "gpu" => popovers::gpu_detail(&anchor),
             // The network panel is the one demo that needs its own meter: its
             // throughput chart is a series, so it has to be sampled over time
             // rather than read once. Same 2-second cadence as the bar's
@@ -300,7 +306,8 @@ fn run_popover_demo(name: String) -> glib::ExitCode {
             }
             other => {
                 eprintln!(
-                    "unknown popover '{other}' — try clock, power, np, volume, bt, net or mirror"
+                    "unknown popover '{other}' — try clock, power, np, volume, bt, net, \
+                     cpu, mem, gpu or mirror"
                 );
                 app.quit();
                 return;

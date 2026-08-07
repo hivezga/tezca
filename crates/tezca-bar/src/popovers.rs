@@ -764,18 +764,24 @@ pub fn cpu_detail(anchor: &impl IsA<gtk4::Widget>) -> Popover {
         }
         c.append(&rows);
 
-        // Prime the meter, then show the grid a moment later once there is a
+        // Prime the meter, then fill the grid a moment later once there is a
         // real delta. Sampling twice back to back would divide by a zero
         // interval and paint every core idle.
+        //
+        // The cells are built *now*, at their final size, and only their values
+        // arrive late — see [`core_grid`] for why the popover must not grow
+        // after it is open.
         cores.borrow_mut().sample();
-        let (cc, cores_c) = (c.clone(), cores.clone());
-        glib::timeout_add_local_once(SAMPLE_GAP, move || {
-            let vals = cores_c.borrow_mut().sample();
-            if let Some(grid) = core_grid(&vals) {
-                cc.append(&caption("per core"));
-                cc.append(&grid);
-            }
-        });
+        if let Some((grid, cells)) = core_grid(d.threads) {
+            c.append(&caption("per core"));
+            c.append(&grid);
+            let cores_c = cores.clone();
+            glib::timeout_add_local_once(SAMPLE_GAP, move || {
+                for (cell, v) in cells.iter().zip(cores_c.borrow_mut().sample()) {
+                    cell.set_value(v);
+                }
+            });
+        }
 
         append_top_processes(&c, Rank::Cpu);
     });
@@ -798,13 +804,17 @@ enum Rank {
 /// Append a "top processes" block to `c`.
 ///
 /// Memory is instantaneous, so it renders at once. CPU is a rate and needs two
-/// samples [`SAMPLE_GAP`] apart, so that block fills itself in a moment later
-/// rather than showing cumulative time, which would rank whatever has been
-/// running longest instead of whatever is busy now.
+/// samples [`SAMPLE_GAP`] apart, so those figures land a moment later rather
+/// than showing cumulative time, which would rank whatever has been running
+/// longest instead of whatever is busy now.
+///
+/// Either way the rows exist from the start and are only *written* late, for
+/// the reason spelled out on [`core_grid`]: a popover that grows after it has
+/// been mapped gets dismissed out from under the user.
 fn append_top_processes(c: &GtkBox, rank: Rank) {
     c.append(&sep_row());
     c.append(&caption("top processes"));
-    let holder = GtkBox::new(Orientation::Vertical, 5);
+    let (holder, slots) = proc_rows();
     c.append(&holder);
 
     if rank == Rank::Mem {
@@ -815,7 +825,7 @@ fn append_top_processes(c: &GtkBox, rank: Rank) {
             .take(TOP_N)
             .map(|p| (p.name.clone(), p.pid, format!("{:.1}G", p.rss_kb as f64 / 1024.0 / 1024.0)))
             .collect();
-        holder.append(&proc_rows(&rows));
+        fill_proc_rows(&slots, &rows);
         return;
     }
 
@@ -839,7 +849,7 @@ fn append_top_processes(c: &GtkBox, rank: Rank) {
             .take(TOP_N)
             .map(|(n, pid, d)| (n, pid, format!("{:.0}%", d as f64 * 10.0 / window_ms * 100.0)))
             .collect();
-        holder.append(&proc_rows(&rows));
+        fill_proc_rows(&slots, &rows);
     });
 }
 
@@ -1407,27 +1417,35 @@ pub fn nowplaying_detail(anchor: &impl IsA<gtk4::Widget>, pal: &SharedPalette) -
     pop
 }
 
-/// A grid of one cell per logical core, each filled to its busy fraction.
+/// An empty grid of one cell per logical core, plus the cells to fill in.
 ///
 /// Eight per row, which is the widest that stays legible at popover width and
-/// happens to halve a 16-thread desktop neatly. Returns `None` on the first
-/// sample, when there is no delta yet and a grid of zeroes would read as an
-/// idle machine rather than as "no reading".
-fn core_grid(cores: &[f64]) -> Option<GtkBox> {
-    if cores.is_empty() {
+/// happens to halve a 16-thread desktop neatly. `None` on a machine that does
+/// not report a thread count, rather than an empty box holding a caption open.
+///
+/// Built empty and filled afterwards because **a popover must not change size
+/// while it is open**: this grid used to be appended when its first delta
+/// landed, 450ms after the click, and the resize that caused had the compositor
+/// dismiss the popup — the CPU popover closed itself, every time, a blink after
+/// you opened it. Nothing else on the bar defers content, which is why nothing
+/// else did it. Cells start at zero and are written once the delta arrives, so
+/// the geometry the popup was mapped with is the geometry it keeps.
+fn core_grid(threads: usize) -> Option<(GtkBox, Vec<LevelBar>)> {
+    if threads == 0 {
         return None;
     }
     let col = GtkBox::new(Orientation::Vertical, 3);
     col.add_css_class("core-grid");
-    for chunk in cores.chunks(8) {
+    let mut cells = Vec::with_capacity(threads);
+    for chunk in 0..threads.div_ceil(8) {
         let row = GtkBox::new(Orientation::Horizontal, 3);
         row.set_homogeneous(true);
-        for f in chunk {
+        for _ in 0..(threads - chunk * 8).min(8) {
             let bar = LevelBar::builder()
                 .mode(gtk4::LevelBarMode::Continuous)
                 .min_value(0.0)
                 .max_value(1.0)
-                .value(*f)
+                .value(0.0)
                 .orientation(Orientation::Vertical)
                 .inverted(true)
                 .hexpand(true)
@@ -1435,34 +1453,72 @@ fn core_grid(cores: &[f64]) -> Option<GtkBox> {
             bar.add_css_class("core");
             bar.set_size_request(-1, 26);
             row.append(&bar);
+            cells.push(bar);
         }
         col.append(&row);
     }
-    Some(col)
+    Some((col, cells))
 }
 
-/// The `top processes` block: name, pid, and one figure per row.
-fn proc_rows(rows: &[(String, u32, String)]) -> GtkBox {
+/// The `top processes` block: [`TOP_N`] empty rows of name, pid and figure,
+/// returned with the labels to write into.
+///
+/// Every column is held to a character width rather than sized to its content,
+/// so filling a row in — which for the CPU list happens [`SAMPLE_GAP`] after the
+/// popover opened — cannot change the popover's width. See [`core_grid`].
+fn proc_rows() -> (GtkBox, Vec<(Label, Label, Label)>) {
     let b = GtkBox::new(Orientation::Vertical, 5);
-    for (name, pid, val) in rows {
+    let mut slots = Vec::with_capacity(TOP_N);
+    for _ in 0..TOP_N {
         let row = GtkBox::new(Orientation::Horizontal, 8);
-        let n = Label::new(Some(name));
+        let n = Label::new(None);
         n.add_css_class("pop-mono-val");
         n.set_halign(Align::Start);
         n.set_hexpand(true);
         n.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        n.set_width_chars(18);
         n.set_max_width_chars(18);
-        let p = Label::new(Some(&pid.to_string()));
+        let p = Label::new(None);
         p.add_css_class("pop-mono");
-        let v = Label::new(Some(val));
+        p.set_width_chars(PID_CHARS);
+        p.set_xalign(1.0);
+        let v = Label::new(None);
         v.add_css_class("pop-mono-val");
         v.set_halign(Align::End);
+        v.set_width_chars(VAL_CHARS);
+        v.set_xalign(1.0);
         row.append(&n);
         row.append(&p);
         row.append(&v);
         b.append(&row);
+        slots.push((n, p, v));
     }
-    b
+    (b, slots)
+}
+
+/// Widest a pid gets (`/proc/sys/kernel/pid_max` is 4194304 by default) and
+/// widest a figure gets (`100%`, `12.3G`).
+const PID_CHARS: i32 = 7;
+const VAL_CHARS: i32 = 5;
+
+/// Write rows into the slots [`proc_rows`] reserved, blanking any left over —
+/// a machine with fewer busy processes than slots keeps its layout rather than
+/// leaving whatever the last open put there.
+fn fill_proc_rows(slots: &[(Label, Label, Label)], rows: &[(String, u32, String)]) {
+    for (i, (n, p, v)) in slots.iter().enumerate() {
+        match rows.get(i) {
+            Some((name, pid, val)) => {
+                n.set_text(name);
+                p.set_text(&pid.to_string());
+                v.set_text(val);
+            }
+            None => {
+                n.set_text("");
+                p.set_text("");
+                v.set_text("");
+            }
+        }
+    }
 }
 
 fn caption(text: &str) -> Label {

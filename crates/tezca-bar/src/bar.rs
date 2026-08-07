@@ -942,6 +942,7 @@ struct Surface {
 
     submap_box: GtkBox,
     submap_label: Label,
+    submap_hint: Label,
 
     np_box: GtkBox,
     /// The title/artist column. Its width is *set*, not measured — see
@@ -1691,6 +1692,7 @@ impl Surface {
             app_label,
             submap_box,
             submap_label,
+            submap_hint,
             np_box,
             np_text,
             np_title,
@@ -1905,6 +1907,14 @@ impl Surface {
             self.bar_box.remove_css_class("submap");
         } else {
             self.submap_label.set_text(&format!("\u{25C6} {}", name.to_uppercase()));
+            // The hint has to name *this* submap's keys. `tezca keybind capture`
+            // is the one Tezca itself enters — Settings puts the session in it
+            // while it reads a shortcut off the keyboard, which is also why
+            // every global bind looks dead for those few seconds.
+            self.submap_hint.set_text(match name {
+                "tezca-capture" => "recording a shortcut · esc cancels",
+                _ => "hjkl / arrows · esc",
+            });
             self.submap_box.set_visible(true);
             self.bar_box.add_css_class("submap");
         }

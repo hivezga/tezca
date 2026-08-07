@@ -17,6 +17,7 @@ import {
     asBool, asNum, kv, records, pairs, secsLabel, convertFileSrc,
 } from './lib.js';
 import { displaysPage } from './displays.js';
+import { keybindsPage } from './keybinds.js';
 
 /* Sidebar icons — 24px viewBox, 1.7px stroke, per the design. */
 const ICONS = {
@@ -750,29 +751,6 @@ async function startup(ctx) {
     return out;
 }
 
-/* ── Keybinds ────────────────────────────────────────────────────────────── */
-
-async function keybinds(ctx) {
-    const sections = await ctx.invoke('tz_keybinds');
-    const out = [el('h1.pagetitle', 'Keybinds')];
-    if (!sections.length) {
-        out.push(el('div.pagehint', 'No keybinds were reported — check `tezca keybind list`.'));
-        return out;
-    }
-    for (const s of sections) {
-        out.push(section(s.title));
-        const t = el('table.keylist');
-        for (const b of s.binds) {
-            t.append(el('tr',
-                el('td.combo', b.combo),
-                el('td.desc', b.desc || '—'),
-                el('td.action', { title: b.action }, b.action)));
-        }
-        out.push(t);
-    }
-    return out;
-}
-
 /* ── Gaming ──────────────────────────────────────────────────────────────── */
 
 async function gaming(ctx) {
@@ -833,5 +811,5 @@ async function system(ctx) {
 
 export const BUILDERS = {
     appearance, bar, dock, displays: displaysPage, sound, input,
-    network, power, startup, keybinds, gaming, system,
+    network, power, startup, keybinds: keybindsPage, gaming, system,
 };

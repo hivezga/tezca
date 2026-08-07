@@ -357,12 +357,24 @@ struct KeySection {
     binds: Vec<KeyBind>,
 }
 
+/// One row of the Keybinds page.
+///
+/// `mods` and `key` travel alongside the rendered `combo` because they are what
+/// `tezca keybind rebind --expect-mods/--expect-key` is given: the guard compares
+/// the combo the page displayed against the one on disk, and re-splitting the
+/// display string in JavaScript would be a second, subtly different parse of
+/// something the CLI already told us.
 #[derive(Serialize)]
 struct KeyBind {
     line: usize,
     combo: String,
+    mods: String,
+    key: String,
     desc: String,
     action: String,
+    overridden: bool,
+    editable: bool,
+    exec: String,
 }
 
 #[tauri::command]
@@ -379,8 +391,13 @@ async fn tz_keybinds() -> Vec<KeySection> {
                         .map(|b| KeyBind {
                             line: b.line,
                             combo: b.combo(),
+                            mods: b.mods,
+                            key: b.key,
                             desc: b.desc,
                             action: b.action,
+                            overridden: b.overridden,
+                            editable: b.editable,
+                            exec: b.exec,
                         })
                         .collect(),
                 })

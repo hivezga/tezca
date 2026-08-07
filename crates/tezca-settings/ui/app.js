@@ -215,7 +215,9 @@ function paletteIndex() {
         ['network', 'Wi-Fi', 'radio & scan'],
         ['network', 'Bluetooth', 'adapter'],
         ['power', 'Idle timeouts', 'dim · lock · suspend'],
-        ['keybinds', 'Keybinds', 'the whole table'],
+        ['keybinds', 'Keybinds', 'the whole map'],
+        ['keybinds', 'Rebind a shortcut', 'record a new combo'],
+        ['keybinds', 'Reset a binding', 'back to the shipped default'],
     ];
 }
 

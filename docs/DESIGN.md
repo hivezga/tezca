@@ -302,7 +302,8 @@ tezca dock ...                 # talk to tezca-dock
 tezca display list | set <name> … | reset | brightness <name>   # per-monitor mode/scale/pos + DDC brightness
 tezca wallpaper set <img> --monitor <name> | clear | library | fit <mode> | apply  # per-monitor overrides, image library, scaling
 tezca hypr get | set <opt> <val>… | reset | list                # live Hyprland option tuning that persists
-tezca keybind list | rebind --line N … | restore                # inspect + rebind keybindings safely
+tezca keybind list | rebind --line N … | set-action --line N --exec <cmd>
+                   | reset [--line N] | restore | capture on|off   # inspect + rebind keybindings safely
 tezca settings [--page ...]    # open tezca-settings, the GUI control center
 tezca doctor                   # verify NVIDIA env, explicit sync, monitors, deps
 tezca install | link           # (bootstrap wraps this) symlink configs into place
@@ -314,7 +315,7 @@ tezca install | link           # (bootstrap wraps this) symlink configs into pla
 | What you change | Where it lands | How it is undone |
 |---|---|---|
 | `hypr set` / `display set` | a generated Lua *data table* at `~/.config/tezca/overrides.lua`, keyed per option so re-setting replaces rather than appends | `hypr reset` / `display reset` |
-| `keybind rebind` / `set-action` | an *override layer* at `~/.config/tezca/keybinds.lua` — `hl.unbind` + `hl.bind` pairs keyed by the shipped file's line number | `keybind restore` (last change) / `keybind reset` (all) |
+| `keybind rebind` / `set-action` | an *override layer* at `~/.config/tezca/keybinds.lua` — `hl.unbind` + `hl.bind` pairs keyed by the shipped file's line number | `keybind restore` (last change) / `keybind reset --line N` (one bind) / `keybind reset` (all) |
 | `bar set` / `dock set` | `~/.config/tezca-bar/config.toml`, `~/.config/tezca-dock/dock.toml` — real files in real directories, seeded from the repo on `tezca link` and never overwritten again | edit or delete them |
 
 The shipped `conf.d/keybinds.lua` is **read-only** to the tools. An override layer

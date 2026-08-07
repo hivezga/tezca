@@ -1171,46 +1171,194 @@ body {
     color: var(--tz-text);
 }
 
-/* ── Keybind table ───────────────────────────────────────────────────────── */
+/* ── Keybind list ────────────────────────────────────────────────────────── */
 
 .keylist {
     width: 100%;
-    border-collapse: collapse;
     user-select: text;
 }
 
-.keylist td {
-    padding: 9px 0;
-    border-top: 1px solid rgba(var(--tz-muted-rgb), 0.16);
-    font-size: 13px;
-    vertical-align: baseline;
+.keyrow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 0;
+    border-top: 1px solid var(--tz-line);
 }
 
-.keylist tr:first-child td {
+.keylist .keyrow:first-child {
     border-top: none;
 }
 
-.keylist .combo {
+/* The combo is the control: 230px so the column reads as one, and the same
+   mono/accent treatment whether it is a button or a fixed bind. */
+.keyrow .combo {
+    flex: none;
     width: 230px;
+    padding: 6px 9px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: none;
     font-family: var(--tz-mono);
     font-size: 11.5px;
+    text-align: left;
     color: var(--tz-accent);
-    white-space: nowrap;
-}
-
-.keylist .desc {
-    color: var(--tz-text);
-}
-
-.keylist .action {
-    font-family: var(--tz-mono);
-    font-size: 11px;
-    color: var(--tz-faint);
-    text-align: right;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 260px;
+    transition: background 0.13s ease, border-color 0.13s ease;
+}
+
+button.combo {
+    cursor: pointer;
+}
+
+button.combo:hover {
+    border-color: rgba(var(--tz-accent-rgb), 0.4);
+    background: rgba(var(--tz-accent-rgb), 0.08);
+}
+
+/* Not yours to change: held in conf.d/keybinds.lua. */
+.combo.fixed {
+    color: var(--tz-muted);
+    cursor: default;
+}
+
+/* Changed from the shipped default — the mark the `↺` button pairs with. */
+.combo.changed {
+    border-color: rgba(var(--tz-gold-rgb, 201, 162, 75), 0.42);
+}
+
+.keybody {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.keybody .desc {
+    flex: 1 1 46%;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--tz-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The command an exec bind runs, editable in place. Borderless until you touch
+   it, so a page of them does not read as a form.
+
+   It shares its flex basis and its padding with `.keyaction` below, and both
+   start at the left: an editable field and a read-only one in the same column
+   have to line up, and right-aligning text you are about to type into reads as
+   a bug. */
+.field.keycmd {
+    flex: 1 1 54%;
+    min-width: 0;
+    padding: 5px 8px;
+    border-color: transparent;
+    background: none;
+    font-size: 11px;
+    color: var(--tz-faint);
+}
+
+.field.keycmd:hover {
+    border-color: var(--tz-line);
+}
+
+.field.keycmd:focus {
+    background: rgba(var(--tz-base-rgb), 0.6);
+    color: var(--tz-text);
+    border-color: rgba(var(--tz-accent-rgb), 0.55);
+}
+
+/* Any other dispatcher: shown, but not offered as a text field — it is a Lua
+   expression, and half-editing one is how you get a config that will not load. */
+.keyaction {
+    flex: 1 1 54%;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid transparent;
+    font-family: var(--tz-mono);
+    font-size: 11px;
+    color: var(--tz-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.keyreset {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--tz-line);
+    border-radius: 8px;
+    background: none;
+    color: var(--tz-gold);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color 0.13s ease, background 0.13s ease;
+}
+
+.keyreset:hover {
+    border-color: rgba(var(--tz-gold-rgb, 201, 162, 75), 0.5);
+    background: rgba(var(--tz-gold-rgb, 201, 162, 75), 0.12);
+}
+
+/* ── The shortcut recorder ───────────────────────────────────────────────── */
+
+.scrim.center {
+    align-items: center;
+}
+
+.capture {
+    width: 420px;
+    max-width: calc(100% - 48px);
+    padding: 22px 24px 16px;
+    background: rgba(var(--tz-surface-rgb), 0.96);
+    border: 1px solid var(--tz-line-strong);
+    border-radius: var(--tz-radius-lg);
+    box-shadow: 0 30px 90px -12px rgba(0, 0, 0, 0.8);
+    text-align: center;
+    animation: tzpop 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.capture-what {
+    font-size: 12.5px;
+    color: var(--tz-muted);
+}
+
+.capture-combo {
+    margin: 14px 0 4px;
+    font-family: var(--tz-mono);
+    font-size: 19px;
+    color: var(--tz-accent);
+    word-break: break-word;
+}
+
+.capture-combo.waiting {
+    color: var(--tz-faint);
+}
+
+.capture-warn {
+    margin-top: 10px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--tz-gold);
+}
+
+.capture-foot {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 16px;
+    padding-top: 11px;
+    border-top: 1px solid var(--tz-line);
+    font-size: 11px;
+    color: var(--tz-faint);
 }
 
 /* ── Wallpaper ───────────────────────────────────────────────────────────── */

@@ -47,6 +47,26 @@
 //! but cannot be rebound, because this line-oriented reader cannot reproduce the
 //! body into the override layer.
 //!
+//! ## What the Settings page needs on top of that
+//!
+//! Three commands exist for the GUI rather than for the command line:
+//!
+//!   * `list --machine` reports, per bind, whether it is *editable* at all (the
+//!     two shapes above are not) and — for an `exec_cmd` bind — the command
+//!     inside the Lua literal, so the page can offer "which app does this key
+//!     launch" as a plain text field instead of a Lua expression;
+//!   * `set-action --exec <command>` is that field's write path: the quoting into
+//!     a Lua literal happens here, next to [`lua_string`], and not in JavaScript;
+//!   * `capture on` / `off` suspends every global keybinding for as long as the
+//!     GUI's "press the new shortcut" box is open. Without it that box is unable
+//!     to read the very combos worth rebinding: Hyprland takes a bound combo
+//!     before the focused window sees it, so pressing SUPER+B would launch the
+//!     browser rather than register as the keys pressed. See [`cmd_capture`].
+//!
+//! `reset --line N` is the fourth, and is equally the page's: it drops one
+//! bind's override, which is how a single key goes back to the shipped default
+//! without `reset` taking every other customisation with it.
+//!
 //! ## Upgrading from the hyprlang override layer
 //!
 //! Before the Lua cutover this layer was `~/.config/tezca/keybinds.conf`, holding
@@ -131,14 +151,15 @@ pub fn run(args: &[&str]) -> i32 {
         Some("rebind") => return cmd_rebind(&args[1..]),
         Some("set-action") => cmd_set_action(&args[1..]),
         Some("restore") => cmd_restore(),
-        Some("reset") => cmd_reset(),
+        Some("reset") => cmd_reset(&args[1..]),
+        Some("capture") => cmd_capture(&args[1..]),
         Some("-h") | Some("--help") => {
             print_help();
             Ok(())
         }
         Some(other) => Err(format!(
             "unknown keybind subcommand: {other}\n  try: list · rebind --line N … · \
-             set-action --line N … · restore · reset"
+             set-action --line N … · restore · reset [--line N] · capture on|off"
         )),
     };
     match r {
@@ -575,21 +596,6 @@ fn parse_legacy_overrides(text: &str) -> Vec<LegacyOvr> {
     out
 }
 
-/// Quote a command as a Lua string literal, following the shipped map's own
-/// convention: a plain `"…"`, or a `[[…]]` long bracket when the command carries
-/// a quote or a backslash — widened to `[=[…]=]` and so on if it also contains
-/// the closing sequence.
-fn lua_string(s: &str) -> String {
-    if !s.contains('"') && !s.contains('\\') {
-        return format!("\"{s}\"");
-    }
-    let mut eqs = String::new();
-    while s.contains(&format!("]{eqs}]")) {
-        eqs.push('=');
-    }
-    format!("[{eqs}[{s}]{eqs}]")
-}
-
 /// Did this entry change what the bind *does*, rather than only which keys run
 /// it? Answerable only while the pre-Lua shipped map is still on disk; when it is
 /// gone the answer is "assume not", which is what `rebind` — the command that
@@ -745,14 +751,94 @@ fn migrate_legacy() -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Lua string literals — the exec_cmd command, read and written
+// ---------------------------------------------------------------------------
+
+/// Quote a command as a Lua string literal, following the shipped map's own
+/// convention: a plain `"…"`, or a `[[…]]` long bracket when the command carries
+/// a quote or a backslash — widened to `[=[…]=]` and so on if it also contains
+/// the closing sequence.
+fn lua_string(s: &str) -> String {
+    if !s.contains('"') && !s.contains('\\') {
+        return format!("\"{s}\"");
+    }
+    let mut eqs = String::new();
+    while s.contains(&format!("]{eqs}]")) {
+        eqs.push('=');
+    }
+    format!("[{eqs}[{s}]{eqs}]")
+}
+
+/// The inverse of [`lua_string`]: the text of a Lua string literal, in either
+/// form. None when `s` is not exactly one literal — an expression, a
+/// concatenation, or a literal with something after it.
+///
+/// Only the escapes the writer can emit are decoded. An unrecognised one is kept
+/// as written rather than dropped, because this text is shown to be edited: a
+/// command that came back subtly different from the file would be re-saved that
+/// way.
+fn lua_unstring(s: &str) -> Option<String> {
+    let t = s.trim();
+    if let Some(rest) = t.strip_prefix('"') {
+        let body = rest.strip_suffix('"')?;
+        let mut out = String::new();
+        let mut it = body.chars();
+        while let Some(c) = it.next() {
+            match c {
+                // An unescaped quote closed the literal earlier than the last
+                // character, so this is a literal plus something else.
+                '"' => return None,
+                '\\' => match it.next()? {
+                    'n' => out.push('\n'),
+                    't' => out.push('\t'),
+                    'r' => out.push('\r'),
+                    e @ ('\\' | '"' | '\'') => out.push(e),
+                    other => {
+                        out.push('\\');
+                        out.push(other);
+                    }
+                },
+                _ => out.push(c),
+            }
+        }
+        return Some(out);
+    }
+    // `[[…]]`, `[=[…]=]`, … — no escapes inside, by definition.
+    let rest = t.strip_prefix('[')?;
+    let eqs = rest.chars().take_while(|c| *c == '=').count();
+    let close = format!("]{}]", "=".repeat(eqs));
+    let body = rest.get(eqs..)?.strip_prefix('[')?.strip_suffix(&close)?;
+    (!body.contains(&close)).then(|| body.to_string())
+}
+
+/// The command an `hl.dsp.exec_cmd("…")` bind runs, for the GUI to show as an
+/// editable field. None for every other dispatcher, and for the `exec_cmd(cmd,
+/// rules)` two-argument form — there is no second field to put the rules in, and
+/// saving would silently drop them.
+///
+/// Also None if the command contains a control character, which cannot survive
+/// the tab-separated machine format. Nothing in the shipped map does; a
+/// hand-edited `conf.d/keybinds.lua` is not owed an editable field.
+fn exec_command(action: &str) -> Option<String> {
+    let inner = action.trim().strip_prefix("hl.dsp.exec_cmd(")?.strip_suffix(')')?;
+    lua_unstring(inner).filter(|c| !c.chars().any(char::is_control))
+}
+
+// ---------------------------------------------------------------------------
 // list
 // ---------------------------------------------------------------------------
 
 /// `tezca keybind list [--machine]` — documented binds with line numbers.
-/// Machine format:  `S\t<title>`  for a section,
-/// `B\t<line>\t<mods>\t<key>\t<desc>\t<action>\t<overridden 0|1>` for a bind.
-/// The trailing field is appended, so a parser that reads five fields and ignores
-/// the rest keeps working.
+/// Machine format:  `S\t<title>`  for a section, and for a bind
+/// `B\t<line>\t<mods>\t<key>\t<desc>\t<action>\t<overridden 0|1>\t<editable 0|1>\t<exec>`.
+/// Fields are only ever appended, so a parser that reads the first five and
+/// ignores the rest keeps working.
+///
+/// `editable` is 0 for the two shapes [`reject_hold_bind`] refuses — a hold-bind
+/// and a multi-line body. The GUI needs that *before* the click, so it can show
+/// the combo as text rather than offering a capture box that could only fail.
+/// `exec` is the command inside an `hl.dsp.exec_cmd(…)` action and empty for
+/// every other dispatcher; see [`exec_command`].
 fn cmd_list(args: &[&str]) -> Result<(), String> {
     let base =
         fs::read_to_string(base_path()?).map_err(|e| format!("cannot read keybinds.lua: {e}"))?;
@@ -777,13 +863,15 @@ fn cmd_list(args: &[&str]) -> Result<(), String> {
         }
         if machine {
             println!(
-                "B\t{}\t{}\t{}\t{}\t{}\t{}",
+                "B\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 b.line,
                 b.mods,
                 b.key,
                 b.desc,
                 b.action,
-                u8::from(b.overridden)
+                u8::from(b.overridden),
+                u8::from(reject_hold_bind(b).is_ok()),
+                exec_command(&b.action).unwrap_or_default()
             );
         } else {
             let combo = format_combo(&b.mods, &b.key);
@@ -997,12 +1085,17 @@ fn restates_shipped(o: &Ovr, base: &Bind) -> bool {
 // set-action  (change what a bind does — dispatcher + args)
 // ---------------------------------------------------------------------------
 
-/// `tezca keybind set-action --line N --action "exec, uwsm app -- firefox.desktop"
+/// `tezca keybind set-action --line N --action 'hl.dsp.exec_cmd("firefox")'
 /// [--desc "Firefox"] [--expect-mods … --expect-key …]` — change one bind's
-/// dispatcher+args (and optionally its label), keeping its combo.
+/// dispatcher (and optionally its label), keeping its combo.
+///
+/// `--exec <command>` is the same thing for the common case, and the form the
+/// Settings page uses: it wraps the command in a Lua literal here rather than
+/// asking a caller to quote one. The two are mutually exclusive.
 fn cmd_set_action(args: &[&str]) -> Result<(), String> {
     let mut line: Option<usize> = None;
     let mut action: Option<String> = None;
+    let mut exec: Option<String> = None;
     let mut desc: Option<String> = None;
     let mut expect_mods: Option<String> = None;
     let mut expect_key: Option<String> = None;
@@ -1012,6 +1105,7 @@ fn cmd_set_action(args: &[&str]) -> Result<(), String> {
         match a {
             "--line" => line = it.next().and_then(|v| v.parse().ok()),
             "--action" => action = it.next().map(str::to_string),
+            "--exec" => exec = it.next().map(str::to_string),
             "--desc" => desc = it.next().map(str::to_string),
             "--expect-mods" => expect_mods = it.next().map(str::to_string),
             "--expect-key" => expect_key = it.next().map(str::to_string),
@@ -1019,7 +1113,21 @@ fn cmd_set_action(args: &[&str]) -> Result<(), String> {
         }
     }
     let line = line.ok_or("set-action needs --line N")?;
-    let action = action.ok_or("set-action needs --action")?.trim().to_string();
+    if action.is_some() && exec.is_some() {
+        return Err("--action and --exec both say what the bind does — pass one".to_string());
+    }
+    let action = match (action, exec) {
+        (Some(a), _) => a.trim().to_string(),
+        (None, Some(cmd)) => {
+            let cmd = cmd.trim();
+            // The command becomes a Lua string, so quotes and backslashes are
+            // escaped rather than refused — only what a literal cannot hold is
+            // rejected, which is what `exec_line` checks.
+            validate::exec_line(cmd)?;
+            format!("hl.dsp.exec_cmd({})", lua_string(cmd))
+        }
+        (None, None) => return Err("set-action needs --action or --exec".to_string()),
+    };
 
     validate::keybind_action(&action)?;
     if let Some(d) = &desc {
@@ -1074,13 +1182,120 @@ fn cmd_restore() -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_reset() -> Result<(), String> {
-    let n = load_overrides()?.len();
-    save_overrides(&[])?;
+/// `tezca keybind reset [--line N]` — drop every override, or just one bind's.
+///
+/// The per-line form is what "restore this shortcut to its default" is in the
+/// GUI. Dropping the entry rather than writing an override back to the shipped
+/// combo is the whole point: the layer stays empty for keys you never changed,
+/// so an upstream change to one of them still reaches you.
+fn cmd_reset(args: &[&str]) -> Result<(), String> {
+    let mut line: Option<usize> = None;
+    let mut it = args.iter().copied();
+    while let Some(a) = it.next() {
+        match a {
+            "--line" => line = it.next().and_then(|v| v.parse().ok()),
+            other => return Err(format!("unknown flag: {other}")),
+        }
+    }
+
+    let mut ovrs = load_overrides()?;
+    let before = ovrs.len();
+    match line {
+        Some(n) => ovrs.retain(|o| o.line != n),
+        None => ovrs.clear(),
+    }
+    let dropped = before - ovrs.len();
+    // Still written when nothing matched: `restore` then has a snapshot that
+    // says "this is where you were", and a no-op write is harmless.
+    save_overrides(&ovrs)?;
     if hypr::in_session() {
         let _ = hypr::reload();
     }
-    println!("  {} dropped {n} override(s) — back to the shipped keybindings", term::green("✓"));
+    match line {
+        Some(n) if dropped == 0 => {
+            println!("  {} line {n} was already at its shipped binding", term::dim("·"))
+        }
+        Some(n) => {
+            let b = shipped(n)?;
+            println!(
+                "  {} line {n} → {} (shipped)",
+                term::green("✓"),
+                format_combo(&b.mods, &b.key)
+            );
+        }
+        None => println!(
+            "  {} dropped {dropped} override(s) — back to the shipped keybindings",
+            term::green("✓")
+        ),
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// capture — suspending the global binds while the GUI reads a shortcut
+// ---------------------------------------------------------------------------
+
+/// The submap the GUI's "press the new shortcut" box runs inside.
+///
+/// Hyprland consumes a bound combo before the focused window ever sees it, so a
+/// capture box in a normal window can read only the combos that are *not* worth
+/// rebinding: press SUPER+B to move it and the browser opens instead. A submap
+/// suspends every global bind except its own, so for as long as one is active
+/// the keys reach the window like any other typing.
+const CAPTURE_SUBMAP: &str = "tezca-capture";
+
+/// Defined at capture time through `hyprctl eval`, not in `conf.d/keybinds.lua`.
+///
+/// Two reasons. The shipped map is read line-by-line by this module, and an
+/// `hl.bind` nested inside a `define_submap` body would be parsed as a top-level
+/// bind — listed on the Keybinds page and offered for rebinding. And defining it
+/// here means the escape hatch exists on any session, including one whose config
+/// on disk predates this command.
+///
+/// The `_G` guard makes it idempotent: `define_submap` appends, so defining on
+/// every capture would grow the bind list all session. The guard lives in the
+/// same Lua state as the definition, so a `hyprctl reload` — which drops the
+/// submap — drops the guard with it.
+///
+/// CTRL+ALT+Escape leaves the submap. That is the hatch: if the GUI dies
+/// mid-capture and never runs `capture off`, one keypress restores every
+/// binding instead of the session being left with no keyboard shortcuts at all.
+///
+/// Plain Escape is deliberately *not* it, however much it reads like the
+/// obvious choice. A bind inside the submap is consumed by the compositor, so
+/// binding Escape here would take Escape away from the window doing the
+/// capturing — its "press Escape to cancel" would silently release the grab and
+/// leave the box waiting for keys that had gone back to running their actions.
+const DEFINE_CAPTURE_SUBMAP: &str = concat!(
+    "if not _G.__tezca_capture_submap then _G.__tezca_capture_submap = true ",
+    "hl.define_submap(\"tezca-capture\", function() ",
+    "hl.bind(\"CTRL + ALT + Escape\", hl.dsp.submap(\"reset\")) end) end"
+);
+
+/// `tezca keybind capture on|off`.
+///
+/// `off` is deliberately willing to run at any time, including when no capture is
+/// in progress: it is what the GUI calls from every path that could end one —
+/// commit, cancel, the window losing focus, a watchdog — and each of those has to
+/// be safe to fire twice.
+fn cmd_capture(args: &[&str]) -> Result<(), String> {
+    if !hypr::in_session() {
+        return Err("not inside a Hyprland session, so there are no binds to suspend".to_string());
+    }
+    match args.first().copied() {
+        Some("on") => {
+            hypr::eval(DEFINE_CAPTURE_SUBMAP)?;
+            hypr::dispatch(&format!("hl.dsp.submap(\"{CAPTURE_SUBMAP}\")"))?;
+            println!(
+                "  {} global keybindings suspended — CTRL+ALT+Escape releases them",
+                term::dim("·")
+            );
+        }
+        Some("off") => {
+            hypr::dispatch("hl.dsp.submap(\"reset\")")?;
+        }
+        _ => return Err("capture needs on or off".to_string()),
+    }
     Ok(())
 }
 
@@ -1139,19 +1354,34 @@ fn print_help() {
     println!("{}", term::dim("  the shipped conf.d/keybinds.lua is never modified"));
     println!();
     println!(
-        "  {}                    list effective binds (* = overridden)",
+        "  {}                              list effective binds (* = overridden)",
         term::cyan("list [--machine]")
     );
     println!(
-        "  {}  rebind a line's combo",
+        "  {}  move a bind to another combo",
         term::cyan("rebind --line N --mods \"SUPER SHIFT\" --key W")
     );
     println!(
-        "  {}  change what a bind does",
-        term::cyan("set-action --line N --action \"exec, uwsm app -- app.desktop\"")
+        "  {}            change what a bind launches",
+        term::cyan("set-action --line N --exec \"<cmd>\"")
     );
-    println!("  {}                         undo the last change", term::cyan("restore"));
-    println!("  {}                           drop every override", term::cyan("reset"));
+    println!(
+        "  {}          change any other dispatcher",
+        term::cyan("set-action --line N --action \"<lua>\"")
+    );
+    println!(
+        "  {}                                       undo the last change",
+        term::cyan("restore")
+    );
+    println!(
+        "  {}                              drop one bind's override, or all of them",
+        term::cyan("reset [--line N]")
+    );
+    println!(
+        "  {}                                suspend the global binds while Settings",
+        term::cyan("capture on|off")
+    );
+    println!("{}", term::dim("                                                reads a shortcut"));
 }
 
 #[cfg(test)]
@@ -1537,6 +1767,41 @@ bind  = $mod, T,          exec, alacritty               # Terminal
         let o = migrated("# @5 was=$mod|W", "bind = $mod, W, exec, uwsm app -- brave  # Browser")
             .unwrap();
         assert!(o.is_none(), "a no-op override should not be carried over");
+    }
+
+    #[test]
+    fn the_command_of_an_exec_bind_is_recovered_for_the_settings_field() {
+        assert_eq!(exec_command(&at(4).action).as_deref(), Some("uwsm app -- brave"));
+        assert_eq!(exec_command(&at(13).action).as_deref(), Some("alacritty"));
+        // The `--` that trips a naive comment split is inside the literal, so it
+        // has to come back whole.
+        assert_eq!(
+            exec_command(r#"hl.dsp.exec_cmd([[sh -c 'notify-send Tezca "x"']])"#).as_deref(),
+            Some(r#"sh -c 'notify-send Tezca "x"'"#)
+        );
+        // Not an exec bind: there is no command to offer, and inventing one would
+        // let the field overwrite a dispatcher with a shell command by accident.
+        assert_eq!(exec_command(&at(3).action), None);
+        assert_eq!(exec_command("hl.dsp.window.resize({ x = -40, y = 0 })"), None);
+        // The two-argument form carries window rules this cannot round-trip.
+        assert_eq!(exec_command(r#"hl.dsp.exec_cmd("foo", { float = true })"#), None);
+        // A concatenation is an expression, not a literal.
+        assert_eq!(exec_command(r#"hl.dsp.exec_cmd("a" .. "b")"#), None);
+    }
+
+    #[test]
+    fn a_command_round_trips_through_the_lua_literal_it_is_written_as() {
+        for cmd in [
+            "walker -m files",
+            "uwsm app -- brave-origin.desktop",
+            r#"sh -c 'cliphist wipe && notify-send Tezca "cleared"'"#,
+            r#"echo "a]]b""#,
+            r"sh -c 'printf a\tb'",
+            "cliphist list | walker -d -p Clipboard | cliphist decode | wl-copy",
+        ] {
+            let action = format!("hl.dsp.exec_cmd({})", lua_string(cmd));
+            assert_eq!(exec_command(&action).as_deref(), Some(cmd), "round trip of {cmd:?}");
+        }
     }
 
     #[test]

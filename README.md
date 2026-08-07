@@ -180,7 +180,7 @@ takes `--help`.
 | `tezca record start \| stop \| toggle \| status` | screen recording to `~/Videos/Tezca` |
 | `tezca wallpaper set <img> --monitor <name> \| clear \| list \| library \| fit <mode> \| apply` | per-monitor wallpaper overrides, the picker's image library, and how images are scaled (global image → `tezca theme`) |
 | `tezca hypr get \| set <opt> <val>… \| reset \| list` | live Hyprland option tuning that persists across reloads |
-| `tezca keybind list \| rebind --line N … \| set-action --line N … \| restore \| reset` | inspect + rebind keybindings safely |
+| `tezca keybind list \| rebind --line N … \| set-action --line N … \| restore \| reset [--line N] \| capture on\|off` | inspect + rebind keybindings safely |
 | `tezca game status \| on \| off \| toggle \| run -- <cmd>` | gaming profile (tearing, blur off, MangoHud) |
 | `tezca settings` | open the GTK control center |
 
@@ -214,9 +214,17 @@ restarts. See [`templates/README.md`](templates/README.md) for the token contrac
 
 A **HyDE-style layout** (mirrors [HyDE's map](https://github.com/HyDE-Project/HyDE/blob/master/KEYBINDINGS.md)) so muscle memory transfers, with Tezca's own actions clustered on `SUPER + ALT`. `SUPER` is the modifier (macOS `⌘`). The always-current, self-documenting cheat-sheet is **`SUPER + /`** — or the **Keybinds** tab in `tezca settings`.
 
+The Keybinds tab is an editor, not a table: click a shortcut and press the new one,
+edit the command an app-launching bind runs, and put any single binding back with the
+`↺` next to it. While it is listening the compositor's own shortcuts are suspended
+(`tezca keybind capture on` enters an empty submap), so pressing `SUPER + B` records
+those keys instead of opening the browser — `CTRL + ALT + Escape` releases the
+keyboard if anything goes wrong mid-capture.
+
 Rebinding from Settings (or `tezca keybind rebind`) writes an override layer to
 `~/.config/tezca/keybinds.lua`; the shipped map is never edited, so upstream changes
-keep flowing and `tezca keybind reset` puts everything back.
+keep flowing. `tezca keybind restore` steps back one change, `reset --line N` returns
+one binding to its default, and `reset` puts everything back.
 
 **Apps & launchers**
 

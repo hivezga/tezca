@@ -20,10 +20,10 @@ margin_top = 6  # gap above the bar (floating only), px
 margin_side = 10  # gap left/right of the bar (floating only), px
 
 # --- Poll intervals (seconds) ----------------------------------------------
-cpu_interval = 3  # CPU sparkline + percentage
-mem_interval = 5  # MEM sparkline + percentage
-gpu_interval = 3  # GPU sparkline + percentage (auto-hidden if no GPU source)
-net_interval = 5  # network glyph + throughput
+cpu_interval = 3  # CPU percentage
+mem_interval = 5  # MEM figure
+gpu_interval = 3  # GPU percentage (auto-hidden if no GPU source)
+net_interval = 5  # network glyph (throughput feeds its popover)
 
 # --- Clock -----------------------------------------------------------------
 # strftime-style; matches the Waybar format the bar reaches parity with.
@@ -219,7 +219,8 @@ clutter = all
 #   ai          AI provider usage (auto-hides; see the AI section above)
 #   weather     current conditions (auto-hides; see the Weather section above)
 #   tray        system tray / StatusNotifierItem icons (auto-hides)
-#   cpu mem gpu hardware metric sparklines (gpu auto-hides without a source)
+#   cpu mem gpu hardware metrics; click one for its detail popover
+#               (gpu auto-hides without a source)
 #   network     wifi/ethernet glyph → detail + radio toggle popover
 #   bluetooth   adapter + connected devices w/ battery (auto-hides with no adapter)
 #   volume brightness battery            controls (brightness/battery auto-hide)

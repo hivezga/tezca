@@ -11,7 +11,7 @@
 //! `nowplaying`, `notify`); this file is purely the GTK4 widget tree + wiring.
 
 use crate::config::{Clutter, Config, Mod, Numerals, Region, Shape, Slot};
-use crate::draw::{self, SharedPalette, Sparkline};
+use crate::draw::{self, SharedPalette};
 use crate::icon::{self, Icon};
 use crate::sysinfo::{self, CpuMeter, Net, NetMeter, Throughput};
 use crate::theme::{CssStack, Palette};
@@ -377,41 +377,31 @@ impl Bar {
     fn tick_cpu(&self) {
         let frac = self.cpu.borrow_mut().sample();
         let pct = (frac * 100.0).round() as u32;
-        // The package temp is one small sysfs read, and it is the number that
-        // explains a load figure — 90% at 55° and 90% at 95° are different
-        // situations. Absent (no sensor) simply hides the sub-label.
-        let temp =
-            sysinfo::cpu_temp().map(|c| format!("{}°", c.round() as i64)).unwrap_or_default();
         for s in self.surfaces.borrow().iter() {
-            s.cpu_spark.push(frac);
             s.cpu_val.set_text(&pct_text(pct));
-            set_sub(&s.cpu_sub, &temp);
-            s.sys_parts.borrow_mut().0 = format!("{pct}%");
+            s.sys_parts.borrow_mut().0 = pct_text(pct);
             s.apply_clusters();
         }
     }
 
     fn tick_mem(&self) {
         // `mem_detail` reads the same /proc/meminfo as `mem` and costs the same,
-        // but keeps the absolute figures — "18.4G of 32" answers "can I open
-        // another one of these" in a way that "57%" does not.
+        // but keeps the absolute figures — "18.4G" answers "can I open another
+        // one of these" in a way that "57%" does not. What it is 18.4G *of* is
+        // one of the things the popover exists to say.
         let d = sysinfo::mem_detail();
-        let frac = if d.total_kb > 0.0 { (d.used_kb / d.total_kb).clamp(0.0, 1.0) } else { 0.0 };
-        let used = format!("{:.1}G", d.used_kb / 1024.0 / 1024.0);
-        let total = format!("/{:.0}", d.total_kb / 1024.0 / 1024.0);
+        let used = mem_used_text(d.used_kb, d.total_kb);
         for s in self.surfaces.borrow().iter() {
-            s.mem_spark.push(frac);
             s.mem_val.set_text(&used);
-            set_sub(&s.mem_sub, &total);
             s.sys_parts.borrow_mut().1 = used.clone();
             s.apply_clusters();
         }
     }
 
     fn tick_gpu(&self) {
-        // One batched read rather than a utilisation call now and a telemetry
-        // call when the popover opens: on NVIDIA both are `nvidia-smi`, so
-        // asking for every field at once costs exactly what asking for one did.
+        // `gpu_detail` rather than `gpu`: on NVIDIA both are one `nvidia-smi`
+        // call, and the detailed one reports utilisation on cards whose plain
+        // read does not.
         let detail = sysinfo::gpu_detail();
         let frac = detail
             .as_ref()
@@ -427,14 +417,10 @@ impl Bar {
             return;
         };
         let pct = (frac * 100.0).round() as u32;
-        let sub = detail.as_ref().map(gpu_sub_text).unwrap_or_default();
         for s in self.surfaces.borrow().iter() {
-            s.gpu_spark.push(frac);
             s.gpu_val.set_text(&pct_text(pct));
-            set_sub(&s.gpu_sub, &sub);
             s.show(&s.gpu_metric, true);
-            s.sys_parts.borrow_mut().2 =
-                if sub.is_empty() { format!("{pct}%") } else { format!("{pct}% {sub}") };
+            s.sys_parts.borrow_mut().2 = pct_text(pct);
             s.apply_clusters();
         }
     }
@@ -474,7 +460,7 @@ impl Bar {
 
         for s in self.surfaces.borrow().iter() {
             s.set_audio(&audio);
-            s.set_net(&net, &self.throughput.borrow());
+            s.set_net(&net);
             s.set_battery(&battery);
             s.set_brightness(brightness);
             s.set_bell(&bell);
@@ -955,21 +941,13 @@ struct Surface {
     /// doesn't re-decode the same JPEG.
     np_art_url: RefCell<String>,
 
-    cpu_spark: Sparkline,
     cpu_val: Label,
-    cpu_sub: Label,
-    mem_spark: Sparkline,
     mem_val: Label,
-    mem_sub: Label,
-    gpu_spark: Sparkline,
     gpu_val: Label,
-    gpu_sub: Label,
     gpu_metric: GtkBox,
 
     net_ctl: Button,
     net_glyph: icon::IconArea,
-    net_val: Label,
-    net_sub: Label,
     bt_ctl: Button,
     bt_glyph: icon::IconArea,
     bt_val: Label,
@@ -1359,25 +1337,20 @@ impl Surface {
         tray_box.set_valign(Align::Center);
         tray_box.set_visible(false);
 
-        // Metrics: CPU + MEM sparklines.
-        let cpu_spark = draw::sparkline(pal, draw::SparkColor::Accent);
+        // Metrics: label + figure, nothing else. The trace and the second number
+        // both moved into the popovers — see [`metric`].
         let cpu_val = Label::new(Some(&pct_text(0)));
         cpu_val.add_css_class("metric-val");
-        let cpu_sub = Label::new(None);
-        let cpu_metric = metric(G_CPU_LABEL, &cpu_spark.area, &cpu_val, &cpu_sub);
+        let cpu_metric = metric(G_CPU_LABEL, &cpu_val);
 
-        let mem_spark = draw::sparkline(pal, draw::SparkColor::Gold);
         let mem_val = Label::new(Some(&pct_text(0)));
         mem_val.add_css_class("metric-val");
-        let mem_sub = Label::new(None);
-        let mem_metric = metric(G_MEM_LABEL, &mem_spark.area, &mem_val, &mem_sub);
+        let mem_metric = metric(G_MEM_LABEL, &mem_val);
 
         // GPU — hidden until the first successful read (absent on GPU-less rigs).
-        let gpu_spark = draw::sparkline(pal, draw::SparkColor::AccentDim);
         let gpu_val = Label::new(Some(&pct_text(0)));
         gpu_val.add_css_class("metric-val");
-        let gpu_sub = Label::new(None);
-        let gpu_metric = metric(G_GPU_LABEL, &gpu_spark.area, &gpu_val, &gpu_sub);
+        let gpu_metric = metric(G_GPU_LABEL, &gpu_val);
         gpu_metric.set_visible(false);
 
         // Each metric group expands into a glass detail popover on click.
@@ -1388,11 +1361,11 @@ impl Surface {
         attach_detail(&mem_metric, mem_pop.clone());
         attach_detail(&gpu_metric, gpu_pop.clone());
 
-        // Controls: network (button → popover). Stacked, because the two facts
-        // worth having — which network, and how fast it is moving — do not fit
-        // side by side without pushing the rest of the cluster off a 2560px
-        // monitor.
-        let (net_ctl, net_glyph, net_val, net_sub) = control_button_stacked(pal, Icon::Wifi);
+        // Controls: network (button → popover). Glyph only — which link it is,
+        // its address, its signal and its throughput are all one click away, and
+        // the glyph alone already answers the question the bar is asked at a
+        // glance ("am I on, and on what kind of link").
+        let (net_ctl, net_glyph) = control_icon_button(pal, Icon::Wifi);
         let net_pop = popovers::network(&net_ctl, throughput.clone(), net_history);
         let p = net_pop.clone();
         net_ctl.connect_clicked(move |_| p.popup());
@@ -1699,20 +1672,12 @@ impl Surface {
             np_artist,
             np_art_pic,
             np_art_url: RefCell::new(String::new()),
-            cpu_spark,
             cpu_val,
-            cpu_sub,
-            mem_spark,
             mem_val,
-            mem_sub,
-            gpu_spark,
             gpu_val,
-            gpu_sub,
             gpu_metric,
             net_ctl,
             net_glyph,
-            net_val,
-            net_sub,
             bt_ctl,
             bt_glyph,
             bt_val,
@@ -1937,28 +1902,20 @@ impl Surface {
         }
     }
 
-    /// The network control: which link, and how hard it is working.
+    /// The network control: which kind of link, and whether it is up.
     ///
-    /// The name line is the SSID on Wi-Fi and the plain word on a wired link —
-    /// signal strength moved to the sub-line's company in the popover, because
-    /// "which network am I on" is asked far more often than "how many bars".
-    fn set_net(&self, n: &Net, t: &sysinfo::Throughput) {
+    /// The glyph is the whole module. The SSID, the address, the signal and the
+    /// throughput all live in the popover — and none of them can widen the bar
+    /// any more, which used to be this module's defining problem: a name and a
+    /// rate that both change on their own, in the right-aligned cluster, moving
+    /// every module left of them (and any popover anchored to one) as they did.
+    fn set_net(&self, n: &Net) {
         self.net_ctl.remove_css_class("disconnected");
         match n {
-            Net::Wifi { ssid, .. } => {
-                self.net_glyph.set(Icon::Wifi);
-                self.net_val.set_text(if ssid.is_empty() { "Wi-Fi" } else { ssid });
-                set_sub(&self.net_sub, &rate_text(t));
-            }
-            Net::Ethernet { .. } => {
-                self.net_glyph.set(Icon::Ethernet);
-                self.net_val.set_text("Wired");
-                set_sub(&self.net_sub, &rate_text(t));
-            }
+            Net::Wifi { .. } => self.net_glyph.set(Icon::Wifi),
+            Net::Ethernet { .. } => self.net_glyph.set(Icon::Ethernet),
             Net::Disconnected => {
                 self.net_glyph.set(Icon::Disconnected);
-                self.net_val.set_text("Offline");
-                set_sub(&self.net_sub, "");
                 self.net_ctl.add_css_class("disconnected");
             }
         }
@@ -2045,8 +2002,8 @@ impl Surface {
         if s.is_empty() {
             return;
         }
-        self.weather_val.set_text(&s.temp_text());
-        set_sub(&self.weather_sub, &s.range_text());
+        self.weather_val.set_text(&pad_num(&s.temp_text(), WEATHER_DIGITS));
+        set_sub(&self.weather_sub, &weather_range_text(s));
         self.weather_box.set_tooltip_text(Some(&s.tooltip()));
     }
 
@@ -2155,6 +2112,19 @@ impl Surface {
         if text < NP_TEXT_MIN {
             // More ellipsis than title. Better hidden than shown as a stub.
             text = 0;
+        }
+        // `TEZCA_BAR_DEBUG_CENTER=1` prints the arithmetic behind the pill's
+        // width. "Why is the pill missing on this monitor" is otherwise a
+        // question you can only answer by measuring screenshots, and the answer
+        // is always one of these five numbers.
+        if std::env::var_os("TEZCA_BAR_DEBUG_CENTER").is_some() {
+            eprintln!(
+                "center[{}] w={w} left={} right={} side={side} lead={lead} trail={trail} \
+                 sat={sat} budget={budget} text={text} min={NP_TEXT_MIN}",
+                self.output,
+                nat(&self.left),
+                nat(&self.right),
+            );
         }
         if self.np_text_w.replace(text) != text {
             self.np_text.set_size_request(text, -1);
@@ -2315,9 +2285,6 @@ impl Surface {
     /// Repaint the cairo-drawn widgets after a palette reload.
     fn repaint_drawn(&self) {
         self.mirror.queue_draw();
-        self.cpu_spark.area.queue_draw();
-        self.mem_spark.area.queue_draw();
-        self.gpu_spark.area.queue_draw();
     }
 }
 
@@ -2660,6 +2627,10 @@ const NP_GAP: i32 = 14;
 
 /// Digits a percent readout is padded to — enough for the widest, `100`.
 const PCT_DIGITS: usize = 3;
+/// Places an outdoor temperature is padded to, counting a minus sign as one of
+/// them: enough for `-30°` in Celsius and `115°` in Fahrenheit, which is the
+/// span this has to hold without ever changing width.
+const WEATHER_DIGITS: usize = 3;
 
 /// Render a percent so that every value is exactly the same width.
 ///
@@ -2682,9 +2653,64 @@ const PCT_DIGITS: usize = 3;
 /// digits themselves equal-width; this handles the digit *count*, that handles
 /// the digits.
 fn pct_text(p: u32) -> String {
-    let n = p.to_string();
-    let pad = PCT_DIGITS.saturating_sub(n.chars().count());
-    format!("{}{n}%", "\u{2007}".repeat(pad))
+    pad_num(&format!("{p}%"), PCT_DIGITS)
+}
+
+/// Reserve `digits` integer places in an already-formatted number.
+///
+/// Counts the sign-and-digits run at the front of `s`, so it works on a bare
+/// number, on one carrying a unit (`48°`, `312W`, `9.8G`), and on one with a
+/// fractional part — only the integer places need reserving, because everything
+/// after the decimal point is a fixed number of characters already.
+///
+/// The pad character is U+2007 FIGURE SPACE for the reason [`pct_text`] gives.
+/// Worth restating that the guarantee holds here: JetBrainsMono Nerd Font has no
+/// U+2007 of its own, so Pango falls back for it — measured, the fallback's
+/// figure space is exactly one digit wide at both bar sizes (7px at 12px, 6px at
+/// 9.5px), which is what the character is defined to be and what makes this
+/// work at all.
+fn pad_num(s: &str, digits: usize) -> String {
+    let lead = s.chars().take_while(|c| c.is_ascii_digit() || *c == '-').count();
+    format!("{}{s}", "\u{2007}".repeat(digits.saturating_sub(lead)))
+}
+
+/// `‥18° / ‥27°` — today's range, each figure held to one width.
+///
+/// The presentation copy of [`weather::Snapshot::range_text`], which stays
+/// unpadded because the popover and `--weather-dump` want the number rather
+/// than the column.
+///
+/// The weather chip earns this despite updating only on its poll: it shares the
+/// *centre* region with the now-playing pill, and [`Surface::retarget_center`]
+/// sizes the pill from what the rest of that region takes up. So a degree
+/// gained here does not merely widen the chip — it narrows the pill and moves
+/// the whole region's midpoint.
+fn weather_range_text(s: &weather::Snapshot) -> String {
+    match (s.lo_c, s.hi_c) {
+        (Some(lo), Some(hi)) => format!(
+            "{} / {}",
+            pad_num(&s.degrees(lo), WEATHER_DIGITS),
+            pad_num(&s.degrees(hi), WEATHER_DIGITS)
+        ),
+        _ => String::new(),
+    }
+}
+
+/// The memory figure, `18.4G`, padded to as many integer places as this
+/// machine's *total* can need — two on a 32G box, three on a 128G one.
+///
+/// Deriving the reservation from the total rather than fixing it means no
+/// machine parks a blank column it could never fill, and none re-flows when used
+/// memory crosses 10G, which on a 32G desktop is a boundary you cross by closing
+/// a browser.
+fn mem_used_text(used_kb: f64, total_kb: f64) -> String {
+    let digits = (gib(total_kb).trunc().max(1.0).log10().floor() as usize) + 1;
+    pad_num(&format!("{:.1}G", gib(used_kb)), digits)
+}
+
+/// Kilobytes as /proc/meminfo reports them → gibibytes.
+fn gib(kb: f64) -> f64 {
+    kb / 1024.0 / 1024.0
 }
 
 /// Set a percent readout, or clear it entirely.
@@ -2700,25 +2726,21 @@ fn set_pct(l: &Label, v: Option<u32>) {
     }
 }
 
-/// `LABEL  <spark>  val%` metric group.
-/// A metric group: `CPU ~~~ 31% 62°`.
+/// A metric group: `CPU 31%`.
 ///
-/// `sub` carries the second number the popover already computes — the temp
-/// beside the load, the watts beside the utilisation. It starts hidden and
-/// reveals itself only once a tick has something real to put in it, so a machine
-/// with no temperature sensor shows no empty gap where one would be.
-fn metric(label: &str, spark: &gtk4::DrawingArea, val: &Label, sub: &Label) -> GtkBox {
+/// The label and one figure, and nothing else. The trace this used to carry and
+/// the second number beside it (the temp with the load, the watts with the
+/// utilisation) are both in the popover, which shows them larger and with the
+/// context — per-core grid, VRAM, top processes — that makes them worth reading.
+/// On the bar they were three glanceable things competing in 90px.
+fn metric(label: &str, val: &Label) -> GtkBox {
     let b = GtkBox::new(Orientation::Horizontal, 7);
     b.add_css_class("metric");
     b.set_valign(Align::Center);
     let l = Label::new(Some(label));
     l.add_css_class("metric-label");
     b.append(&l);
-    b.append(spark);
     b.append(val);
-    sub.add_css_class("metric-sub");
-    sub.set_visible(false);
-    b.append(sub);
     b
 }
 
@@ -2726,34 +2748,6 @@ fn metric(label: &str, spark: &gtk4::DrawingArea, val: &Label, sub: &Label) -> G
 fn set_sub(l: &Label, text: &str) {
     l.set_text(text);
     l.set_visible(!text.is_empty());
-}
-
-/// `↓12.4 ↑1.1 MB/s` — the throughput line under the network name.
-///
-/// Megabytes, not the megabits the meter samples in: MB/s is the unit a
-/// download progress bar quotes, so it is the one that answers "is this as fast
-/// as it should be". Blank while nothing is moving, so an idle link does not
-/// park a row of zeroes on the bar.
-/// Padded to a fixed width for the same reason [`pct_text`] is: this label sits
-/// in the right-aligned cluster, so when `↓1.2` becomes `↓12.8` every module to
-/// its left slides over. Measured on the 2560px monitor, that one digit moved the
-/// cluster's edge by 48px — enough on its own to decide whether the centred
-/// now-playing pill had room to exist.
-fn rate_text(t: &sysinfo::Throughput) -> String {
-    let (down, up) = (t.down_mbps / 8.0, t.up_mbps / 8.0);
-    if down < 0.05 && up < 0.05 {
-        return String::new();
-    }
-    format!("↓{} ↑{} MB/s", rate_num(down), rate_num(up))
-}
-
-/// One throughput figure, padded to `NN.N` with U+2007 FIGURE SPACE — the
-/// character defined to be exactly one digit wide. Past 99.9 it simply grows: a
-/// truncated number would be worse than a one-off re-flow.
-fn rate_num(v: f64) -> String {
-    let s = format!("{v:.1}");
-    let int_digits = s.split('.').next().map(str::len).unwrap_or(1);
-    format!("{}{s}", "\u{2007}".repeat(2usize.saturating_sub(int_digits)))
 }
 
 /// Split a formatted clock into its date and time halves.
@@ -2769,18 +2763,6 @@ fn split_clock(text: &str) -> (&str, &str) {
         Some(i) => (text[..i].trim_end(), text[i..].trim_start()),
         None => (text, ""),
     }
-}
-
-/// `71° 168W` — whichever of the two the driver actually reported.
-fn gpu_sub_text(d: &sysinfo::GpuDetail) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(t) = d.temp_c {
-        parts.push(format!("{}°", t.round() as i64));
-    }
-    if let Some(w) = d.power_w {
-        parts.push(format!("{}W", w.round() as i64));
-    }
-    parts.join(" ")
 }
 
 /// Parent `pop` to `widget` and pop it up on click, marking the group hoverable.
@@ -2807,35 +2789,20 @@ fn control_button(pal: &SharedPalette, kind: Icon) -> (Button, icon::IconArea, L
     (b, glyph, val)
 }
 
-/// A `.control` button with its value stacked over a smaller second line.
-/// Returns `(button, glyph, name, sub)`.
-fn control_button_stacked(
-    pal: &SharedPalette,
-    kind: Icon,
-) -> (Button, icon::IconArea, Label, Label) {
+/// A `.control` button that is only its glyph — a module whose whole state is
+/// carried by which icon it is showing, and whose detail is a click away.
+///
+/// Not [`control_button`] with an empty label: the box's spacing applies to a
+/// zero-width child as much as to any other, so the button would carry 6px of
+/// air it has nothing to put in.
+fn control_icon_button(pal: &SharedPalette, kind: Icon) -> (Button, icon::IconArea) {
     let b = Button::new();
     b.add_css_class("control");
     b.set_valign(Align::Center);
-    let inner = GtkBox::new(Orientation::Horizontal, 7);
     let glyph = icon::icon(pal, kind);
     glyph.area.add_css_class("glyph");
-
-    let col = GtkBox::new(Orientation::Vertical, 0);
-    col.set_valign(Align::Center);
-    let name = Label::new(None);
-    name.add_css_class("control-name");
-    name.set_xalign(0.0);
-    let sub = Label::new(None);
-    sub.add_css_class("control-sub");
-    sub.set_xalign(0.0);
-    sub.set_visible(false);
-    col.append(&name);
-    col.append(&sub);
-
-    inner.append(&glyph.area);
-    inner.append(&col);
-    b.set_child(Some(&inner));
-    (b, glyph, name, sub)
+    b.set_child(Some(&glyph.area));
+    (b, glyph)
 }
 
 /// A workspace pill button showing `label`, switching to `id` on click.
@@ -2942,19 +2909,75 @@ mod tests {
     }
 
     #[test]
-    fn throughput_is_one_width_whatever_the_link_is_doing() {
-        // The right cluster is right-aligned, so a label that widens by a digit
-        // pushes every module left of it sideways. Same reasoning as `pct_text`,
-        // same U+2007 padding — this one was simply missed.
-        let w = |d: f64, u: f64| {
-            rate_text(&sysinfo::Throughput { down_mbps: d * 8.0, up_mbps: u * 8.0 }).chars().count()
+    fn the_memory_figure_reserves_what_this_machine_can_actually_reach() {
+        // 32G box: two integer places, so 9.8G and 18.4G are the same width and
+        // closing a browser does not re-flow the bar.
+        let total = 32.0 * 1024.0 * 1024.0;
+        let g = |used: f64| mem_used_text(used * 1024.0 * 1024.0, total);
+        assert_eq!(g(9.8).chars().count(), g(18.4).chars().count());
+        assert_eq!(g(9.8), "\u{2007}9.8G");
+        assert_eq!(g(18.4), "18.4G");
+
+        // The reservation follows the total rather than being fixed, so a 128G
+        // machine gets its third place and a 8G one carries no blank column.
+        assert_eq!(
+            mem_used_text(9.8 * 1024.0 * 1024.0, 128.0 * 1024.0 * 1024.0),
+            "\u{2007}\u{2007}9.8G"
+        );
+        assert_eq!(mem_used_text(3.2 * 1024.0 * 1024.0, 8.0 * 1024.0 * 1024.0), "3.2G");
+
+        // A /proc/meminfo that read as zero must not panic on log10(0).
+        assert_eq!(mem_used_text(0.0, 0.0), "0.0G");
+    }
+
+    #[test]
+    fn the_weather_chip_is_one_width_from_a_frost_to_a_heatwave() {
+        // Not for the chip's own sake — it shares the centre region with the
+        // now-playing pill, and `retarget_center` sizes the pill from whatever
+        // else that region is taking up. A degree gained here narrows the pill.
+        let snap = |lo: f64, hi: f64, f: bool| weather::Snapshot {
+            temp_c: Some(hi),
+            lo_c: Some(lo),
+            hi_c: Some(hi),
+            fahrenheit: f,
+            ..Default::default()
         };
-        assert_eq!(w(1.2, 0.1), w(12.8, 0.1));
-        assert_eq!(w(1.2, 0.1), w(99.9, 99.9));
-        assert!(rate_num(1.2).starts_with('\u{2007}'), "one-digit values are padded");
-        assert!(!rate_num(12.8).starts_with('\u{2007}'), "two-digit values are not");
-        // Past the reserved field it grows rather than lying about the rate.
-        assert_eq!(rate_num(123.4), "123.4");
+        let w: Vec<usize> = [(-12.0, -3.0), (-1.0, 8.0), (4.0, 9.0), (18.0, 27.0)]
+            .iter()
+            .map(|(lo, hi)| weather_range_text(&snap(*lo, *hi, false)).chars().count())
+            .collect();
+        assert!(w.iter().all(|x| *x == w[0]), "{w:?}");
+
+        // Fahrenheit reaches three digits, which is why the reservation is three
+        // places and not two — the same field has to hold both units.
+        let f: Vec<usize> = [(-20.0, 5.0), (60.0, 79.0), (88.0, 104.0)]
+            .iter()
+            .map(|(lo, hi)| {
+                pad_num(&snap(*lo, *hi, true).temp_text(), WEATHER_DIGITS).chars().count()
+            })
+            .collect();
+        assert!(f.iter().all(|x| *x == f[0]), "{f:?}");
+
+        // A range needs both halves to be known; one alone says nothing.
+        assert_eq!(weather_range_text(&weather::Snapshot::default()), "");
+    }
+
+    #[test]
+    fn the_collapsed_system_chip_is_padded_too() {
+        // The chip is the same three figures joined, so leaving them raw would
+        // have moved the cluster exactly as much as the expanded metrics did.
+        assert_eq!(pct_text(7).chars().count(), pct_text(100).chars().count());
+        let chip = |c: u32, g: u32, used: f64| {
+            format!(
+                "{} · {} · {}",
+                pct_text(c),
+                mem_used_text(used, 32.0 * 1024.0 * 1024.0),
+                pct_text(g)
+            )
+            .chars()
+            .count()
+        };
+        assert_eq!(chip(7, 4, 9.8 * 1024.0 * 1024.0), chip(100, 100, 18.4 * 1024.0 * 1024.0));
     }
 
     fn m(x: Mod) -> Slot {

@@ -1,9 +1,8 @@
 //! Self-drawn bits — the pieces a config bar can't render, painted with cairo
-//! from the live [`Palette`]: the CPU/MEM sparklines, the now-playing
-//! equaliser, and the Mayan workspace numerals. Each is a
-//! [`gtk4::DrawingArea`]; the sparkline and equaliser own a little state
-//! (history buffer / animation phase). All read a shared `Rc<RefCell<Palette>>`
-//! so a theme reload repaints them.
+//! from the live [`Palette`]: the now-playing equaliser and the Mayan workspace
+//! numerals. Each is a [`gtk4::DrawingArea`]; the equaliser owns a little state
+//! (its animation phase). All read a shared `Rc<RefCell<Palette>>` so a theme
+//! reload repaints them.
 //!
 //! The status icons live in [`crate::icon`] instead — they are the design's own
 //! path data rather than shapes composed here.
@@ -14,7 +13,6 @@ use gtk4::glib::ControlFlow;
 use gtk4::prelude::*;
 use gtk4::DrawingArea;
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::f64::consts::PI;
 use std::rc::Rc;
 
@@ -23,86 +21,6 @@ pub type SharedPalette = Rc<RefCell<Palette>>;
 
 fn set_src(cr: &Context, c: gtk4::gdk::RGBA, a: f64) {
     cr.set_source_rgba(c.red() as f64, c.green() as f64, c.blue() as f64, c.alpha() as f64 * a);
-}
-
-/// Which theme token a sparkline strokes with — one per metric so CPU, MEM, and
-/// GPU read apart at a glance while all staying theme-driven.
-#[derive(Clone, Copy)]
-pub enum SparkColor {
-    Accent,    // CPU
-    Gold,      // MEM
-    AccentDim, // GPU
-}
-
-/// A live sparkline. Returns the area and its history buffer; push a value in
-/// [0,1] and call `area.queue_draw()` to advance it. `color` selects the stroke
-/// token, matching CPU / MEM / GPU.
-pub struct Sparkline {
-    pub area: DrawingArea,
-    pub history: Rc<RefCell<VecDeque<f64>>>,
-}
-
-const SPARK_POINTS: usize = 24;
-
-pub fn sparkline(pal: &SharedPalette, color: SparkColor) -> Sparkline {
-    let area = DrawingArea::new();
-    area.set_content_width(26);
-    area.set_content_height(13);
-    area.set_valign(gtk4::Align::Center);
-    let history: Rc<RefCell<VecDeque<f64>>> = Rc::new(RefCell::new(VecDeque::new()));
-
-    let pal_c = pal.clone();
-    let hist_c = history.clone();
-    area.set_draw_func(move |_, cr, w, h| {
-        let hist = hist_c.borrow();
-        if hist.len() < 2 {
-            return;
-        }
-        let p = pal_c.borrow();
-        let col = match color {
-            SparkColor::Accent => p.accent,
-            SparkColor::Gold => p.gold,
-            SparkColor::AccentDim => p.accent_dim,
-        };
-        let (w, h) = (w as f64, h as f64);
-        let n = hist.len();
-        let dx = w / (n - 1) as f64;
-        let xy = |i: usize, v: f64| (i as f64 * dx, h - v.clamp(0.0, 1.0) * (h - 1.0) - 0.5);
-
-        // Stroke only — no area under it. The design's sparkline is a bare
-        // `<polyline>` on an `fill="none"` svg, and the wash this used to lay
-        // down did not read as a subtle tint at bar size: against the glass it
-        // filled in as a solid block, so a steady metric showed up as a bar
-        // rather than as the flat trace it actually is.
-        for (i, &v) in hist.iter().enumerate() {
-            let (x, y) = xy(i, v);
-            if i == 0 {
-                cr.move_to(x, y);
-            } else {
-                cr.line_to(x, y);
-            }
-        }
-        set_src(cr, col, 1.0);
-        cr.set_line_width(1.3);
-        cr.set_line_join(gtk4::cairo::LineJoin::Round);
-        cr.set_line_cap(gtk4::cairo::LineCap::Round);
-        let _ = cr.stroke();
-    });
-
-    Sparkline { area, history }
-}
-
-impl Sparkline {
-    /// Append a sample and repaint.
-    pub fn push(&self, v: f64) {
-        let mut h = self.history.borrow_mut();
-        h.push_back(v);
-        while h.len() > SPARK_POINTS {
-            h.pop_front();
-        }
-        drop(h);
-        self.area.queue_draw();
-    }
 }
 
 /// The design's `tzeq`: a 1.1s cycle between [`EQ_MIN_H`] and [`EQ_MAX_H`], the

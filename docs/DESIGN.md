@@ -86,7 +86,7 @@ in CachyOS repos; `AUR` installs via `paru`.
 | Compositor | **Hyprland** | repo | Given. Modern, animated, scriptable |
 | Session/env | **uwsm** (`env` + `env-hyprland`) | repo | Correct env handling; where NVIDIA vars belong |
 | Display mgr | **SDDM** (keep) + Tezca session | repo | Already there; add session, theme later. greetd is a fallback path |
-| **Menubar** | **`tezca-bar`** (custom Rust, top) | build | *See §6.* Bespoke gtk4-layer-shell bar — sparklines, popovers, tray. Replaced Waybar |
+| **Menubar** | **`tezca-bar`** (custom Rust, top) | build | *See §6.* Bespoke gtk4-layer-shell bar — live metrics, popovers, tray. Replaced Waybar |
 | **Dock** | **`tezca-dock`** (custom Rust) | build | *See §6.* Real macOS dock — cosine magnification, glass, autohide. Replaced nwg-dock-hyprland |
 | Launcher | **Walker** (Spotlight/Raycast style) | repo | GTK4, plugins (apps/calc/clipboard/emoji/websearch/AI actions). `wofi`/`fuzzel` fallback |
 | Notifications | **swaync** | repo | Notification **center** + quick-settings panel = macOS vibe; CSS-themable |
@@ -128,7 +128,7 @@ long-term *stability + performance + beauty*, ideally Rust + CSS.
   workspaces, system stats). ***Superseded in Phase 10*** by **`tezca-bar`** (see the
   update note below): once the dock proved a bespoke gtk4-layer-shell surface is a
   daily-driveable win, the same approach applied to the menubar unlocks things Waybar
-  can't render from config — inline live sparklines, expandable glass popovers, an
+  can't render from config — expandable glass popovers, an
   MPRIS now-playing widget, per-app menus, and animated state transitions. Waybar
   stays in the repo as a documented fallback.
 - **Dock = nwg-dock-hyprland** now (mature, purpose-built: autohide, pinned launchers,
@@ -149,7 +149,7 @@ gtk4-layer-shell** top menubar replacing Waybar, built on the same pattern as
 `layerrule`), one window per monitor, palette read live from
 `~/.config/tezca/current/colors.css` and repainted on **SIGUSR2** (so `tezca theme`
 reskins it with no restart). Left cluster = Tezca "mirror" menu · per-app label ·
-per-output workspaces; centre = MPRIS now-playing; right = live CPU/MEM/GPU sparklines ·
+per-output workspaces; centre = MPRIS now-playing; right = live CPU/MEM/GPU readouts ·
 network/volume/brightness/battery · notification bell · clock · power. Nearly every
 module expands into a glass popover: the clock's carries the month, any extra time
 zones (`clock_zones`) and uptime; the volume module's carries the mixer, the output

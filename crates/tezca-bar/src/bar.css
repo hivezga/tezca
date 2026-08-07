@@ -212,23 +212,16 @@ button.ws.urgent {
     font-size: 12px;
     color: @tz_subtext;
 }
-/* The second number in a module — the temp beside the load, the watts beside
-   the utilisation, the time beside the charge. Deliberately quieter than the
-   primary: it is context for the figure next to it, not a reading of its own,
-   and at equal weight the pair reads as two unrelated numbers. */
-.metric-sub,
+/* The second number in a module — the time beside the charge, the reset beside
+   the usage. Deliberately quieter than the primary: it is context for the figure
+   next to it, not a reading of its own, and at equal weight the pair reads as
+   two unrelated numbers. The hardware metrics have no second number any more;
+   their temps, watts and totals are in the popovers. */
 .control-sub {
     font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
     font-size: 9.5px;
     color: @tz_faint;
     font-feature-settings: "tnum" 1;
-}
-/* The network name sits over its throughput, so both lines have to be tight
-   enough that the pair is no taller than a single-line module beside it. */
-.control-name {
-    font-size: 11px;
-    font-weight: 600;
-    color: @tz_subtext;
 }
 .metric,
 .control,

@@ -40,7 +40,7 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
   <img src="docs/screenshots/launcher.jpg" alt="Walker launcher — obsidian glass panel over the desktop, app list with the accent extracted from the wallpaper" width="100%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/menubar.jpg" alt="tezca-bar — Tezca menu and per-output workspaces at left, MPRIS now-playing centred, live CPU/MEM/GPU sparklines, AI usage, volume, clock at right" width="100%">
+  <img src="docs/screenshots/menubar.jpg" alt="tezca-bar — Tezca menu and per-output workspaces at left, MPRIS now-playing centred, live CPU/MEM/GPU readouts, AI usage, volume, clock at right" width="100%">
 </p>
 
 > Shot on a **dynamic** palette (`tezca theme wallpaper`), so the accent is extracted
@@ -55,7 +55,7 @@ It's opinionated on purpose — not a pile of dotfiles, but a cohesive DE for
   extracts a Material-You palette and re-skins the bar, swaync, Walker, Alacritty,
   Hyprland borders, and the lock screen live — no restarts, no hand-syncing hex codes.
 - **`tezca-bar`** — a bespoke **Rust + GTK4 + layer-shell** top menubar replacing
-  Waybar: inline CPU/MEM/GPU sparklines, an MPRIS now-playing widget with a transport
+  Waybar: live CPU/MEM/GPU readouts, an MPRIS now-playing widget with a transport
   popover, a system tray, per-output workspaces, and glass popovers for the clock,
   mixer, network, Bluetooth, battery, weather and the session menu. Adaptive
   per monitor — the ultrawide shows the full cluster, a narrower screen tightens.

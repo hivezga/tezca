@@ -12,6 +12,8 @@ use std::process::{Command, Stdio};
 use tezca_barlayout::{unknown_ids, Mod, Region};
 
 const BIN: &str = "tezca-bar";
+/// The systemd user unit that supervises the bar (config/systemd/user/).
+const UNIT: &str = "tezca-bar.service";
 
 /// The bar's tunable keys and built-in defaults — mirrors
 /// crates/tezca-bar/src/config.rs so `config` reports a complete picture even
@@ -68,6 +70,7 @@ pub fn run(args: &[&str]) -> i32 {
         Some("stop") => cmd_stop(),
         Some("restart") => cmd_restart(),
         Some("toggle") => cmd_toggle(),
+        Some("logs") => cmd_logs(&args[1..]),
         Some("config") => cmd_config(),
         Some("modules") => cmd_modules(),
         Some("set") => cmd_set(&args[1..]),
@@ -99,6 +102,52 @@ fn cmd_status() -> Result<(), String> {
         println!("  {} {} is not running", term::dim("○"), term::bold(BIN));
         println!("    {}", term::dim("start it with `tezca bar start`"));
     }
+
+    // The unit's own view. Worth printing even when the bar is up: it is what
+    // says whether anything is watching it, and `n restarts` is the only place a
+    // crash the user never saw shows up at all.
+    if let Some(state) = unit_property("ActiveState") {
+        let sub = unit_property("SubState").unwrap_or_default();
+        let mark = if state == "active" { term::green("●") } else { term::yellow("○") };
+        println!("  {mark} {UNIT} is {state} ({sub})");
+        match unit_property("NRestarts").as_deref() {
+            Some("0") | None => {}
+            Some(n) => {
+                println!("    {}", term::yellow(&format!("restarted {n} time(s) this session")));
+                println!("    {}", term::dim("see why with `tezca bar logs`"));
+            }
+        }
+    } else {
+        println!("  {} {UNIT} is not installed", term::yellow("!"));
+        println!("    {}", term::dim("nothing will restart the bar if it crashes"));
+        println!("    {}", term::dim("install it with `tezca link`, then `tezca bar start`"));
+    }
+    Ok(())
+}
+
+/// `tezca bar logs` — what the bar has said, and every restart it has taken.
+///
+/// The bar's stdio used to go to /dev/null, so a crash left nothing but a
+/// coredump. Under the unit, systemd files both in the journal; this is the
+/// short way to look without remembering the journalctl incantation.
+fn cmd_logs(args: &[&str]) -> Result<(), String> {
+    let follow = args.iter().any(|a| *a == "-f" || *a == "--follow");
+    let lines = args
+        .iter()
+        .position(|a| *a == "-n")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "80".to_string());
+
+    let mut cmd = Command::new("journalctl");
+    cmd.args(["--user", "-u", UNIT, "-n", &lines, "--no-pager"]);
+    if follow {
+        cmd.arg("-f");
+    }
+    let status = cmd.status().map_err(|e| format!("cannot run journalctl: {e}"))?;
+    if !status.success() {
+        return Err(format!("journalctl failed — is {UNIT} installed? (`tezca link`)"));
+    }
     Ok(())
 }
 
@@ -107,22 +156,41 @@ fn cmd_start() -> Result<(), String> {
         println!("  {} {} already running", term::dim("·"), BIN);
         return Ok(());
     }
+    // Prefer the unit: a bar started behind systemd's back is a bar nothing
+    // restarts, which is the exact hole this unit exists to close.
+    if systemctl(&["start", UNIT]) {
+        println!("  {} started {} {}", term::green("→"), BIN, term::dim(&format!("({UNIT})")));
+        return Ok(());
+    }
     spawn()?;
-    println!("  {} started {}", term::green("→"), BIN);
+    println!("  {} started {} {}", term::green("→"), BIN, term::dim("(unsupervised)"));
     Ok(())
 }
 
 fn cmd_stop() -> Result<(), String> {
+    // Stop the unit first even if no process is up: an activating/failed unit is
+    // still something systemd will keep trying, and "stop" should mean stopped.
+    let by_unit = unit_property("ActiveState").is_some() && systemctl(&["stop", UNIT]);
     if !running() {
-        println!("  {} {} not running", term::dim("·"), BIN);
+        if by_unit {
+            println!("  {} stopped {UNIT}", term::green("✓"));
+        } else {
+            println!("  {} {} not running", term::dim("·"), BIN);
+        }
         return Ok(());
     }
-    pkill(&["-x", BIN]);
+    if !by_unit {
+        pkill(&["-x", BIN]);
+    }
     println!("  {} stopped {}", term::green("✓"), BIN);
     Ok(())
 }
 
 fn cmd_restart() -> Result<(), String> {
+    if unit_property("ActiveState").is_some() && systemctl(&["restart", UNIT]) {
+        println!("  {} restarted {} {}", term::green("✓"), BIN, term::dim(&format!("({UNIT})")));
+        return Ok(());
+    }
     if running() {
         pkill(&["-TERM", "-x", BIN]);
         for _ in 0..50 {
@@ -481,6 +549,35 @@ fn running() -> bool {
     Command::new("pkill").args(["-0", "-x", BIN]).status().map(|s| s.success()).unwrap_or(false)
 }
 
+/// Read one property off the unit, or `None` when systemd doesn't know it —
+/// which covers "no unit installed", "no user manager" and "no systemd at all"
+/// in one answer, so every caller can treat it as "we are on our own here".
+fn unit_property(name: &str) -> Option<String> {
+    let out = Command::new("systemctl")
+        .args(["--user", "show", UNIT, "-p", name, "--value"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    // A unit systemd has never heard of still shows, with an empty value.
+    (!v.is_empty()).then_some(v)
+}
+
+/// Run a `systemctl --user` verb, reporting whether it took.
+fn systemctl(args: &[&str]) -> bool {
+    let mut a = vec!["--user"];
+    a.extend_from_slice(args);
+    Command::new("systemctl")
+        .args(&a)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn pkill(args: &[&str]) {
     let _ = Command::new("pkill").args(args).status();
 }
@@ -495,6 +592,11 @@ fn print_help() {
     println!(
         "  {}                  hide/show it (SIGUSR1 — the ALT+Right-Ctrl bind)",
         term::cyan("toggle")
+    );
+    println!(
+        "  {}         what it has said, and every restart {}",
+        term::cyan("logs [-n N] [-f]"),
+        term::dim("(journal)")
     );
     println!("  {}                  print the effective configuration", term::cyan("config"));
     println!("  {}                 every placeable module id", term::cyan("modules"));

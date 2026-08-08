@@ -140,6 +140,19 @@ info "${DIM} only for symlinks, which hold no data — real files are always sav
 echo
 if confirm "Run \`tezca link\` now?"; then
     TEZCA_REPO="$REPO_DIR" "$BIN" link
+    # The bar runs under a systemd user unit so a crash costs seconds rather
+    # than the rest of the session, and so its output lands in the journal
+    # instead of /dev/null. `tezca link` seeds the unit file; systemd still has
+    # to be told it exists and that it belongs in a graphical session.
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user daemon-reload 2>/dev/null || true
+        if systemctl --user enable tezca-bar.service >/dev/null 2>&1; then
+            info "${GREEN}✓${RST} tezca-bar.service enabled ${DIM}(restarts the bar if it crashes)${RST}"
+            info "${DIM}   logs: tezca bar logs${RST}"
+        else
+            warn "could not enable tezca-bar.service — is this a systemd user session?"
+        fi
+    fi
 else
     warn "skipped — run \`tezca link\` yourself when ready"
 fi

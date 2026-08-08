@@ -1,0 +1,50 @@
+# Project:Tezca — the menubar as a supervised service.
+#
+# The bar used to be a bare `uwsm app -- tezca-bar` from conf.d/autostart.lua:
+# one process, no supervision, stdio to /dev/null. When it took a SIGSEGV at
+# 01:00 one night the desktop simply lost its bar for nine hours, and the only
+# evidence left was a coredump nobody was watching for. A unit fixes all three
+# of those at once — it restarts the bar, it files its output in the journal,
+# and it gives `systemctl --user status tezca-bar` an answer that is actually
+# authoritative rather than a `pgrep` guess.
+#
+# Installed to ~/.config/systemd/user/ by install.sh (or `tezca link`), started
+# by conf.d/autostart.lua, and stopped with the session through
+# graphical-session.target.
+
+[Unit]
+Description=Tezca menubar
+Documentation=https://github.com/hivezga/tezca
+PartOf=graphical-session.target
+After=graphical-session.target
+
+# A bar that crashes gets restarted; a bar that *cannot start* is allowed to
+# stay down and say so. Without a limit a broken binary would respawn forever,
+# which reads as "nothing happens when I log in" instead of a failed unit.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/tezca-bar
+
+# A crash must cost seconds, not a session. The bar is the way back to Settings,
+# so leaving it dead strands the desktop with no way to bring it back short of a
+# terminal. SIGTERM/SIGINT are excluded from `on-failure` by systemd, so
+# `tezca bar stop` and session shutdown stay quiet — only real failures respawn.
+Restart=on-failure
+RestartSec=2
+
+# Rust panics print a backtrace to stderr, which systemd files in the journal.
+# Worth the handful of bytes: the alternative is a silent exit.
+Environment=RUST_BACKTRACE=1
+SyslogIdentifier=tezca-bar
+
+# SIGUSR1 (toggle) and SIGUSR2 (palette reload) are the bar's live controls and
+# are sent to the process by name; the stop signal goes only to the main process
+# so a helper thread can't be killed out from under it mid-teardown.
+KillMode=mixed
+TimeoutStopSec=5
+
+[Install]
+WantedBy=graphical-session.target

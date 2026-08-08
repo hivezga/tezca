@@ -62,15 +62,29 @@ hl.on("hyprland.start", function()
 
     -- --- Phase 2: aesthetic core --------------------------------------------
     -- Menubar + notification center.
-    -- The bespoke gtk4-rs menubar (Phase 10) replaces Waybar. Absolute path on
-    -- purpose — the systemd --user PATH that uwsm apps inherit at login does NOT
-    -- include ~/.local/bin (where install.sh puts the binary), so a bare
-    -- `tezca-bar` would silently fail to launch, exactly like tezca-dock below.
-    -- $HOME is expanded by the shell hl.exec_cmd runs the command through.
+    -- The bespoke gtk4-rs menubar (Phase 10) replaces Waybar. Started through
+    -- its own systemd user unit rather than `uwsm app --`, because a bare app
+    -- launch has no supervision: when the bar took a SIGSEGV overnight the
+    -- desktop lost it until someone noticed by eye. The unit restarts it,
+    -- captures its output in the journal (`tezca bar logs`), and makes
+    -- `tezca bar status` authoritative. See config/systemd/user/tezca-bar.service.
+    -- `start` is idempotent, so this is harmless if the unit is also enabled
+    -- into graphical-session.target — and it is what makes the bar come up on a
+    -- machine where it never got enabled.
     -- Deliberately NOT wrapped in `launch()`: the bar is the way back to the
     -- settings window that would switch it on again, so `tezca startup` refuses
     -- to disable it and there is nothing to check here.
-    hl.exec_cmd("uwsm app -- $HOME/.local/bin/tezca-bar")
+    -- `reset-failed` first: the unit is also wanted by graphical-session.target,
+    -- which can fire before uwsm has finished exporting WAYLAND_DISPLAY into the
+    -- user manager. A bar that starts without a display exits, burns its restart
+    -- budget and lands in `failed`, where a plain `start` is refused for
+    -- "start request repeated too quickly". Clearing the counter first makes
+    -- this line — which runs from inside a compositor that definitely exists —
+    -- the authority on whether the bar comes up.
+    hl.exec_cmd(
+        "systemctl --user reset-failed tezca-bar.service; "
+            .. "systemctl --user start --no-block tezca-bar.service"
+    )
     launch("swaync", "uwsm app -- swaync")
     -- Walker launcher's provider backend (SUPER+SPACE).
     launch("elephant", "uwsm app -- elephant")

@@ -15,6 +15,14 @@ repository = "https://github.com/hivezga/tezca"
 [profile.release]
 opt-level = "z"
 lto = true
-strip = true
+# Keep the symbol table and line tables in the shipped binaries. These are
+# long-lived desktop processes whose crashes land in systemd-coredump hours
+# later, with no reproducer and no operator watching — and a stripped binary
+# turns such a dump into library frames and hex offsets, which is exactly how
+# three tezca-bar SIGSEGVs became undiagnosable. `line-tables-only` names the
+# file and line without carrying full DWARF; the cost is a few MB on disk and
+# nothing at runtime (debug info is not paged in unless something reads it).
+strip = "none"
+debug = "line-tables-only"
 codegen-units = 1
 panic = "abort"

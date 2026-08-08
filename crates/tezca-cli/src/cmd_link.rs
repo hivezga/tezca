@@ -29,7 +29,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// `tezca-bar/` holds the bar's `config.toml` (rewritten by `tezca bar set`) and
 /// `modules/`, where custom module manifests are dropped by hand. `tezca-dock/`
 /// holds `dock.toml` (rewritten by `tezca dock set`).
-const SEEDED: &[&str] = &["tezca-bar", "tezca-dock"];
+///
+/// `systemd/` is seeded for a different reason: it is not ours. `~/.config/
+/// systemd/user/` is where *every* user unit on the machine lives, and
+/// symlinking it into the repo would take the user's own units with it. Seeding
+/// drops `user/tezca-bar.service` in beside them and touches nothing else.
+const SEEDED: &[&str] = &["tezca-bar", "tezca-dock", "systemd"];
 
 pub struct Opts {
     pub dry_run: bool,

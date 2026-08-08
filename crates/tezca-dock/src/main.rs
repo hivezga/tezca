@@ -31,15 +31,22 @@ fn activate(app: &Application) {
     let dock = dock::Dock::build(app, cfg, palette);
 
     // Live updates from Hyprland's event socket → rebuild the model.
-    let (tx, rx) = async_channel::unbounded::<()>();
+    let (tx, rx) = async_channel::unbounded::<hypr::Event>();
     hypr::subscribe(tx);
     glib::spawn_future_local(glib::clone!(
         #[strong]
         dock,
         async move {
-            while rx.recv().await.is_ok() {
-                // Coalesce bursts (opening a window fires several events).
-                while rx.try_recv().is_ok() {}
+            while let Ok(first) = rx.recv().await {
+                // Coalesce bursts (opening a window fires several events), but
+                // don't let a window event in the burst swallow a monitor one.
+                let mut monitors = first == hypr::Event::Monitors;
+                while let Ok(e) = rx.try_recv() {
+                    monitors |= e == hypr::Event::Monitors;
+                }
+                if monitors {
+                    dock.schedule_sync(true);
+                }
                 dock.rebuild();
             }
         }

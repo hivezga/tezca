@@ -82,10 +82,21 @@ pub fn focus(address: &str) {
         .status();
 }
 
-/// Spawn a reader on the Hyprland event socket. Sends `()` down `tx` whenever a
-/// window-lifecycle or focus event lands, so the caller can refresh the model.
+/// What the event stream asks the dock to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Event {
+    /// The window set or the focus moved — rebuild the item model.
+    Windows,
+    /// The output topology moved — re-anchor the surfaces. GDK's own list
+    /// signal covers an output being destroyed and recreated, but not a
+    /// compositor that shuffles layer surfaces while every output stays put.
+    Monitors,
+}
+
+/// Spawn a reader on the Hyprland event socket. Sends down `tx` whenever a
+/// window-lifecycle, focus or monitor event lands, so the caller can refresh.
 /// Returns immediately; the thread lives for the process.
-pub fn subscribe(tx: async_channel::Sender<()>) {
+pub fn subscribe(tx: async_channel::Sender<Event>) {
     let Some(path) = socket2_path() else {
         eprintln!("tezca-dock: no Hyprland event socket — live updates disabled");
         return;
@@ -101,22 +112,16 @@ pub fn subscribe(tx: async_channel::Sender<()>) {
             // Events are `NAME>>DATA`. We rebuild on anything that changes the
             // window set or which app is focused.
             let name = line.split(">>").next().unwrap_or("");
-            let relevant = matches!(
-                name,
-                "openwindow"
-                    | "closewindow"
-                    | "movewindow"
-                    | "movewindowv2"
-                    | "activewindow"
-                    | "activewindowv2"
-                    | "windowtitle"
-                    | "windowtitlev2"
-                    | "changefloatingmode"
-                    | "fullscreen"
-                    | "workspace"
-                    | "focusedmon"
-            );
-            if relevant && tx.send_blocking(()).is_err() {
+            let event = match name {
+                "openwindow" | "closewindow" | "movewindow" | "movewindowv2" | "activewindow"
+                | "activewindowv2" | "windowtitle" | "windowtitlev2" | "changefloatingmode"
+                | "fullscreen" | "workspace" | "focusedmon" => Event::Windows,
+                "monitoradded" | "monitoraddedv2" | "monitorremoved" | "monitorremovedv2" => {
+                    Event::Monitors
+                }
+                _ => continue,
+            };
+            if tx.send_blocking(event).is_err() {
                 break; // receiver gone → main loop shut down
             }
         }
